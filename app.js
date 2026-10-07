@@ -721,8 +721,25 @@ let sb = null, session = null;
   render();
 })();
 
+// ================= Auto-update =================
+// Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
+// to the front, compare our version with the live one and reload if there's a newer one.
+const APP_VERSION = "7";   // bump together with version.json on every release
+async function checkForUpdate(){
+  try {
+    const r = await fetch("version.json", { cache: "no-store" });
+    const { v } = await r.json();
+    if (v && v !== APP_VERSION && !sessionStorage.getItem("gs-reloaded-" + v)){
+      sessionStorage.setItem("gs-reloaded-" + v, "1");   // never loop if something's off
+      location.reload();
+    }
+  } catch(e){ /* offline: keep running the current version */ }
+}
+checkForUpdate();
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("controllerchange", () => checkForUpdate());
+
 // Phones pause apps in the background: refresh when it comes back, and roll over at midnight.
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && session) loadAll(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ checkForUpdate(); if (session) loadAll(); } });
 let lastDay = key(today());
 setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); render(); } }, 60000);
 
