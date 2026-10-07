@@ -56,3 +56,9 @@ You tab). Steps are private unless the person turns on sharing.
 
 The public key in `config.js` only lets people do what the **Row Level Security** rules in
 `schema.sql` allow: signed-in members can read the crew's data, and can only change their own.
+
+## Releasing an update
+
+Bump the version number **8 → 9** (etc.) in four places, then push:
+`version.json`, `APP_VERSION` in `app.js`, the `?v=` on the three files in `index.html`, and `CACHE` + `SHELL` in `sw.js`.
+Open apps notice `version.json` changed and reload themselves.
