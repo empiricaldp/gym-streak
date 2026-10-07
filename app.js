@@ -614,7 +614,7 @@ async function loadAll(){
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       members = next; ready = true; $("warn").hidden = true;
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
-    finally { loading = null; render(); }
+    finally { loading = null; render(); trackMe(); }
   })();
   return loading;
 }
@@ -673,6 +673,53 @@ function burst(){
 }
 
 
+
+// ================= Who's online (Realtime Presence) =================
+// Every open app joins a private live channel and says "I'm here". Supabase keeps the list and tells
+// everyone when someone arrives or leaves. Nothing is stored: close the app and you drop off.
+let presenceCh = null, presenceReady = false, online = [], onlineOpen = false, lastTracked = "";
+function joinPresence(){
+  if (presenceCh || !sb || !myId) return;
+  presenceCh = sb.channel("online", { config: { private: true, presence: { key: myId } } });
+  presenceCh
+    .on("presence", { event: "sync" }, () => {
+      const st = presenceCh.presenceState();          // { userId: [ {name, plate} per open device ] }
+      online = Object.entries(st).map(([id, metas]) => ({ id, ...(metas[0] || {}) }));
+      renderOnline();
+    })
+    .subscribe(status => {
+      if (status === "SUBSCRIBED"){ presenceReady = true; lastTracked = ""; trackMe(); }
+      if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT"){ presenceReady = false; }
+    });
+}
+async function trackMe(){
+  if (!presenceReady) return;
+  const m = me();
+  // private people are counted but stay nameless
+  const payload = m && m.isPublic ? { name: m.name, plate: m.plate } : { hidden: true };
+  const sig = JSON.stringify(payload);
+  if (sig === lastTracked) return;
+  lastTracked = sig;
+  try { await presenceCh.track(payload); } catch(e){ lastTracked = ""; }
+}
+function leavePresence(){
+  if (presenceCh){ try { presenceCh.untrack(); sb.removeChannel(presenceCh); } catch(e){} }
+  presenceCh = null; presenceReady = false; online = []; lastTracked = ""; renderOnline();
+}
+function renderOnline(){
+  const el = $("online"); if (!el) return;
+  const show = !!session && !ob && online.length > 0;
+  el.hidden = !show; if (!show) return;
+  const named = online.filter(o => !o.hidden && o.name), hidden = online.length - named.length;
+  // me first, then everyone else alphabetically
+  named.sort((a,b) => (a.id===myId?-1:b.id===myId?1:0) || String(a.name).localeCompare(String(b.name)));
+  const dots = named.slice(0,4).map(o => `<span class="dot" style="--c:var(--p-${PLATES.some(p=>p.id===o.plate)?o.plate:"white"})"></span>`).join("");
+  el.setAttribute("aria-expanded", String(onlineOpen));
+  el.setAttribute("aria-label", `${online.length} online now`);
+  el.innerHTML = `<span class="live" aria-hidden="true"></span><span class="odots">${dots}</span><b class="mono">${online.length}</b><span class="olabel">online</span>
+    ${onlineOpen ? `<span class="olist">${named.map(o => `<span class="orow"><span class="dot" style="--c:var(--p-${PLATES.some(p=>p.id===o.plate)?o.plate:"white"})"></span>${esc(o.name)}${o.id===myId?' <i>(you)</i>':""}</span>`).join("")}
+      ${hidden ? `<span class="orow muted">+ ${hidden} private</span>` : ""}</span>` : ""}`;
+}
 
 // ================= Login screens =================
 let authMode = "signin", authMsg = "", authErr = "";
@@ -743,6 +790,7 @@ function render(){
   const signedIn = !!session;
   $("tabbar").hidden = !signedIn || !!ob;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
+  renderOnline();
   if (!sb) return viewSetup();
   if (authMode==="newpass") return viewAuth();
   if (!signedIn) return viewAuth();
@@ -753,6 +801,7 @@ function render(){
 }
 function setTab(t){ tab=t; ob=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
+$("online").onclick = () => { onlineOpen = !onlineOpen; renderOnline(); };
 
 let sb = null, session = null;
 (function boot(){
@@ -764,8 +813,8 @@ let sb = null, session = null;
     if (event === "PASSWORD_RECOVERY") authMode = "newpass";
     const was = session?.user?.id;
     session = s; myId = s?.user?.id || null;
-    if (myId && myId !== was){ ready = false; loadAll(); subscribe(); }
-    if (!myId){ members = new Map(); ready = false; }
+    if (myId && myId !== was){ ready = false; loadAll(); subscribe(); joinPresence(); }
+    if (!myId){ members = new Map(); ready = false; leavePresence(); }
     render();
   });
   render();
@@ -774,7 +823,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "10";   // bump together with version.json on every release
+const APP_VERSION = "11";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
