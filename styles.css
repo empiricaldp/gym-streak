@@ -202,3 +202,25 @@ button,input{font:inherit;color:inherit}
 .linkbtn{border:0;background:none;color:var(--muted);font-weight:600;font-size:14px;cursor:pointer;text-decoration:underline;text-underline-offset:3px;padding:6px}
 .err{color:var(--bad);font-size:14px;font-weight:600;min-height:1em}
 .okmsg{color:var(--good);font-size:14px;font-weight:600}
+
+/* privacy picker */
+.privacy{display:flex;flex-direction:column;gap:10px}
+.popt{display:flex;flex-direction:column;gap:4px;text-align:left;border:1.5px solid var(--line);background:var(--card);border-radius:14px;padding:14px;cursor:pointer}
+.popt .pt{display:flex;align-items:center;gap:8px;font-weight:800;font-size:16px}
+.popt .pd{font-size:13px;color:var(--muted);line-height:1.35}
+.popt.on{border-color:var(--iron);box-shadow:0 0 0 1.5px var(--iron)}
+.popt:focus-visible{outline:3px solid var(--iron);outline-offset:2px}
+.rec{font:700 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;background:var(--good);color:#fff;border-radius:5px;padding:2px 6px}
+.toggles{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-top:-2px}
+.tg{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;cursor:pointer;background:var(--card2)}
+.tg+.tg{border-top:1px solid var(--line)}
+.tg b{display:block;font-size:15px}
+.tg small{display:block;font-size:12px;color:var(--muted);margin-top:2px;line-height:1.3}
+.sw{appearance:none;-webkit-appearance:none;flex:none;width:50px;height:30px;border-radius:999px;background:var(--line2);position:relative;cursor:pointer;transition:background .2s;margin:0}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .2s}
+.sw:checked{background:var(--good)}
+.sw:checked::after{transform:translateX(20px)}
+.sw:focus-visible{outline:3px solid var(--iron);outline-offset:2px}
+.nudge{margin:0;padding:10px 14px;font-size:13px;font-weight:600;color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--card));border-top:1px solid var(--line)}
+.pvcard{display:flex;flex-direction:column;gap:10px}
+.status svg{vertical-align:-2px}

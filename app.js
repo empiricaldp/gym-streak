@@ -78,6 +78,12 @@ try { tab = localStorage.getItem("gs-tab") || "today"; } catch(e){}
 const me = () => myId ? members.get(myId) : null;
 const roster = () => [...members.entries()].map(([id,m])=>({id,...m})).filter(m=>m.name && m.plan)
   .sort((a,b)=> (a.id===myId?-1:b.id===myId?1:0) || String(a.joined||"").localeCompare(String(b.joined||"")));
+// Can I see this person's attendance, streaks and trophies? (Always yes for yourself.)
+const sharesStats = m => !!m && (m.id === myId || (m.isPublic && m.shareAtt && !!m.since));
+const statsCrew = () => roster().filter(sharesStats);
+const quietCrew = () => roster().filter(o => o.id !== myId && !sharesStats(o));
+const workLabel = s => s && s.w ? esc(s.w) : "Gym day";   // split hidden -> just "Gym day"
+const LOCK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 
 // ================= Rendering =================
 const $ = id => document.getElementById(id);
@@ -104,7 +110,7 @@ function barbell(m, w){
 function quote(m){
   const t = today(), ds = dayStreak(m), w = weekStats(m,startOfWeek(t)), done = weeksDone(m);
   const next = MILESTONES.find(x=>x.n>done), s = slot(m,t);
-  const others = roster().filter(o=>o.id!==myId).sort((a,b)=>dayStreak(b)-dayStreak(a));
+  const others = statsCrew().filter(o=>o.id!==myId).sort((a,b)=>dayStreak(b)-dayStreak(a));
   const L = [];
   if (isGym(m,t) && !has(m,t)) L.push([`Day ${ds+1} is on the bar.`, `${s.w} today. Load it up.`]);
   if (isGym(m,t) && has(m,t)) L.push([`${ds} gym days straight.`, w.left ? `${w.left} more to close out Week ${weekNo(m)}.` : `Week ${weekNo(m)} is locked. Anything else is a bonus.`]);
@@ -139,25 +145,47 @@ function viewToday(){
   let crewHtml = "";
   if (crew.length){
     crewHtml = `<div class="sec"><h2 class="sign">Crew today</h2><span class="label">${crew.length} member${crew.length===1?"":"s"}</span></div><div class="list">` +
-      crew.map(o=>{ const st = isGym(o,t) ? (has(o,t)?"done":"todo") : "rest";
+      crew.map(o=>{
+        if (!sharesStats(o)) return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
+          <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · keeps stats private</span></div><span class="status rest">${LOCK}</span></div>`;
+        const st = isGym(o,t) ? (has(o,t)?"done":"todo") : "rest";
         return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
-          <span class="note">${isGym(o,t)?esc(slot(o,t).w):"Rest day"} · ${dayStreak(o)} day streak</span></div>
+          <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span></div>
           <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>`;
   } else crewHtml = `<div class="card"><span class="label">Crew</span><p style="margin:6px 0 0;font-weight:600">You're the first one here.</p><p class="note">Open the You tab to see how to bring your friends in.</p></div>`;
-  main().innerHTML = `<div class="view">${hero}${tiles}${q}${crewHtml}</div>`;
+
+  // Existing members get asked once; anyone hidden gets a gentle nudge to share.
+  let pvHtml = "";
+  if (!m.privacyChosen){
+    pvDraft = pvDraft || pvFrom(m);
+    pvHtml = `<div class="card pvcard"><span class="label">New</span><h2 class="sign" style="margin:4px 0 2px;font-size:30px">Choose what your crew sees</h2>
+      <p class="note">You can change this any time in the You tab.</p>${privacyPicker(pvDraft)}
+      <button class="cta" id="pv-save">Save</button></div>`;
+  } else if (!m.isPublic || !m.shareAtt){
+    pvHtml = `<div class="card quote"><span class="bolt">${LOCK}</span><div class="q">You're hidden from the leaderboard.<small>Share your streak so the crew can see you showing up.</small>
+      <button class="linkbtn" id="pv-open" style="padding-left:0">Privacy settings</button></div></div>`;
+  }
+  main().innerHTML = `<div class="view">${pvHtml}${hero}${tiles}${q}${crewHtml}</div>`;
   $("logbtn").onclick = () => toggleDay(t);
+  if ($("pv-save")){
+    wirePrivacy(pvDraft, render);
+    $("pv-save").onclick = async () => { const b = $("pv-save"); b.disabled = true;
+      if (await savePrivacy(pvDraft)){ pvDraft = null; toast("Privacy saved"); } else if ($("pv-save")) $("pv-save").disabled = false; };
+  }
+  if ($("pv-open")) $("pv-open").onclick = () => setTab("you");
 }
+let pvDraft = null;
 
 function viewJoin(){
   main().innerHTML = `<div class="view">
     <div class="card hero" style="--c:var(--iron)">
       <span class="label">Welcome</span>
       <div class="work sign">Set up your plan</div>
-      <p class="sub">4 quick questions: what to call you, your plate colour, your weekly split, and how long you've already been going. Then tick off every session and keep the streak alive.</p>
+      <p class="sub">5 quick questions: what to call you, your plate colour, your weekly split, how long you've been going, and what the crew can see. Then tick off every session and keep the streak alive.</p>
       <button class="cta" id="startob">Get started</button>
     </div>
     ${roster().length ? `<div class="sec"><h2 class="sign">Already here</h2><span class="label">${roster().length} lifting</span></div>
-      <div class="list">${roster().map(o=>`<div class="li" style="${pc(o)}"><span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="note">Week ${weekNo(o)} · ${dayStreak(o)} day streak</span></span></div>`).join("")}</div>` : ""}
+      <div class="list">${roster().map(o=>`<div class="li" style="${pc(o)}"><span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${sharesStats(o) ? `Week ${weekNo(o)} · ${dayStreak(o)} day streak` : "Keeps stats private"}</span></span></div>`).join("")}</div>` : ""}
   </div>`;
   $("startob").onclick = () => startOnboarding(false);
 }
@@ -166,15 +194,18 @@ function cellBtn(o,d){
   const s = slot(o,d), t = today(), done = has(o,d), cred = credited(o,d);
   const st = !s ? (done?"done":"rest") : done ? "done" : (!s.opt && d<t) ? "missed" : "open";
   const mine = o.id===myId && d<=t && !cred && db;
-  const label = !s ? (done?"Bonus":"Rest") : esc(s.w);
+  const label = !s ? (done?"Bonus":"Rest") : workLabel(s);
   const small = s?.opt ? "Optional" : "";
   return `<button class="cell ${st} ${mine?"mine":""}" ${mine?`data-day="${key(d)}"`:"disabled"} style="${pc(o)}" aria-label="${esc(o.name)} ${DAYS_LONG[dow(d)]}: ${label}, ${done?"done":"not done"}">
     <span class="t">${label}${small?`<small>${small}</small>`:""}</span><span class="ck">${CHECK}</span></button>`;
 }
 
 function viewCrew(){
-  const t = today(), ws = startOfWeek(t), list = roster();
+  const t = today(), ws = startOfWeek(t), list = statsCrew(), quiet = quietCrew();
   if (!list.length){ main().innerHTML = `<div class="card"><p style="margin:0;font-weight:600">No one's joined yet.</p><p class="note">Join from the Today tab and you'll show up here.</p></div>`; return; }
+  const quietHtml = quiet.length ? `<div class="sec"><h2 class="sign">Keeping it private</h2><span class="label">${quiet.length}</span></div>
+    <div class="list">${quiet.map(o=>`<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
+      <span class="note">Not sharing attendance</span></div><span class="status rest">${LOCK}</span></div>`).join("")}</div>` : "";
   const ranked = [...list].sort((a,b)=> dayStreak(b)-dayStreak(a) || weeksDone(b)-weeksDone(a));
   const board = `<div class="list">${ranked.map((o,i)=>{
       const days = Array.from({length:7},(_,k)=>{ const d=addDays(ws,k); return `<i class="${has(o,d)?"d":isGym(o,d)?(d<t?"m":"g"):""}"></i>`; }).join("");
@@ -201,16 +232,16 @@ function viewCrew(){
       <button class="navbtn" id="next" aria-label="Next week" ${weekOffset>=0?"disabled":""}>›</button></div>
     <div class="scrollx">${grid}</div>
     <p class="note">Tap your own column to tick a day you forgot, or to undo one.</p>
-    <div class="list">${sums}</div></div>`;
+    <div class="list">${sums}</div>${quietHtml}</div>`;
   $("prev").onclick = () => { weekOffset--; render(); };
   $("next").onclick = () => { if (weekOffset<0){ weekOffset++; render(); } };
   main().querySelectorAll("[data-day]").forEach(b => b.onclick = () => toggleDay(parse(b.dataset.day)));
 }
 
 function viewTrophies(){
-  const list = roster();
+  const list = statsCrew();
   if (!list.length){ main().innerHTML = `<div class="card"><p style="margin:0;font-weight:600">Trophies show up once you join.</p></div>`; return; }
-  if (!trophyFor || !members.has(trophyFor)) trophyFor = myId && members.has(myId) ? myId : list[0].id;
+  if (!trophyFor || !list.some(o=>o.id===trophyFor)) trophyFor = myId && members.has(myId) ? myId : list[0].id;
   const m = list.find(o=>o.id===trophyFor);
   const done = weeksDone(m), next = MILESTONES.find(x=>x.n>done), prev = [...MILESTONES].reverse().find(x=>x.n<=done);
   const base = prev?prev.n:0, frac = next ? (done-base)/(next.n-base) : 1;
@@ -239,7 +270,7 @@ function viewYou(){
   const invite = `<div class="card"><span class="label">Bring a friend in</span>
     <ol style="margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15px">
       <li>Send them this link: <b class="mono" style="font-size:13px;word-break:break-all">${esc(link)}</b></li>
-      <li>They tap <b>Create account</b> and answer the 4 questions.</li>
+      <li>They tap <b>Create account</b> and answer 5 quick questions.</li>
       <li>On iPhone: Safari → Share → <b>Add to Home Screen</b>.</li></ol>
     <button class="cta ghost" id="copylink" style="margin-top:12px;font-size:18px">Copy link</button></div>`;
   const acct = `<p class="note" style="text-align:center">Signed in as ${esc(session?.user?.email || "")}</p>
@@ -254,22 +285,66 @@ function viewYou(){
       <div class="sec"><h2 class="sign">Your split</h2></div>
       <div class="list">${plan}</div>
       <button class="cta ghost" id="editob">Edit name, plate or split</button>
+      <div class="sec"><h2 class="sign">Privacy</h2><span class="label">${privacySummary(m)}</span></div>
+      <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
       ${invite}${acct}</div>`;
     $("editob").onclick = () => startOnboarding(true);
+    const p = pvFrom(m);
+    wirePrivacy(p, async () => {
+      if ($("pv-status")) $("pv-status").textContent = "Saving…";
+      if (await savePrivacy(p)) toast("Privacy updated");
+    });
   }
   $("copylink").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied"); } catch(e){ toast("Copy failed"); } };
   $("logout").onclick = async () => { await sb.auth.signOut(); };
 }
 
+// ================= Privacy =================
+// p = {pub, att, split}. Sharing is the default and the recommended choice.
+function privacyPicker(p){
+  return `<div class="privacy">
+    <button type="button" class="popt ${p.pub?"on":""}" data-pv="pub" aria-pressed="${p.pub}">
+      <span class="pt">Share with the crew <span class="rec">Recommended</span></span>
+      <span class="pd">Your crew keeps you honest. They see if you went, you show up on the leaderboard, and they can hype you up.</span></button>
+    ${p.pub ? `<div class="toggles">
+      <label class="tg" for="pv-att"><span><b>Attendance &amp; streaks</b><small>Whether you went each day, your streak, week number and trophies</small></span>
+        <input type="checkbox" class="sw" id="pv-att" ${p.att?"checked":""}></label>
+      <label class="tg" for="pv-split"><span><b>My split</b><small>What you train each day (e.g. Push, Legs)</small></span>
+        <input type="checkbox" class="sw" id="pv-split" ${p.split?"checked":""}></label>
+      ${p.att ? "" : `<p class="nudge">Heads up: with attendance off you're not on the leaderboard, and nobody can tell if you went. Streaks hit different when people are watching.</p>`}
+    </div>` : ""}
+    <button type="button" class="popt ${!p.pub?"on":""}" data-pv="priv" aria-pressed="${!p.pub}">
+      <span class="pt">${LOCK} Keep it private</span>
+      <span class="pd">Only you see your sessions. You won't appear in the crew at all.</span></button>
+  </div>`;
+}
+function wirePrivacy(p, onChange){
+  main().querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { p.pub = b.dataset.pv === "pub"; if (p.pub && !p.att && !p.split){ p.att = true; } onChange(); });
+  const a = $("pv-att"), s = $("pv-split");
+  if (a) a.onchange = () => { p.att = a.checked; onChange(); };
+  if (s) s.onchange = () => { p.split = s.checked; onChange(); };
+}
+const pvFrom = m => ({ pub: m?.isPublic ?? true, att: m?.shareAtt ?? true, split: m?.shareSplit ?? true });
+async function savePrivacy(p){
+  const { error } = await sb.from("profiles").update({ is_public:p.pub, share_attendance:p.att, share_split:p.split, privacy_chosen:true }).eq("id", myId);
+  if (error){ showWarn("Couldn't save privacy: " + error.message); return false; }
+  await loadAll(); return true;
+}
+const privacySummary = m => !m.isPublic ? "Private: only you see your sessions"
+  : m.shareAtt && m.shareSplit ? "Sharing attendance, streaks and split"
+  : m.shareAtt ? "Sharing attendance and streaks · split hidden"
+  : m.shareSplit ? "Sharing split only · attendance hidden" : "Visible by name only";
+
 // ================= Onboarding =================
 function startOnboarding(edit){
   const m = edit ? me() : null;
   ob = { edit, step:0, name: m?.name || "", plate: m?.plate || PLATES[members.size % PLATES.length].id,
-    plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false], weeks: 0 };
+    plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false], weeks: 0,
+    pv: { pub:true, att:true, split:true } };
   render();
 }
 function viewOnboarding(){
-  const total = ob.edit ? 4 : 5, s = ob.step;
+  const total = ob.edit ? 4 : 6, s = ob.step;
   const dots = `<div class="steps">${Array.from({length:total},(_,i)=>`<i class="${i<=s?"on":""}"></i>`).join("")}</div>`;
   let body = "", canNext = true;
   if (s===0){ body = `<span class="label">Question 1</span><h2 class="sign">What should the crew call you?</h2>
@@ -287,6 +362,8 @@ function viewOnboarding(){
       <p class="note">Count full weeks in a row before today. They count toward your milestones.</p>
       <div class="stepper"><button id="w-minus" aria-label="Fewer weeks">−</button><b class="sign" id="w-n">${ob.weeks}</b><button id="w-plus" aria-label="More weeks">+</button></div>
       <p class="note" style="text-align:center">You'll start on <b>Week ${ob.weeks+1}</b>.</p>`; }
+  if (s===4 && !ob.edit){ body = `<span class="label">Question 5</span><h2 class="sign">What can the crew see?</h2>
+      <p class="note">You can change this any time in the You tab.</p>${privacyPicker(ob.pv)}`; }
   const last = s === total-1;
   if (last){ const gym = ob.plan.filter((w,i)=>w.trim()&&!ob.opt[i]).length;
     body = `<span class="label">Check it</span><h2 class="sign">${ob.edit?"Save changes":"Ready to lift"}</h2>
@@ -294,7 +371,8 @@ function viewOnboarding(){
         <div><span>Name</span><b>${esc(ob.name)}</b></div>
         <div><span>Plate</span><b style="display:flex;align-items:center;gap:6px"><span class="dot"></span>${PLATES.find(p=>p.id===ob.plate).kg} kg</b></div>
         <div><span>Gym days a week</span><b>${gym}</b></div>
-        ${ob.edit?"":`<div><span>Starting on</span><b>Week ${ob.weeks+1}</b></div>`}
+        ${ob.edit?"":`<div><span>Starting on</span><b>Week ${ob.weeks+1}</b></div>
+          <div><span>Crew sees</span><b>${privacySummary({isPublic:ob.pv.pub, shareAtt:ob.pv.att, shareSplit:ob.pv.split}).replace(/^Private: /,"Private · ")}</b></div>`}
         ${DAYS.map((d,i)=>`<div><span>${d}</span><b>${ob.plan[i].trim()?esc(ob.plan[i].trim())+(ob.opt[i]?" (optional)":""):"Rest"}</b></div>`).join("")}
       </div>`; }
   main().innerHTML = `<div class="card ob">${dots}${body}
@@ -309,6 +387,7 @@ function viewOnboarding(){
     main().querySelectorAll("[data-o]").forEach(cb => cb.onchange = () => { ob.opt[+cb.dataset.o] = cb.checked; refresh(); });
     main().querySelectorAll("[data-preset]").forEach(b => b.onclick = () => { ob.plan = [...PRESETS[b.dataset.preset]]; ob.opt = ob.opt.map(()=>false); render(); });
   }
+  if (s===4 && !ob.edit) wirePrivacy(ob.pv, render);
   if (s===3 && !ob.edit){ $("w-minus").onclick = () => { ob.weeks = Math.max(0,ob.weeks-1); render(); }; $("w-plus").onclick = () => { ob.weeks = Math.min(260,ob.weeks+1); render(); }; }
   $("ob-back").onclick = () => { if (s===0){ ob = null; } else ob.step--; render(); };
   nextBtn.onclick = () => { if (last) saveOnboarding(); else { ob.step++; render(); } };
@@ -318,7 +397,8 @@ async function saveOnboarding(){
   const old = ob.edit ? me() : null;
   const ws = startOfWeek(today());
   const row = { id: myId, name: ob.name.trim().slice(0,20), plate: ob.plate, plan };
-  if (!old){ row.since = key(addDays(ws,-7*ob.weeks)); row.track_start = key(ws); }
+  if (!old){ row.since = key(addDays(ws,-7*ob.weeks)); row.track_start = key(ws);
+    Object.assign(row, { is_public:ob.pv.pub, share_attendance:ob.pv.att, share_split:ob.pv.split, privacy_chosen:true }); }
   const wasEdit = ob.edit;
   const btn = $("ob-next"); if (btn) btn.disabled = true;
   const { error } = await sb.from("profiles").upsert(row);
@@ -348,11 +428,13 @@ async function loadAll(){
   loading = (async () => {
     try {
       const [profiles, checkins] = await Promise.all([
-        fetchAll("profiles", "id,name,plate,plan,since,track_start,created_at"),
+        // "crew" is a database view that already strips out whatever each person keeps private
+        fetchAll("crew", "id,name,plate,plan,since,track_start,created_at,is_public,share_attendance,share_split,privacy_chosen"),
         fetchAll("checkins", "user_id,day")
       ]);
       const next = new Map();
-      for (const p of profiles) next.set(p.id, { name:p.name, plate:p.plate, plan:p.plan, since:p.since, trackStart:p.track_start, joined:p.created_at, days:{} });
+      for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:p.plan, since:p.since, trackStart:p.track_start, joined:p.created_at,
+        isPublic:p.is_public, shareAtt:p.share_attendance, shareSplit:p.share_split, privacyChosen:p.privacy_chosen, days:{} });
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       members = next; ready = true; $("warn").hidden = true;
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }

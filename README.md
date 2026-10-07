@@ -31,6 +31,17 @@ totals means numbers can never drift out of sync.
 - **Week number** = full weeks in a row you hit every gym day, plus the current one.
 - Weeks you'd already trained before joining count as done.
 
+## Privacy
+
+Everyone chooses what the crew sees: share everything (recommended), hide their split,
+hide attendance, or go fully private. This is enforced in the database (`supabase/002_privacy.sql`):
+other people's phones never even receive the hidden data. `supabase/tests/privacy_test.sql`
+checks the rules and undoes itself.
+
+## Database changes
+
+Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, then `002_privacy.sql`.
+
 ## Security in one line
 
 The public key in `config.js` only lets people do what the **Row Level Security** rules in
