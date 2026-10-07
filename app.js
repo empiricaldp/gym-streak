@@ -86,6 +86,8 @@ const workLabel = s => s && s.w ? esc(s.w) : "Gym day";   // split hidden -> jus
 
 // ---- Steps (from Apple Health via an iPhone Shortcut) ----
 let stepsKey = null;
+let stepsMode = "day";   // Crew steps leaderboard: "day" or "week"
+try { stepsMode = localStorage.getItem("gs-steps") || "day"; } catch(e){}
 const STEPS_URL = () => (window.GYM_CONFIG.SUPABASE_URL || "") + "/rest/v1/rpc/log_steps";
 const num = n => Number(n || 0).toLocaleString("en-AU");
 const hasSteps = m => !!m && Object.keys(m.steps || {}).length > 0;
@@ -263,10 +265,21 @@ function viewCrew(){
     return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${w.hit} of ${w.target} gym days${w.bonus?` · +${w.bonus} bonus`:""}</span></div><span class="status ${tag[0]}">${tag[1]}</span></div>`; }).join("");
   main().innerHTML = `<div class="view">
     <div class="sec" style="margin-top:0"><h2 class="sign">Leaderboard</h2><span class="label">By day streak</span></div>${board}
-    ${(() => { const sp = roster().filter(seesSteps).map(o => ({o, tot: weekSteps(o, ws).reduce((a,b)=>a+b,0)})).filter(x => x.tot > 0).sort((a,b) => b.tot - a.tot);
-      if (!sp.length) return "";
-      const top = sp[0].tot;
-      return `<div class="sec"><h2 class="sign">Steps this week</h2><span class="label">Apple Health</span></div><div class="list">${sp.map((x,i) =>
+    ${(() => { const sharers = roster().filter(seesSteps);
+      if (!sharers.length) return "";
+      // Daily view: today's steps. Steps usually sync at night, so if nobody has today yet, show yesterday.
+      let dayRef = t, dayLabel = "Today";
+      if (stepsMode === "day" && !sharers.some(o => stepsOn(o, t) > 0)){ dayRef = addDays(t, -1); dayLabel = "Yesterday"; }
+      const sp = sharers.map(o => ({o, tot: stepsMode === "day" ? (stepsOn(o, dayRef) || 0) : weekSteps(o, ws).reduce((a,b)=>a+b,0)}))
+        .filter(x => x.tot > 0).sort((a,b) => b.tot - a.tot);
+      const top = sp[0]?.tot || 1;
+      const toggle = `<div class="chips" role="group" aria-label="Steps period" style="margin-bottom:-4px">
+        <button class="chip" data-sm="day" aria-pressed="${stepsMode==="day"}">Daily</button>
+        <button class="chip" data-sm="week" aria-pressed="${stepsMode==="week"}">Weekly</button></div>`;
+      const sub = stepsMode === "day" ? `${dayLabel} · ${fmt(dayRef)}` : `This week · ${fmt(ws)} – ${fmt(addDays(ws,6))}`;
+      if (!sp.length) return `<div class="sec"><h2 class="sign">Steps</h2><span class="label">${sub}</span></div>${toggle}
+        <div class="card"><p class="note" style="margin:0">No steps synced for ${stepsMode==="day" ? dayLabel.toLowerCase() : "this week"} yet.</p></div>`;
+      return `<div class="sec"><h2 class="sign">Steps</h2><span class="label">${sub}</span></div>${toggle}<div class="list">${sp.map((x,i) =>
         `<div class="li" style="${pc(x.o)}"><span class="rank">${i+1}</span><span class="dot"></span><div class="grow"><span class="nm">${esc(x.o.name)}${x.o.id===myId?'<span class="youtag">YOU</span>':""}</span>
           <span class="stepmeter"><i style="width:${Math.round(x.tot/top*100)}%"></i></span></div><div class="big-n sign" style="font-size:28px">${num(x.tot)}<small>STEPS</small></div></div>`).join("")}</div>`; })()}
     <div class="sec"><h2 class="sign">Week board</h2></div>
@@ -276,6 +289,7 @@ function viewCrew(){
     <div class="scrollx">${grid}</div>
     <p class="note">Tap your own column to tick a day you forgot, or to undo one.</p>
     <div class="list">${sums}</div>${quietHtml}</div>`;
+  main().querySelectorAll("[data-sm]").forEach(b => b.onclick = () => { stepsMode = b.dataset.sm; try{localStorage.setItem("gs-steps",stepsMode);}catch(e){} render(); });
   $("prev").onclick = () => { weekOffset--; render(); };
   $("next").onclick = () => { if (weekOffset<0){ weekOffset++; render(); } };
   main().querySelectorAll("[data-day]").forEach(b => b.onclick = () => toggleDay(parse(b.dataset.day)));
@@ -405,6 +419,7 @@ function healthCard(m){
         <br>Request Body <b>JSON</b>: add a <b>Text</b> field <b>p_key</b> = <b>Your steps key</b>, and a <b>Number</b> field <b>p_steps</b> = the <b>Statistics</b> result.</li>
       <li>Tap ▶ to test. You should see “Saved … steps”. Allow Health access when asked.</li>
       <li><b>Automation</b> tab → <b>+</b> → <b>Time of Day</b> → <b>11:30 PM</b>, Daily → <b>Run Immediately</b> → pick <b>Log Steps</b>.</li>
+      <li>Want the <b>daily</b> leaderboard to update during the day? Repeat step 6 for a few more times, e.g. <b>12 PM</b> and <b>6 PM</b>. Each run replaces that day's count, so nothing doubles up.</li>
     </ol></details>
     ${copyRow("URL", "h-url", STEPS_URL())}
     ${copyRow("App key", "h-api", window.GYM_CONFIG.SUPABASE_ANON_KEY)}
