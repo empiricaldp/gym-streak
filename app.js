@@ -905,7 +905,12 @@ async function saveOnboarding(){
     Object.assign(row, { is_public:ob.pv.pub, share_attendance:ob.pv.att, share_split:ob.pv.split, share_steps:!!ob.pv.steps, privacy_chosen:true }); }
   const wasEdit = ob.edit;
   const btn = $("ob-next"); if (btn) btn.disabled = true;
-  const { error } = await sb.from("profiles").upsert(row);
+  // Editing: UPDATE only the changed fields. (An upsert is checked like a brand-new row,
+  // and a new row must have a start date, which is why editing used to fail.)
+  // Joining: INSERT the full profile.
+  const { error } = old
+    ? await sb.from("profiles").update({ name: row.name, plate: row.plate, plan: row.plan, goal: row.goal }).eq("id", myId)
+    : await sb.from("profiles").insert(row);
   if (error){ if (btn) btn.disabled = false; showWarn("Couldn't save: " + error.message); return; }
   ob = null; tab = "today";
   await loadAll();
@@ -1145,7 +1150,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "12";   // bump together with version.json on every release
+const APP_VERSION = "13";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
