@@ -262,7 +262,7 @@ button,input{font:inherit;color:inherit}
 .trayc .chip[aria-pressed="true"]{background:var(--iron);color:var(--on-iron);border-color:var(--iron)}
 .ghostchip{border-style:dashed}
 
-/* active users pill: small, see-through, bottom-right */
+/* member count pill: small, see-through, bottom-right */
 .online{position:fixed;right:12px;bottom:calc(78px + env(safe-area-inset-bottom,0px));z-index:6;display:flex;align-items:center;gap:6px;
   padding:6px 11px 6px 10px;border-radius:999px;border:1px solid var(--line);pointer-events:none;
   background:color-mix(in srgb,var(--card) 70%,transparent);backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%);

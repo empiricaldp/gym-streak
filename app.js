@@ -614,7 +614,7 @@ async function loadAll(){
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       members = next; ready = true; $("warn").hidden = true;
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
-    finally { loading = null; render(); trackMe(); }
+    finally { loading = null; render(); loadMemberCount(); }
   })();
   return loading;
 }
@@ -674,31 +674,20 @@ function burst(){
 
 
 
-// ================= Active users (Realtime Presence) =================
-// Every open app joins a private live channel and says "I'm here" (no name, nothing stored).
-// Supabase counts who's connected and tells everyone when the number changes.
-let presenceCh = null, presenceReady = false, activeCount = 0;
-function joinPresence(){
-  if (presenceCh || !sb || !myId) return;
-  presenceCh = sb.channel("online", { config: { private: true, presence: { key: myId } } });   // one count per person, even on 2 devices
-  presenceCh
-    .on("presence", { event: "sync" }, () => { activeCount = Object.keys(presenceCh.presenceState()).length; renderOnline(); })
-    .subscribe(status => {
-      if (status === "SUBSCRIBED"){ presenceReady = true; presenceCh.track({ here: true }).catch(() => {}); }
-      if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") presenceReady = false;
-    });
-}
-function trackMe(){ /* nothing personal is shared, so nothing to update */ }
-function leavePresence(){
-  if (presenceCh){ try { presenceCh.untrack(); sb.removeChannel(presenceCh); } catch(e){} }
-  presenceCh = null; presenceReady = false; activeCount = 0; renderOnline();
+// ================= Member count =================
+// How many people have signed up (everyone, including private profiles). Just a number, no names.
+// member_count() is a tiny database function; it refreshes whenever the app loads its data.
+let memberCount = 0;
+async function loadMemberCount(){
+  const { data, error } = await sb.rpc("member_count");
+  if (!error && typeof data === "number"){ memberCount = data; renderOnline(); }
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && activeCount > 0;
+  const show = !!session && !ob && memberCount > 0;
   el.hidden = !show; if (!show) return;
-  el.setAttribute("aria-label", `${activeCount} ${activeCount === 1 ? "person" : "people"} using the app right now`);
-  el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${activeCount}</b><span class="olabel">active now</span>`;
+  el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined Gym Streak`);
+  el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
 }
 
 // ================= Login screens =================
@@ -792,8 +781,8 @@ let sb = null, session = null;
     if (event === "PASSWORD_RECOVERY") authMode = "newpass";
     const was = session?.user?.id;
     session = s; myId = s?.user?.id || null;
-    if (myId && myId !== was){ ready = false; loadAll(); subscribe(); joinPresence(); }
-    if (!myId){ members = new Map(); ready = false; leavePresence(); }
+    if (myId && myId !== was){ ready = false; loadAll(); subscribe(); }
+    if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); }
     render();
   });
   render();
