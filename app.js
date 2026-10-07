@@ -605,7 +605,9 @@ async function loadAll(){
         stepsKey = own.data?.steps_token || null;
       }
       const next = new Map();
-      for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:p.plan, since:p.since, trackStart:p.track_start, joined:p.created_at,
+      // tidy older, hand-typed split names on the way in ("back bicep" -> "Back + Biceps")
+      const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
+      for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
         isPublic:p.is_public, shareAtt:p.share_attendance, shareSplit:p.share_split, privacyChosen:p.privacy_chosen, shareSteps:p.share_steps,
         days:{}, steps:{}, stepsAt:null });
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
@@ -772,7 +774,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "9";   // bump together with version.json on every release
+const APP_VERSION = "10";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
