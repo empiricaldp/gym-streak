@@ -674,51 +674,31 @@ function burst(){
 
 
 
-// ================= Who's online (Realtime Presence) =================
-// Every open app joins a private live channel and says "I'm here". Supabase keeps the list and tells
-// everyone when someone arrives or leaves. Nothing is stored: close the app and you drop off.
-let presenceCh = null, presenceReady = false, online = [], onlineOpen = false, lastTracked = "";
+// ================= Active users (Realtime Presence) =================
+// Every open app joins a private live channel and says "I'm here" (no name, nothing stored).
+// Supabase counts who's connected and tells everyone when the number changes.
+let presenceCh = null, presenceReady = false, activeCount = 0;
 function joinPresence(){
   if (presenceCh || !sb || !myId) return;
-  presenceCh = sb.channel("online", { config: { private: true, presence: { key: myId } } });
+  presenceCh = sb.channel("online", { config: { private: true, presence: { key: myId } } });   // one count per person, even on 2 devices
   presenceCh
-    .on("presence", { event: "sync" }, () => {
-      const st = presenceCh.presenceState();          // { userId: [ {name, plate} per open device ] }
-      online = Object.entries(st).map(([id, metas]) => ({ id, ...(metas[0] || {}) }));
-      renderOnline();
-    })
+    .on("presence", { event: "sync" }, () => { activeCount = Object.keys(presenceCh.presenceState()).length; renderOnline(); })
     .subscribe(status => {
-      if (status === "SUBSCRIBED"){ presenceReady = true; lastTracked = ""; trackMe(); }
-      if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT"){ presenceReady = false; }
+      if (status === "SUBSCRIBED"){ presenceReady = true; presenceCh.track({ here: true }).catch(() => {}); }
+      if (status === "CHANNEL_ERROR" || status === "CLOSED" || status === "TIMED_OUT") presenceReady = false;
     });
 }
-async function trackMe(){
-  if (!presenceReady) return;
-  const m = me();
-  // private people are counted but stay nameless
-  const payload = m && m.isPublic ? { name: m.name, plate: m.plate } : { hidden: true };
-  const sig = JSON.stringify(payload);
-  if (sig === lastTracked) return;
-  lastTracked = sig;
-  try { await presenceCh.track(payload); } catch(e){ lastTracked = ""; }
-}
+function trackMe(){ /* nothing personal is shared, so nothing to update */ }
 function leavePresence(){
   if (presenceCh){ try { presenceCh.untrack(); sb.removeChannel(presenceCh); } catch(e){} }
-  presenceCh = null; presenceReady = false; online = []; lastTracked = ""; renderOnline();
+  presenceCh = null; presenceReady = false; activeCount = 0; renderOnline();
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && online.length > 0;
+  const show = !!session && !ob && activeCount > 0;
   el.hidden = !show; if (!show) return;
-  const named = online.filter(o => !o.hidden && o.name), hidden = online.length - named.length;
-  // me first, then everyone else alphabetically
-  named.sort((a,b) => (a.id===myId?-1:b.id===myId?1:0) || String(a.name).localeCompare(String(b.name)));
-  const dots = named.slice(0,4).map(o => `<span class="dot" style="--c:var(--p-${PLATES.some(p=>p.id===o.plate)?o.plate:"white"})"></span>`).join("");
-  el.setAttribute("aria-expanded", String(onlineOpen));
-  el.setAttribute("aria-label", `${online.length} online now`);
-  el.innerHTML = `<span class="live" aria-hidden="true"></span><span class="odots">${dots}</span><b class="mono">${online.length}</b><span class="olabel">online</span>
-    ${onlineOpen ? `<span class="olist">${named.map(o => `<span class="orow"><span class="dot" style="--c:var(--p-${PLATES.some(p=>p.id===o.plate)?o.plate:"white"})"></span>${esc(o.name)}${o.id===myId?' <i>(you)</i>':""}</span>`).join("")}
-      ${hidden ? `<span class="orow muted">+ ${hidden} private</span>` : ""}</span>` : ""}`;
+  el.setAttribute("aria-label", `${activeCount} ${activeCount === 1 ? "person" : "people"} using the app right now`);
+  el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${activeCount}</b><span class="olabel">active now</span>`;
 }
 
 // ================= Login screens =================
@@ -801,7 +781,6 @@ function render(){
 }
 function setTab(t){ tab=t; ob=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
-$("online").onclick = () => { onlineOpen = !onlineOpen; renderOnline(); };
 
 let sb = null, session = null;
 (function boot(){
