@@ -271,3 +271,83 @@ button,input{font:inherit;color:inherit}
 .online .olabel{color:var(--muted);font-weight:600}
 .online .live{width:8px;height:8px;border-radius:50%;background:var(--good);animation:pulse 2s infinite}
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--good) 55%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+
+/* ---------- goals ---------- */
+.goals{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.goal{display:flex;flex-direction:column;gap:2px;text-align:left;border:1.5px solid var(--line);background:var(--card);border-radius:12px;padding:10px 12px;cursor:pointer}
+.goal b{font-size:15px}
+.goal span{font-size:12px;color:var(--muted);line-height:1.3}
+.goal.on{border-color:var(--iron);box-shadow:0 0 0 1.5px var(--iron);background:var(--card2)}
+.goal:focus-visible{outline:3px solid var(--iron);outline-offset:2px}
+
+/* ---------- body card ---------- */
+.bodycard{display:flex;flex-direction:column;gap:12px}
+.bodyrow{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
+.bfield{display:flex;flex-direction:column;gap:4px;min-width:0}
+.bin{display:flex;align-items:center;border:1.5px solid var(--line2);border-radius:10px;background:var(--card);padding:0 10px}
+.bin input{border:0;background:transparent;font-size:17px;font-weight:700;width:100%;min-width:0;padding:10px 0;outline:none;font-variant-numeric:tabular-nums}
+.bin i{font-style:normal;color:var(--muted);font:700 12px var(--mono)}
+.bin:focus-within{border-color:var(--iron)}
+.wtop{display:flex;gap:12px}
+.wtop>div{flex:1;display:flex;flex-direction:column;gap:2px;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.wbig{font-size:40px}
+.wbig small{font-size:16px;color:var(--muted)}
+.bmi.good .wbig{color:var(--good)} .bmi.warn .wbig{color:var(--p-yellow)} .bmi.bad .wbig{color:var(--bad)}
+.trend{margin:0;font-weight:700;font-size:14px}
+.wchart{width:100%;height:auto;display:block}
+.wc-grid{stroke:var(--line);stroke-width:1}
+.wc-area{fill:color-mix(in srgb,var(--fg) 7%,transparent)}
+.wc-line{fill:none;stroke:var(--fg);stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+.wc-dot{fill:var(--fg)}
+.wc-l{font:700 10px var(--mono);fill:var(--muted)}
+.bmihelp{border-top:1px solid var(--line);padding-top:10px;font-size:14px}
+.bmihelp summary{font-weight:700;cursor:pointer}
+.bmihelp p{margin:8px 0 0;line-height:1.45;color:var(--muted)}
+.bmihelp b{color:var(--fg)}
+
+/* ---------- reactions & nudges ---------- */
+.recv{margin:2px 0 0;text-align:center;font-weight:700;font-size:14px}
+.crewrow{align-items:flex-start}
+.rowact{display:block;margin-top:6px}
+.reacts{display:flex;gap:6px}
+.react{border:1px solid var(--line);background:var(--card2);border-radius:999px;padding:4px 10px;font-size:15px;cursor:pointer;display:flex;align-items:center;gap:4px;line-height:1.2}
+.react b{font:700 12px var(--mono)}
+.react.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 18%,var(--card))}
+.react:active{transform:scale(.92)}
+.nudge{border:1.5px dashed var(--line2);background:transparent;border-radius:999px;padding:5px 12px;font-weight:700;font-size:13px;cursor:pointer}
+.nudge:active{transform:scale(.95)}
+.nudged{font-size:13px;color:var(--muted);font-weight:600}
+.banner{display:flex;align-items:center;gap:12px}
+.banner .grow{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.big-emoji{font-size:28px;line-height:1}
+.nudgebanner{border-color:color-mix(in srgb,var(--p-yellow) 50%,var(--line))}
+.freezebanner{border-color:color-mix(in srgb,var(--p-blue) 50%,var(--line))}
+
+/* ---------- freezes ---------- */
+.cell.froze{background:color-mix(in srgb,var(--p-blue) 14%,var(--card2))}
+.cell.froze .ck{box-shadow:inset 0 0 0 2px var(--p-blue)}
+.week7 i.f{background:var(--p-blue);opacity:.6}
+
+/* ---------- weekly recap ---------- */
+.recap{display:flex;flex-direction:column;gap:10px}
+.rcard{border-radius:18px;padding:20px 18px;background:var(--iron);color:var(--on-iron);display:flex;flex-direction:column;gap:10px;position:relative;overflow:hidden;border-left:8px solid var(--c)}
+.rcard .label{color:inherit;opacity:.65}
+.rhead{font-size:40px;color:var(--c)}
+.rbig{display:flex;align-items:baseline;gap:8px}
+.rbig b{font-size:88px}
+.rbig small{font-size:40px;opacity:.55}
+.rstrip{display:flex;gap:6px}
+.rday{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.rday i{width:100%;aspect-ratio:1;max-width:44px;border-radius:9px;box-shadow:inset 0 0 0 2px color-mix(in srgb,var(--on-iron) 22%,transparent);display:grid;place-items:center;font-style:normal;font-size:16px}
+.rday i svg{width:60%;height:60%;stroke:#fff}
+.rday.done i,.rday.bonus i{background:var(--c);box-shadow:none}
+.rday.froze i{background:var(--p-blue);box-shadow:none}
+.rday.missed i{box-shadow:inset 0 0 0 2px var(--bad)}
+.rday small{font:700 10px var(--mono);opacity:.6}
+.rstats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;border-top:1px solid color-mix(in srgb,var(--on-iron) 15%,transparent);padding-top:10px}
+.rstats div{display:flex;flex-direction:column}
+.rstats b{font-size:36px}
+.imgov{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.75);display:grid;place-items:center;padding:16px}
+.imgbox{background:var(--card);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:10px;max-width:420px;width:100%}
+.imgbox img{width:100%;border-radius:10px}
+@media (max-width:380px){.goals{grid-template-columns:1fr}.bodyrow{grid-template-columns:1fr 1fr}.bodyrow .cta{grid-column:1/-1}}
