@@ -2,7 +2,7 @@
 "use strict";
 // ================= Config =================
 const PLATES = [
-  {id:"red",kg:25},{id:"blue",kg:20},{id:"yellow",kg:15},{id:"green",kg:10},{id:"white",kg:5}
+  {id:"red",kg:25},{id:"blue",kg:20},{id:"yellow",kg:15},{id:"green",kg:10},{id:"white",kg:5},{id:"lavender",kg:2.5},{id:"pink",kg:1.25}
 ];
 const MILESTONES = [
   {n:1,name:"Empty Bar"},{n:2,name:"Warm-Up Set"},{n:4,name:"Iron Month"},{n:6,name:"Six Pack"},
@@ -36,8 +36,10 @@ const has = (m,d) => credited(m,d) || ticked(m,d);
 const frozen = (m,d) => !!(m.frozen && m.frozen[key(d)]);
 // Plate colour for a member. Butter yellow is pale, so things drawn ON it use dark ink (--on-c),
 // and text drawn IN it uses a deeper gold on light backgrounds (--ct on cards, --cti on the dark "iron" panels).
-const pc = m => { const id = PLATES.some(p=>p.id===m.plate) ? m.plate : "white";
-  return id === "yellow" ? `--c:var(--p-yellow);--on-c:#3b2f0a;--ct:var(--yel-card);--cti:var(--yel-iron)` : `--c:var(--p-${id})`; };
+// Pastel plates (butter yellow, lavender, pink) get dark ink on top and a deeper shade for text.
+const PASTEL = { yellow:["#3b2f0a","yel"], lavender:["#2c2150","lav"], pink:["#4a1630","pink"] };
+const pc = m => { const id = PLATES.some(p=>p.id===m.plate) ? m.plate : "white", p = PASTEL[id];
+  return p ? `--c:var(--p-${id});--on-c:${p[0]};--ct:var(--${p[1]}-card);--cti:var(--${p[1]}-iron)` : `--c:var(--p-${id})`; };
 
 // Day streak as it stood at the end of `end` (today, or e.g. the last day of a week for a recap)
 function dayStreakAt(m, end){
@@ -672,7 +674,7 @@ async function shareRecap(m){
     x.lineWidth = 6; x.strokeStyle = d.state === "missed" ? "#d65a4f" : "#3a3e43";
     x.fillStyle = d.state === "done" || d.state === "bonus" ? plate : d.state === "froze" ? "#5d8bd0" : "transparent";
     x.beginPath(); x.roundRect ? x.roundRect(cx, cy, s, s, 18) : x.rect(cx, cy, s, s); x.fill(); if (!(d.state === "done" || d.state === "bonus" || d.state === "froze")) x.stroke();
-    if (d.state === "done" || d.state === "bonus"){ x.strokeStyle = m.plate === "yellow" ? "#3b2f0a" : "#fff"; x.lineWidth = 10; x.lineCap = "round"; x.lineJoin = "round"; x.beginPath(); x.moveTo(cx+24, cy+50); x.lineTo(cx+42, cy+68); x.lineTo(cx+74, cy+32); x.stroke(); }
+    if (d.state === "done" || d.state === "bonus"){ x.strokeStyle = PASTEL[m.plate] ? PASTEL[m.plate][0] : "#fff"; x.lineWidth = 10; x.lineCap = "round"; x.lineJoin = "round"; x.beginPath(); x.moveTo(cx+24, cy+50); x.lineTo(cx+42, cy+68); x.lineTo(cx+74, cy+32); x.stroke(); }
     x.fillStyle = "#8d9196"; font(700, 30, false); x.textAlign = "center"; x.fillText(DAYS[i][0], cx + s/2, cy + s + 46); x.textAlign = "left";
   });
   // stats
@@ -804,7 +806,7 @@ function viewOnboarding(){
     canNext = !!ob.goal; }
   if (k==="plate"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">Pick your plate</h2>
       <p class="note">Your colour across the app, like competition plates.</p>
-      <div class="platepick">${PLATES.map(p=>`<button data-plate="${p.id}" aria-pressed="${ob.plate===p.id}" style="--c:var(--p-${p.id})"><span class="pd"></span><small>${p.kg} KG</small></button>`).join("")}</div>`; }
+      <div class="platepick">${PLATES.map(p=>`<button data-plate="${p.id}" aria-pressed="${ob.plate===p.id}" style="${pc({plate:p.id})}" aria-label="${p.id} plate"><span class="pd"></span><small>${p.kg} KG</small></button>`).join("")}</div>`; }
   if (k==="split"){ ob.active = ob.active ?? ob.plan.findIndex(w=>!w.trim()); if (ob.active < 0) ob.active = 0;
     body = `<span class="label">Question ${qn}</span><h2 class="sign">Your weekly split</h2>
       <p class="note">Pick a ready-made split, or tap a day and build it with the buttons below it. You can also just type: we'll tidy it up.</p>
@@ -1153,7 +1155,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "14";   // bump together with version.json on every release
+const APP_VERSION = "15";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
