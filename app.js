@@ -85,6 +85,9 @@ const quietCrew = () => roster().filter(o => o.id !== myId && !sharesStats(o));
 const workLabel = s => s && s.w ? esc(s.w) : "Gym day";   // split hidden -> just "Gym day"
 
 // ---- Steps (from Apple Health via an iPhone Shortcut) ----
+// Steps from Apple Health: built and working, but hidden for now (setup was too much effort for users).
+// Flip to true to bring the steps card, steps leaderboard and setup guide back. The database side stays live.
+const STEPS_ENABLED = false;
 let stepsKey = null;
 let stepsMode = "day";   // Crew steps leaderboard: "day" or "week"
 try { stepsMode = localStorage.getItem("gs-steps") || "day"; } catch(e){}
@@ -187,8 +190,9 @@ function viewToday(){
     pvHtml = `<div class="card quote"><span class="bolt">${LOCK}</span><div class="q">You're hidden from the leaderboard.<small>Share your streak so the crew can see you showing up.</small>
       <button class="linkbtn" id="pv-open" style="padding-left:0">Privacy settings</button></div></div>`;
   }
-  let stepsHtml;
-  if (hasSteps(m)){
+  let stepsHtml = "";
+  if (!STEPS_ENABLED){ /* steps hidden */ }
+  else if (hasSteps(m)){
     const ws = startOfWeek(t), vals = weekSteps(m, ws), tot = vals.reduce((a,b)=>a+b,0);
     const daysIn = Math.max(1, vals.filter(v=>v>0).length), todayN = stepsOn(m,t), yN = stepsOn(m, addDays(t,-1));
     const synced = m.stepsAt ? new Date(m.stepsAt).toLocaleString("en-AU",{weekday:"short",hour:"numeric",minute:"2-digit"}) : "";
@@ -265,7 +269,8 @@ function viewCrew(){
     return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${w.hit} of ${w.target} gym days${w.bonus?` · +${w.bonus} bonus`:""}</span></div><span class="status ${tag[0]}">${tag[1]}</span></div>`; }).join("");
   main().innerHTML = `<div class="view">
     <div class="sec" style="margin-top:0"><h2 class="sign">Leaderboard</h2><span class="label">By day streak</span></div>${board}
-    ${(() => { const sharers = roster().filter(seesSteps);
+    ${(() => { if (!STEPS_ENABLED) return "";
+      const sharers = roster().filter(seesSteps);
       if (!sharers.length) return "";
       // Daily view: today's steps. Steps usually sync at night, so if nobody has today yet, show yesterday.
       let dayRef = t, dayLabel = "Today";
@@ -344,7 +349,7 @@ function viewYou(){
       <button class="cta ghost" id="editob">Edit name, plate or split</button>
       <div class="sec"><h2 class="sign">Privacy</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
-      ${healthCard(m)}
+      ${STEPS_ENABLED ? healthCard(m) : ""}
       ${invite}${acct}</div>`;
     wireHealth();
     $("editob").onclick = () => startOnboarding(true);
@@ -370,8 +375,8 @@ function privacyPicker(p){
         <input type="checkbox" class="sw" id="pv-att" ${p.att?"checked":""}></label>
       <label class="tg" for="pv-split"><span><b>My split</b><small>What you train each day (e.g. Push, Legs)</small></span>
         <input type="checkbox" class="sw" id="pv-split" ${p.split?"checked":""}></label>
-      <label class="tg" for="pv-steps"><span><b>Steps</b><small>Daily steps from Apple Health, if you connect it</small></span>
-        <input type="checkbox" class="sw" id="pv-steps" ${p.steps?"checked":""}></label>
+      ${STEPS_ENABLED ? `<label class="tg" for="pv-steps"><span><b>Steps</b><small>Daily steps from Apple Health, if you connect it</small></span>
+        <input type="checkbox" class="sw" id="pv-steps" ${p.steps?"checked":""}></label>` : ""}
       ${p.att ? "" : `<p class="nudge">Heads up: with attendance off you're not on the leaderboard, and nobody can tell if you went. Streaks hit different when people are watching.</p>`}
     </div>` : ""}
     <button type="button" class="popt ${!p.pub?"on":""}" data-pv="priv" aria-pressed="${!p.pub}">
@@ -545,9 +550,12 @@ async function loadAll(){
         fetchAll("checkins", "user_id,day")
       ]);
       // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
-      const stepRows = await fetchAll("steps", "user_id,day,count,updated_at", q => q.gte("day", key(addDays(today(), -56)))).catch(() => []);
-      const own = await sb.from("profiles").select("steps_token").eq("id", myId).maybeSingle();
-      stepsKey = own.data?.steps_token || null;
+      let stepRows = [];
+      if (STEPS_ENABLED){
+        stepRows = await fetchAll("steps", "user_id,day,count,updated_at", q => q.gte("day", key(addDays(today(), -56)))).catch(() => []);
+        const own = await sb.from("profiles").select("steps_token").eq("id", myId).maybeSingle();
+        stepsKey = own.data?.steps_token || null;
+      }
       const next = new Map();
       for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:p.plan, since:p.since, trackStart:p.track_start, joined:p.created_at,
         isPublic:p.is_public, shareAtt:p.share_attendance, shareSplit:p.share_split, privacyChosen:p.privacy_chosen, shareSteps:p.share_steps,

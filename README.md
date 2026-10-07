@@ -43,7 +43,10 @@ checks the rules and undoes itself.
 Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, `002_privacy.sql`, `003_steps.sql`.
 Tests in `supabase/tests/` print PASS/FAIL and undo themselves.
 
-## Apple Health steps
+## Apple Health steps (paused)
+
+Hidden in the app for now (`STEPS_ENABLED = false` in `app.js`) because the iPhone setup was too much effort.
+The database, `log_steps` and the `log-steps` edge function (`supabase/functions/`) stay live, so flipping the switch brings it back.
 
 Web apps can't read Apple Health, so an iPhone **Shortcut** does it: it sums today's steps and POSTs
 `{p_key, p_steps}` to `/rest/v1/rpc/log_steps`. `p_key` is each person's secret steps key (shown in the
