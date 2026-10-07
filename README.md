@@ -40,7 +40,8 @@ checks the rules and undoes itself.
 
 ## Database changes
 
-Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, `002_privacy.sql`, `003_steps.sql`.
+Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, `002_privacy.sql`, `003_steps.sql`,
+`004_member_count.sql`, `005_social_body.sql`.
 Tests in `supabase/tests/` print PASS/FAIL and undo themselves.
 
 ## Apple Health steps (paused)
@@ -51,6 +52,13 @@ The database, `log_steps` and the `log-steps` edge function (`supabase/functions
 Web apps can't read Apple Health, so an iPhone **Shortcut** does it: it sums today's steps and POSTs
 `{p_key, p_steps}` to `/rest/v1/rpc/log_steps`. `p_key` is each person's secret steps key (shown in the
 You tab). Steps are private unless the person turns on sharing.
+
+## Social & body
+
+- **Reactions** (🔥 💪 👏) on friends' sessions, **nudges** (one per friend per day), both limited to people who share attendance.
+- **Streak freeze**: one per calendar month for a missed day in the last week. Keeps the streak (doesn't add to it) and counts toward the week's target.
+- **Goal, height and weight log are private**: only the owner can read them. BMI is worked out in the app.
+- **Weekly recap** in Trophies, with a 1080×1350 share image drawn on a canvas.
 
 ## Security in one line
 
