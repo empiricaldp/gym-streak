@@ -34,7 +34,10 @@ const ticked = (m,d) => !!(m.days && m.days[key(d)]);
 const has = (m,d) => credited(m,d) || ticked(m,d);
 // A streak freeze covers one missed gym day: it doesn't add to your streak, but it doesn't break it either.
 const frozen = (m,d) => !!(m.frozen && m.frozen[key(d)]);
-const pc = m => `--c:var(--p-${PLATES.some(p=>p.id===m.plate)?m.plate:"white"})`;
+// Plate colour for a member. Butter yellow is pale, so things drawn ON it use dark ink (--on-c),
+// and text drawn IN it uses a deeper gold on light backgrounds (--ct on cards, --cti on the dark "iron" panels).
+const pc = m => { const id = PLATES.some(p=>p.id===m.plate) ? m.plate : "white";
+  return id === "yellow" ? `--c:var(--p-yellow);--on-c:#3b2f0a;--ct:var(--yel-card);--cti:var(--yel-iron)` : `--c:var(--p-${id})`; };
 
 // Day streak as it stood at the end of `end` (today, or e.g. the last day of a week for a recap)
 function dayStreakAt(m, end){
@@ -669,7 +672,7 @@ async function shareRecap(m){
     x.lineWidth = 6; x.strokeStyle = d.state === "missed" ? "#d65a4f" : "#3a3e43";
     x.fillStyle = d.state === "done" || d.state === "bonus" ? plate : d.state === "froze" ? "#5d8bd0" : "transparent";
     x.beginPath(); x.roundRect ? x.roundRect(cx, cy, s, s, 18) : x.rect(cx, cy, s, s); x.fill(); if (!(d.state === "done" || d.state === "bonus" || d.state === "froze")) x.stroke();
-    if (d.state === "done" || d.state === "bonus"){ x.strokeStyle = "#fff"; x.lineWidth = 10; x.lineCap = "round"; x.lineJoin = "round"; x.beginPath(); x.moveTo(cx+24, cy+50); x.lineTo(cx+42, cy+68); x.lineTo(cx+74, cy+32); x.stroke(); }
+    if (d.state === "done" || d.state === "bonus"){ x.strokeStyle = m.plate === "yellow" ? "#3b2f0a" : "#fff"; x.lineWidth = 10; x.lineCap = "round"; x.lineJoin = "round"; x.beginPath(); x.moveTo(cx+24, cy+50); x.lineTo(cx+42, cy+68); x.lineTo(cx+74, cy+32); x.stroke(); }
     x.fillStyle = "#8d9196"; font(700, 30, false); x.textAlign = "center"; x.fillText(DAYS[i][0], cx + s/2, cy + s + 46); x.textAlign = "left";
   });
   // stats
@@ -1150,7 +1153,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "13";   // bump together with version.json on every release
+const APP_VERSION = "14";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
