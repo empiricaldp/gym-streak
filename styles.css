@@ -224,3 +224,27 @@ button,input{font:inherit;color:inherit}
 .nudge{margin:0;padding:10px 14px;font-size:13px;font-weight:600;color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--card));border-top:1px solid var(--line)}
 .pvcard{display:flex;flex-direction:column;gap:10px}
 .status svg{vertical-align:-2px}
+
+/* steps */
+.steps{display:flex;flex-direction:column;gap:12px}
+.steps-top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
+.steps-n{font-size:56px;color:var(--c);display:block;margin-top:2px}
+.steps-side{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
+.steps-side b{font-size:18px}
+.stepsbars{width:100%;height:auto;display:block}
+.stepsbars .sb{fill:color-mix(in srgb,var(--c) 45%,var(--card2))}
+.stepsbars .sb-now{fill:var(--c)}
+.stepsbars .sb-base{fill:var(--line2)}
+.stepsbars .sb-goal{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 4;opacity:.6}
+.stepsbars .sb-l{font:700 10px var(--mono);fill:var(--muted)}
+.stepmeter{display:block;height:6px;border-radius:3px;background:var(--line);overflow:hidden;max-width:220px}
+.stepmeter i{display:block;height:100%;background:var(--c);border-radius:3px}
+
+/* Apple Health setup */
+.health{display:flex;flex-direction:column;gap:10px}
+.health details{border:1px solid var(--line);border-radius:12px;padding:10px 14px;background:var(--card2)}
+.health summary{font-weight:700;cursor:pointer}
+.howto{margin:10px 0 2px;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:14px;line-height:1.4}
+.copyrow{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 12px;min-width:0}
+.copyrow code{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--fg)}
+.copyrow .chip{padding:6px 12px}

@@ -40,7 +40,14 @@ checks the rules and undoes itself.
 
 ## Database changes
 
-Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, then `002_privacy.sql`.
+Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, `002_privacy.sql`, `003_steps.sql`.
+Tests in `supabase/tests/` print PASS/FAIL and undo themselves.
+
+## Apple Health steps
+
+Web apps can't read Apple Health, so an iPhone **Shortcut** does it: it sums today's steps and POSTs
+`{p_key, p_steps}` to `/rest/v1/rpc/log_steps`. `p_key` is each person's secret steps key (shown in the
+You tab). Steps are private unless the person turns on sharing.
 
 ## Security in one line
 

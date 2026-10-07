@@ -83,6 +83,26 @@ const sharesStats = m => !!m && (m.id === myId || (m.isPublic && m.shareAtt && !
 const statsCrew = () => roster().filter(sharesStats);
 const quietCrew = () => roster().filter(o => o.id !== myId && !sharesStats(o));
 const workLabel = s => s && s.w ? esc(s.w) : "Gym day";   // split hidden -> just "Gym day"
+
+// ---- Steps (from Apple Health via an iPhone Shortcut) ----
+let stepsKey = null;
+const STEPS_URL = () => (window.GYM_CONFIG.SUPABASE_URL || "") + "/rest/v1/rpc/log_steps";
+const num = n => Number(n || 0).toLocaleString("en-AU");
+const hasSteps = m => !!m && Object.keys(m.steps || {}).length > 0;
+const seesSteps = m => !!m && (m.id === myId || (m.isPublic && m.shareSteps)) && hasSteps(m);
+const stepsOn = (m,d) => (m.steps || {})[key(d)];
+const weekSteps = (m,start) => Array.from({length:7}, (_,i) => stepsOn(m, addDays(start,i)) || 0);
+function stepsBars(m, start){
+  const vals = weekSteps(m,start), max = Math.max(10000, ...vals), t = today();
+  const bw = 30, gap = 14, h = 64;
+  const bars = vals.map((v,i) => { const d = addDays(start,i), bh = v ? Math.max(3, Math.round(v/max*h)) : 0, x = i*(bw+gap);
+    return `<rect x="${x}" y="${h-bh}" width="${bw}" height="${bh}" rx="4" class="${key(d)===key(t)?"sb-now":"sb"}"/>
+      <rect x="${x}" y="${h-1}" width="${bw}" height="1" class="sb-base"/>
+      <text x="${x+bw/2}" y="${h+14}" text-anchor="middle" class="sb-l">${DAYS[i][0]}</text>`; }).join("");
+  const goal = h - Math.round(10000/max*h);
+  return `<svg class="stepsbars" viewBox="0 0 ${7*bw+6*gap} ${h+18}" role="img" aria-label="Steps per day this week">
+    <line x1="0" x2="${7*bw+6*gap}" y1="${goal}" y2="${goal}" class="sb-goal"/>${bars}</svg>`;
+}
 const LOCK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 
 // ================= Rendering =================
@@ -165,8 +185,25 @@ function viewToday(){
     pvHtml = `<div class="card quote"><span class="bolt">${LOCK}</span><div class="q">You're hidden from the leaderboard.<small>Share your streak so the crew can see you showing up.</small>
       <button class="linkbtn" id="pv-open" style="padding-left:0">Privacy settings</button></div></div>`;
   }
-  main().innerHTML = `<div class="view">${pvHtml}${hero}${tiles}${q}${crewHtml}</div>`;
+  let stepsHtml;
+  if (hasSteps(m)){
+    const ws = startOfWeek(t), vals = weekSteps(m, ws), tot = vals.reduce((a,b)=>a+b,0);
+    const daysIn = Math.max(1, vals.filter(v=>v>0).length), todayN = stepsOn(m,t), yN = stepsOn(m, addDays(t,-1));
+    const synced = m.stepsAt ? new Date(m.stepsAt).toLocaleString("en-AU",{weekday:"short",hour:"numeric",minute:"2-digit"}) : "";
+    stepsHtml = `<div class="card steps" style="${pc(m)}">
+      <div class="steps-top"><div><span class="label">Steps ${todayN != null ? "today" : "yesterday"}</span>
+        <b class="sign steps-n">${num(todayN != null ? todayN : yN)}</b></div>
+        <div class="steps-side"><span class="label">This week</span><b class="mono">${num(tot)}</b><span class="note">avg ${num(Math.round(tot/daysIn))}/day</span></div></div>
+      ${stepsBars(m, ws)}
+      <p class="note">Dashed line = 10,000. Last synced ${esc(synced)}.${m.shareSteps && m.isPublic ? " Shared with crew." : " Only you can see these."}</p></div>`;
+  } else {
+    stepsHtml = `<div class="card quote"><span class="bolt"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8.5 2.5c1.6 0 2.6 1.6 2.6 3.7 0 2.4-1.2 4.1-2.8 4.1S5.6 8.8 5.6 6.5c0-2.2 1.3-4 2.9-4zm6.8 4.8c1.6 0 2.9 1.8 2.9 4 0 2.3-1.1 3.8-2.7 3.8s-2.8-1.7-2.8-4.1c0-2.1 1-3.7 2.6-3.7zM6.4 12.6c1.3-.2 2.6.8 2.8 2.6.3 2-.6 3.3-1.9 3.5-1.3.2-2.4-.9-2.6-2.7-.3-1.9.4-3.2 1.7-3.4zm11.2 4.6c1.3.2 2 1.5 1.7 3.4-.2 1.8-1.3 2.9-2.6 2.7-1.3-.2-2.2-1.5-1.9-3.5.2-1.8 1.5-2.8 2.8-2.6z"/></svg></span>
+      <div class="q">Track your steps here<small>Connect Apple Health with a 2-minute Shortcut.</small>
+      <button class="linkbtn" id="steps-setup" style="padding-left:0">Set it up</button></div></div>`;
+  }
+  main().innerHTML = `<div class="view">${pvHtml}${hero}${tiles}${stepsHtml}${q}${crewHtml}</div>`;
   $("logbtn").onclick = () => toggleDay(t);
+  if ($("steps-setup")) $("steps-setup").onclick = () => { setTab("you"); setTimeout(() => $("health")?.scrollIntoView({behavior:"smooth"}), 50); };
   if ($("pv-save")){
     wirePrivacy(pvDraft, render);
     $("pv-save").onclick = async () => { const b = $("pv-save"); b.disabled = true;
@@ -226,6 +263,12 @@ function viewCrew(){
     return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${w.hit} of ${w.target} gym days${w.bonus?` · +${w.bonus} bonus`:""}</span></div><span class="status ${tag[0]}">${tag[1]}</span></div>`; }).join("");
   main().innerHTML = `<div class="view">
     <div class="sec" style="margin-top:0"><h2 class="sign">Leaderboard</h2><span class="label">By day streak</span></div>${board}
+    ${(() => { const sp = roster().filter(seesSteps).map(o => ({o, tot: weekSteps(o, ws).reduce((a,b)=>a+b,0)})).filter(x => x.tot > 0).sort((a,b) => b.tot - a.tot);
+      if (!sp.length) return "";
+      const top = sp[0].tot;
+      return `<div class="sec"><h2 class="sign">Steps this week</h2><span class="label">Apple Health</span></div><div class="list">${sp.map((x,i) =>
+        `<div class="li" style="${pc(x.o)}"><span class="rank">${i+1}</span><span class="dot"></span><div class="grow"><span class="nm">${esc(x.o.name)}${x.o.id===myId?'<span class="youtag">YOU</span>':""}</span>
+          <span class="stepmeter"><i style="width:${Math.round(x.tot/top*100)}%"></i></span></div><div class="big-n sign" style="font-size:28px">${num(x.tot)}<small>STEPS</small></div></div>`).join("")}</div>`; })()}
     <div class="sec"><h2 class="sign">Week board</h2></div>
     <div class="weeknav"><button class="navbtn" id="prev" aria-label="Previous week">‹</button>
       <div class="mid"><b class="sign">${weekOffset===0?"This week":weekOffset===-1?"Last week":"Week of "+fmt(start)}</b><span class="label">${fmt(start)} – ${fmt(addDays(start,6))}</span></div>
@@ -287,7 +330,9 @@ function viewYou(){
       <button class="cta ghost" id="editob">Edit name, plate or split</button>
       <div class="sec"><h2 class="sign">Privacy</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
+      ${healthCard(m)}
       ${invite}${acct}</div>`;
+    wireHealth();
     $("editob").onclick = () => startOnboarding(true);
     const p = pvFrom(m);
     wirePrivacy(p, async () => {
@@ -311,6 +356,8 @@ function privacyPicker(p){
         <input type="checkbox" class="sw" id="pv-att" ${p.att?"checked":""}></label>
       <label class="tg" for="pv-split"><span><b>My split</b><small>What you train each day (e.g. Push, Legs)</small></span>
         <input type="checkbox" class="sw" id="pv-split" ${p.split?"checked":""}></label>
+      <label class="tg" for="pv-steps"><span><b>Steps</b><small>Daily steps from Apple Health, if you connect it</small></span>
+        <input type="checkbox" class="sw" id="pv-steps" ${p.steps?"checked":""}></label>
       ${p.att ? "" : `<p class="nudge">Heads up: with attendance off you're not on the leaderboard, and nobody can tell if you went. Streaks hit different when people are watching.</p>`}
     </div>` : ""}
     <button type="button" class="popt ${!p.pub?"on":""}" data-pv="priv" aria-pressed="${!p.pub}">
@@ -323,10 +370,12 @@ function wirePrivacy(p, onChange){
   const a = $("pv-att"), s = $("pv-split");
   if (a) a.onchange = () => { p.att = a.checked; onChange(); };
   if (s) s.onchange = () => { p.split = s.checked; onChange(); };
+  const st = $("pv-steps");
+  if (st) st.onchange = () => { p.steps = st.checked; onChange(); };
 }
-const pvFrom = m => ({ pub: m?.isPublic ?? true, att: m?.shareAtt ?? true, split: m?.shareSplit ?? true });
+const pvFrom = m => ({ pub: m?.isPublic ?? true, att: m?.shareAtt ?? true, split: m?.shareSplit ?? true, steps: m?.shareSteps ?? false });
 async function savePrivacy(p){
-  const { error } = await sb.from("profiles").update({ is_public:p.pub, share_attendance:p.att, share_split:p.split, privacy_chosen:true }).eq("id", myId);
+  const { error } = await sb.from("profiles").update({ is_public:p.pub, share_attendance:p.att, share_split:p.split, share_steps:!!p.steps, privacy_chosen:true }).eq("id", myId);
   if (error){ showWarn("Couldn't save privacy: " + error.message); return false; }
   await loadAll(); return true;
 }
@@ -335,12 +384,58 @@ const privacySummary = m => !m.isPublic ? "Private: only you see your sessions"
   : m.shareAtt ? "Sharing attendance and streaks · split hidden"
   : m.shareSplit ? "Sharing split only · attendance hidden" : "Visible by name only";
 
+// ================= Apple Health setup =================
+// The iPhone Shortcut reads today's steps from Health and POSTs them to log_steps with your secret key.
+function healthCard(m){
+  const connected = hasSteps(m);
+  const copyRow = (label, id, value, secret) => `<div class="copyrow"><span class="label">${label}</span>
+    <code id="${id}" class="mono">${esc(secret ? value.slice(0,8) + "••••••••" : value)}</code>
+    <button class="chip" data-copy="${esc(value)}" aria-label="Copy ${label}">Copy</button></div>`;
+  return `<div class="sec" id="health"><h2 class="sign">Apple Health</h2><span class="label">${connected ? "Connected" : "Not set up"}</span></div>
+  <div class="card health">
+    <p style="margin:0;font-weight:700">${connected ? `Last synced ${esc(new Date(m.stepsAt).toLocaleString("en-AU",{weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}))}` : "Send your daily steps here automatically."}</p>
+    <p class="note">iPhone only lets real App Store apps read Health directly, so we use Apple's <b>Shortcuts</b> app as the bridge. One-time setup, about 2 minutes.</p>
+    <details ${connected ? "" : "open"}><summary>Setup steps</summary>
+    <ol class="howto">
+      <li>Open <b>Shortcuts</b> → <b>+</b> (new shortcut). Name it <b>Log Steps</b>.</li>
+      <li>Add <b>Find Health Samples</b>. Set type to <b>Steps</b>, then add the filter <b>Start Date · is today</b>.</li>
+      <li>Add <b>Calculate Statistics</b> and set it to <b>Sum</b> (it picks up the Health Samples).</li>
+      <li>Add <b>Get Contents of URL</b>, paste the <b>URL</b> below, tap <b>Show More</b>:
+        <br>Method <b>POST</b>. Headers: add <b>apikey</b> = the <b>App key</b> below.
+        <br>Request Body <b>JSON</b>: add a <b>Text</b> field <b>p_key</b> = <b>Your steps key</b>, and a <b>Number</b> field <b>p_steps</b> = the <b>Statistics</b> result.</li>
+      <li>Tap ▶ to test. You should see “Saved … steps”. Allow Health access when asked.</li>
+      <li><b>Automation</b> tab → <b>+</b> → <b>Time of Day</b> → <b>11:30 PM</b>, Daily → <b>Run Immediately</b> → pick <b>Log Steps</b>.</li>
+    </ol></details>
+    ${copyRow("URL", "h-url", STEPS_URL())}
+    ${copyRow("App key", "h-api", window.GYM_CONFIG.SUPABASE_ANON_KEY)}
+    ${stepsKey ? copyRow("Your steps key", "h-key", stepsKey, true) : `<p class="note">Your steps key is loading…</p>`}
+    <p class="note">Keep your steps key to yourself: it lets anything send steps as you. If it leaks, reset it and update the Shortcut.</p>
+    <button class="linkbtn" id="h-reset" style="padding-left:0">Reset my steps key</button>
+  </div>`;
+}
+let resetArmed = false;
+function wireHealth(){
+  main().querySelectorAll("[data-copy]").forEach(b => b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "Copied"; setTimeout(() => b.textContent = "Copy", 1500); }
+    catch(e){ toast("Copy failed: long-press to copy"); }
+  });
+  const r = $("h-reset"); if (!r) return;
+  r.textContent = resetArmed ? "Tap again to confirm reset (your Shortcut will stop until updated)" : "Reset my steps key";
+  r.onclick = async () => {
+    if (!resetArmed){ resetArmed = true; return wireHealth(); }
+    resetArmed = false;
+    const { data, error } = await sb.rpc("reset_steps_key");
+    if (error) return showWarn("Couldn't reset: " + error.message);
+    stepsKey = data; toast("New steps key"); render();
+  };
+}
+
 // ================= Onboarding =================
 function startOnboarding(edit){
   const m = edit ? me() : null;
   ob = { edit, step:0, name: m?.name || "", plate: m?.plate || PLATES[members.size % PLATES.length].id,
     plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false], weeks: 0,
-    pv: { pub:true, att:true, split:true } };
+    pv: { pub:true, att:true, split:true, steps:false } };
   render();
 }
 function viewOnboarding(){
@@ -398,7 +493,7 @@ async function saveOnboarding(){
   const ws = startOfWeek(today());
   const row = { id: myId, name: ob.name.trim().slice(0,20), plate: ob.plate, plan };
   if (!old){ row.since = key(addDays(ws,-7*ob.weeks)); row.track_start = key(ws);
-    Object.assign(row, { is_public:ob.pv.pub, share_attendance:ob.pv.att, share_split:ob.pv.split, privacy_chosen:true }); }
+    Object.assign(row, { is_public:ob.pv.pub, share_attendance:ob.pv.att, share_split:ob.pv.split, share_steps:!!ob.pv.steps, privacy_chosen:true }); }
   const wasEdit = ob.edit;
   const btn = $("ob-next"); if (btn) btn.disabled = true;
   const { error } = await sb.from("profiles").upsert(row);
@@ -412,10 +507,12 @@ async function saveOnboarding(){
 // ================= Data (Supabase) =================
 // Two tables: profiles (one row per person) and checkins (one row per person per day they trained).
 // We load everything, build the same "members" shape the screens use, and reload when anything changes.
-async function fetchAll(table, cols){
+async function fetchAll(table, cols, filter){
   const out = []; const page = 1000;
   for (let from = 0; ; from += page){
-    const { data, error } = await sb.from(table).select(cols).range(from, from + page - 1);
+    let q = sb.from(table).select(cols);
+    if (filter) q = filter(q);
+    const { data, error } = await q.range(from, from + page - 1);
     if (error) throw error;
     out.push(...data);
     if (data.length < page) break;
@@ -429,13 +526,19 @@ async function loadAll(){
     try {
       const [profiles, checkins] = await Promise.all([
         // "crew" is a database view that already strips out whatever each person keeps private
-        fetchAll("crew", "id,name,plate,plan,since,track_start,created_at,is_public,share_attendance,share_split,privacy_chosen"),
+        fetchAll("crew", "id,name,plate,plan,since,track_start,created_at,is_public,share_attendance,share_split,privacy_chosen,share_steps"),
         fetchAll("checkins", "user_id,day")
       ]);
+      // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
+      const stepRows = await fetchAll("steps", "user_id,day,count,updated_at", q => q.gte("day", key(addDays(today(), -56)))).catch(() => []);
+      const own = await sb.from("profiles").select("steps_token").eq("id", myId).maybeSingle();
+      stepsKey = own.data?.steps_token || null;
       const next = new Map();
       for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:p.plan, since:p.since, trackStart:p.track_start, joined:p.created_at,
-        isPublic:p.is_public, shareAtt:p.share_attendance, shareSplit:p.share_split, privacyChosen:p.privacy_chosen, days:{} });
+        isPublic:p.is_public, shareAtt:p.share_attendance, shareSplit:p.share_split, privacyChosen:p.privacy_chosen, shareSteps:p.share_steps,
+        days:{}, steps:{}, stepsAt:null });
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
+      for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       members = next; ready = true; $("warn").hidden = true;
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
     finally { loading = null; render(); }
@@ -450,6 +553,7 @@ function subscribe(){
   channel = sb.channel("crew")
     .on("postgres_changes", { event:"*", schema:"public", table:"checkins" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"profiles" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"steps" }, reloadSoon)
     .subscribe();
 }
 
