@@ -248,3 +248,16 @@ button,input{font:inherit;color:inherit}
 .copyrow{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 8px 8px 12px;min-width:0}
 .copyrow code{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--fg)}
 .copyrow .chip{padding:6px 12px}
+
+/* split builder */
+.daylist{display:flex;flex-direction:column;gap:6px}
+.dayrow{border-radius:12px;padding:6px 8px;border:1.5px solid transparent;cursor:pointer}
+.dayrow.active{border-color:var(--iron);background:var(--card2)}
+.dayin{display:flex;flex-direction:column;gap:2px;min-width:0}
+.tidy{font:700 11px var(--mono);color:var(--good);min-height:0}
+.tidy:empty{display:none}
+.quicktray{border:1px solid var(--line);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--card)}
+.trayc{display:flex;flex-wrap:wrap;gap:6px}
+.trayc .chip{padding:7px 12px;font-size:13px}
+.trayc .chip[aria-pressed="true"]{background:var(--iron);color:var(--on-iron);border-color:var(--iron)}
+.ghostchip{border-style:dashed}
