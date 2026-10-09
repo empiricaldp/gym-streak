@@ -1079,12 +1079,15 @@ function splitStepHtml(ql){
     const a = ob.active ?? -1;
     const rows = DAYS.map((d,i) => { const w = normalizeWorkout(ob.plan[i]), open = a === i, parts = w ? w.split(" + ") : [];
       return `<div class="crow ${open?"open":""}">
-        <button type="button" class="crow-h" data-day="${i}"><b class="sign">${d}</b><span class="${w?"":"rest"}">${esc(w ? shortName(w) : "Rest")}${ob.opt[i]&&w?' <em>optional</em>':""}</span><i class="chev"></i></button>
-        ${open ? `<div class="crow-b"><div class="basics">${BASICS.map(q => `<button type="button" class="chip" data-basic="${esc(q)}" aria-pressed="${parts.includes(q)}">${esc(shortName(q))}</button>`).join("")}
+        <button type="button" class="crow-h" data-day="${i}"><b class="sign">${d}</b><span id="crow-v-${i}" class="${w?"":"rest"}">${esc(w ? shortName(w) : "Rest")}${ob.opt[i]&&w?' <em>optional</em>':""}</span><i class="chev"></i></button>
+        ${open ? `<div class="crow-b">
+          <input class="field daytype" id="f-type-${i}" data-type="${i}" type="text" maxlength="40" value="${esc(w)}" placeholder="Type it… e.g. back and biceps" autocapitalize="words" autocomplete="off" spellcheck="false" enterkeyhint="done">
+          <small class="tidy" id="tidy-${i}"></small>
+          <span class="label orlabel">Or tap</span><div class="basics">${BASICS.map(q => `<button type="button" class="chip" data-basic="${esc(q)}" aria-pressed="${parts.includes(q)}">${esc(shortName(q))}</button>`).join("")}
             <button type="button" class="chip ghostchip" data-basic="__rest" aria-pressed="${!w}">Rest</button></div>
           ${w ? `<label class="tg optrow" for="f-opt-${i}"><span><b>Optional day</b><small>Skipping it won't break your streak</small></span><input type="checkbox" class="sw" id="f-opt-${i}" data-o="${i}" ${ob.opt[i]?"checked":""}></label>` : ""}
         </div>` : ""}</div>`; }).join("");
-    return head("Build your week", "Tap a day. Tap two to combine, like Chest + Arms.") + `<div class="clist">${rows}</div>`;
+    return head("Build your week", "Tap a day, then type it or tap the buttons.") + `<div class="clist">${rows}</div>`;
   }
   // review
   const list = DAYS.map((d,i) => { const w = normalizeWorkout(ob.plan[i]);
@@ -1099,7 +1102,27 @@ function wireSplitStep(){
   main().querySelectorAll("[data-split]").forEach(b => b.onclick = () => {
     const x = SPLITS.find(s => s.name === b.dataset.split); if (!x) return;
     ob.plan = [...x.days]; ob.opt = ob.opt.map(() => false); ob.splitMode = "review"; render(); window.scrollTo(0,0); });
-  main().querySelectorAll("[data-day]").forEach(b => b.onclick = () => { const i = +b.dataset.day; ob.active = ob.active === i ? -1 : i; render(); });
+  main().querySelectorAll("[data-day]").forEach(b => b.onclick = () => { const i = +b.dataset.day; ob.active = ob.active === i ? -1 : i; ob.focusType = ob.active === i; render(); });
+  // Typing a day: show the tidied name live WITHOUT re-drawing the screen (that would close the keyboard);
+  // save + re-draw when they press Enter or tap away.
+  main().querySelectorAll("[data-type]").forEach(inp => {
+    const i = +inp.dataset.type, tidy = $("tidy-"+i), head = $("crow-v-"+i);
+    const pressButtons = clean => { const parts = clean ? clean.split(" + ") : [];     // buttons follow what's typed
+      main().querySelectorAll("[data-basic]").forEach(c => c.setAttribute("aria-pressed", c.dataset.basic === "__rest" ? String(!clean) : String(parts.includes(c.dataset.basic)))); };
+    const live = () => { ob.plan[i] = inp.value; const clean = normalizeWorkout(inp.value), typed = inp.value.trim();
+      tidy.textContent = typed && clean !== typed ? (clean ? "→ " + clean : "→ Rest day") : "";
+      head.textContent = clean ? shortName(clean) : "Rest"; head.className = clean ? "" : "rest";
+      const nx = $("ob-next"); if (nx) nx.disabled = !splitReady(); pressButtons(clean); };
+    // tidy in place (no re-draw), so a tap on Save or another day straight after typing still counts
+    const commit = () => { const clean = normalizeWorkout(inp.value); ob.plan[i] = clean; if (!clean) ob.opt[i] = false;
+      inp.value = clean; tidy.textContent = ""; pressButtons(clean); };
+    inp.oninput = live;
+    inp.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); inp.blur(); } };
+    inp.onblur = commit;
+    live();
+    if (ob.focusType){ ob.focusType = false; inp.focus(); }
+  });
+  main().querySelectorAll("[data-basic]").forEach(b => b.onpointerdown = e => e.preventDefault());
   main().querySelectorAll("[data-basic]").forEach(b => b.onclick = () => {
     const i = ob.active, q = b.dataset.basic; if (i < 0) return;
     if (q === "__rest"){ ob.plan[i] = ""; ob.opt[i] = false; }
@@ -1741,7 +1764,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "36";   // bump together with version.json on every release
+const APP_VERSION = "37";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

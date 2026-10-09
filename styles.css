@@ -537,3 +537,7 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .path.small{padding:12px 14px;border-color:var(--line)}
 .path.small b{font-size:16px}
 .path.small small{font-size:12px}
+/* Build my own: type box first, buttons as shortcuts */
+.daytype{width:100%;font-size:16px;margin-bottom:2px}
+.crow-b .tidy{display:block;min-height:1.2em;font:600 13px var(--body);letter-spacing:0;text-transform:none;color:var(--good);margin:4px 2px 8px}
+.orlabel{display:block;margin-bottom:6px}
