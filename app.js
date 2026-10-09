@@ -1277,11 +1277,20 @@ async function toggleDay(d){
     else if (isGym(nm,d)) toast(`${dayStreak(nm)} day streak`);
     else toast("Bonus session");
   }
-  const { error } = was
-    ? await sb.from("checkins").delete().eq("user_id", myId).eq("day", k)
-    : await sb.from("checkins").insert({ user_id: myId, day: k });
+  // Both saves are safe to repeat: logging a day that's already logged (e.g. an earlier save that
+  // looked like it failed but actually landed) just does nothing instead of a "duplicate key" error.
+  const save = () => was
+    ? sb.from("checkins").delete().eq("user_id", myId).eq("day", k)
+    : sb.from("checkins").upsert({ user_id: myId, day: k }, { onConflict: "user_id,day", ignoreDuplicates: true });
+  let { error } = await save();
+  if (error && /load failed|failed to fetch|network/i.test(error.message||"")){ await new Promise(r => setTimeout(r, 1200)); ({ error } = await save()); }
   busy.delete(k);
-  if (error){ members.set(myId, m); render(); showWarn("Couldn't save that: " + error.message); }
+  if (error){
+    // Before undoing on screen, ask the server what's really saved (the save may have landed anyway)
+    const chk = await sb.from("checkins").select("day").eq("user_id", myId).eq("day", k);
+    if (!chk.error && (chk.data.length > 0) === !was) return;   // it did save: keep it, no warning
+    members.set(myId, m); render(); showWarn("Couldn't save that — check your internet and try again.");
+  }
 }
 
 // ================= FX: chalk burst =================
@@ -1764,7 +1773,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "38";   // bump together with version.json on every release
+const APP_VERSION = "39";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
