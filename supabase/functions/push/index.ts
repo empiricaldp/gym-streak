@@ -142,7 +142,7 @@ const dayWord = (d: string) => d === sydneyDay() ? "today" : d === addDays(sydne
   : "on " + new Date(d + "T12:00:00Z").toLocaleDateString("en-AU", { weekday: "long", timeZone: "UTC" });
 
 const people = async (ids: string[]) =>
-  ids.length ? await rest(`profiles?select=id,name,plan,is_public,share_attendance,share_split,notif_nudge,notif_react,notif_crew&id=${inList(ids)}`) : [];
+  ids.length ? await rest(`profiles?select=id,name,plan,is_public,share_attendance,share_split,account,hide_split,notif_nudge,notif_react,notif_crew,notif_circle&id=${inList(ids)}`) : [];
 const EMOJI: Record<string, string> = { fire: "🔥", muscle: "💪", clap: "👏" };
 
 // ---------- the wording ----------
@@ -163,18 +163,20 @@ export function reactionNote(fromName: string, emoji: string, me: Ctx, day: stri
   return { title: `${EMOJI[emoji] || "👏"} ${fromName} reacted to your session`,
     body: `${w ? w + " session" : "Your session"} ${dayWord(day)}.${n >= 2 ? ` ${n}-day streak and counting.` : " Keep it rolling."}`, tag: "react" };
 }
-export function crewNote(who: Ctx, showWorkout: boolean, me: Ctx): Note {
+export function crewNote(who: Ctx, showWorkout: boolean, me: Ctx, circle?: string | null): Note {
   const t = sydneyDay(), w = showWorkout ? slotOf(who, t)?.w : null, n = streak(who), mine = slotOf(me, t)?.w;
   const done = `${w ? w + " done" : "Session logged"}${n >= 2 ? ` · ${n}-day streak` : ""}.`;
   const you = me.days.has(t) ? "You've both trained today 🤝"
     : gymDay(me, t) ? `Your ${mine ? mine + " session" : "session"} is still waiting.`
     : "Rest day for you, so enjoy it.";
-  return { title: `💪 ${who.name} just trained`, body: `${done} ${you}`, tag: "crew-" + who.id };
+  return { title: `💪 ${who.name} just trained${circle ? " · " + circle : ""}`, body: `${done} ${you}`, tag: "crew-" + who.id };
 }
 export function reminderNote(me: Ctx): Note {
   const w = slotOf(me, sydneyDay())?.w;
   return { title: `⏰ ${w ? w + " day" : "Gym day"}: not logged yet`, body: `${streakLine(streak(me))} Train, then tap to log it.`, tag: "remind" };
 }
+export const circleAddNote = (adder: string, circle: string): Note => ({ title: `➕ ${adder} added you to ${circle}`,
+  body: "See who's trained today and keep each other going.", tag: "circle" });
 export const testNote = (): Note => ({ title: "✅ Notifications are on",
   body: "You'll get nudges, reactions, crew sessions and gym reminders here. Change them any time in the You tab.", tag: "test" });
 
@@ -203,14 +205,39 @@ async function onCheckin(r: any){
   const found = await rest(`checkins?select=day&user_id=eq.${r.user_id}&day=eq.${r.day}`);
   if (!found.length) return { skipped: "not found" };
   const [who] = await people([r.user_id]);
-  if (!who || !who.is_public || !who.share_attendance) return { skipped: "private" };   // respect their privacy choice
-  const others = await rest(`profiles?select=id&notif_crew=eq.true&id=neq.${r.user_id}`);
+  if (!who) return { skipped: "no profile" };
+  // recipient → circle label (null = not via a circle). One notification per person, however they're connected.
+  const recips = new Map<string, string | null>();
+  if (who.is_public && who.share_attendance){                         // crew activity (respects their privacy choice)
+    for (const o of await rest(`profiles?select=id&notif_crew=eq.true&id=neq.${r.user_id}`)) recips.set(o.id, null);
+  }
+  const mine = await rest(`circle_members?select=circle_id&user_id=eq.${r.user_id}`);   // circle-mates (even if private)
+  if (mine.length){
+    const ids = mine.map((x: any) => x.circle_id);
+    const [mates, circles] = await Promise.all([
+      rest(`circle_members?select=user_id,circle_id,muted&circle_id=${inList(ids)}&user_id=neq.${r.user_id}`),
+      rest(`circles?select=id,name,emoji&id=${inList(ids)}`)]);
+    const unmuted = mates.filter((m: any) => !m.muted);
+    const wants = unmuted.length ? new Set((await rest(`profiles?select=id&notif_circle=eq.true&id=${inList([...new Set(unmuted.map((m: any) => m.user_id))] as string[])}`)).map((p: any) => p.id)) : new Set();
+    for (const m of unmuted) if (wants.has(m.user_id) && !recips.has(m.user_id)){
+      const c = circles.find((c: any) => c.id === m.circle_id); recips.set(m.user_id, c ? `${c.emoji} ${c.name}` : null); }
+  }
   const to: string[] = [];
-  for (const o of others) if (await firstTime("crew", o.id, r.user_id, r.day)) to.push(o.id);   // once per person per day, even if they untick + tick
+  for (const id of recips.keys()) if (await firstTime("crew", id, r.user_id, r.day)) to.push(id);   // once per person per day, even if they untick + tick
   const ctx = await contexts([r.user_id, ...to]);
+  const showWorkout = who.account ? !who.hide_split : who.share_split;
   let sent = 0;
-  for (const id of to){ const me = ctx.get(id); if (me) sent += (await send([id], crewNote(ctx.get(r.user_id)!, who.share_split, me))).sent; }
+  for (const id of to){ const me = ctx.get(id); if (me) sent += (await send([id], crewNote(ctx.get(r.user_id)!, showWorkout, me, recips.get(id)))).sent; }
   return { to: to.length, sent };
+}
+async function onCircleAdd(r: any){
+  const found = await rest(`circle_members?select=added_by&circle_id=eq.${r.circle_id}&user_id=eq.${r.user_id}`);
+  if (!found.length || !found[0].added_by || found[0].added_by === r.user_id) return { skipped: "not an add" };
+  const [[adder], [to], [circle]] = await Promise.all([people([found[0].added_by]), people([r.user_id]),
+    rest(`circles?select=name,emoji&id=eq.${r.circle_id}`)]);
+  if (!adder || !circle || !to?.notif_circle) return { skipped: "off" };
+  if (!await firstTime("circle_add", r.user_id, r.circle_id, sydneyDay())) return { skipped: "dupe" };
+  return send([r.user_id], circleAddNote(adder.name, `${circle.emoji} ${circle.name}`));
 }
 async function onReminders(){
   const due = await rest("rpc/due_reminders", { method: "POST", body: "{}" });   // also marks them as reminded today
@@ -235,6 +262,7 @@ export async function handle(req: Request){
     if (b.type === "nudges") out = await onNudge(b.record);
     else if (b.type === "reactions") out = await onReaction(b.record);
     else if (b.type === "checkins") out = await onCheckin(b.record);
+    else if (b.type === "circle_members") out = await onCircleAdd(b.record);
     else if (b.type === "reminders") out = await onReminders();
     else if (b.type === "test") out = await onTest(req);
     else if (b.type === "ping") out = { key: SB_KEY ? SB_KEY.slice(0, 8) + "…" : "missing", vapid: !!(await keys()).priv };
