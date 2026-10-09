@@ -44,7 +44,8 @@ checks the rules and undoes itself.
 ## Database changes
 
 Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, `002_privacy.sql`, `003_steps.sql`,
-`004_member_count.sql`, `005_social_body.sql`, `006_more_plates.sql`, `007_goals_experience.sql`.
+`004_member_count.sql`, `005_social_body.sql`, `006_more_plates.sql`, `007_goals_experience.sql`,
+`008_notifications.sql` (then insert the VAPID keys into `push_config`, see the file).
 Tests in `supabase/tests/` print PASS/FAIL and undo themselves.
 
 ## Apple Health steps (paused)
@@ -69,6 +70,19 @@ You tab). Steps are private unless the person turns on sharing.
   Showing the sign-in form during that check made people think they'd been logged out.
 - Optional **Face ID / fingerprint lock** (You tab → Security): WebAuthn with the phone's built-in biometrics.
   It's a lock on this device only; it asks on open and after a minute in the background. Nothing biometric leaves the phone.
+
+## Notifications (Web Push)
+
+- Types: **nudges**, **reactions**, **crew activity** (a friend logs today's session, only if they share attendance)
+  and a **gym reminder** at a time each person picks (gym days only, skipped if already logged). Each has its own switch in the You tab.
+- On iPhone it needs iOS 16.4+ and the app opened from the Home Screen.
+- Flow: the phone gives us a push address + keys → saved in `push_subs` → database triggers on `nudges`, `reactions`
+  and `checkins` call the `push` edge function (via `pg_net`) → it encrypts the message (RFC 8291) and signs it with
+  our VAPID key (RFC 8292) → Apple/Google deliver it → `sw.js` shows it.
+- Reminders: `pg_cron` job `push-reminders` calls the function every 5 minutes; `due_reminders()` picks who's due.
+- The `push` function runs with JWT verification **off** (the database calls it without a login). It re-reads every
+  record before sending and logs sends in `push_log`, so faked calls can't invent notifications or send duplicates.
+- VAPID public key is in `config.js`; the private key is only in the `push_config` table (never in this repo).
 
 ## Security in one line
 

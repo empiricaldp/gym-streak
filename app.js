@@ -255,6 +255,11 @@ function viewToday(){
     topHtml += `<div class="card banner"><span class="big-emoji">📊</span><div class="grow"><b>Your weekly recap is ready</b>
       <span class="note">${lastWk.hit}/${lastWk.target} last week. See it and share it.</span></div>
       <button type="button" class="chip" id="recap-open">See it</button></div>`;
+  // Invite to turn on notifications (only where it can work, only until they answer)
+  if (!topHtml && pushState() === "off" && Notification.permission === "default" && !askedPush())
+    topHtml += `<div class="card banner"><span class="big-emoji">🔔</span><div class="grow"><b>Turn on notifications?</b>
+      <span class="note">Get pinged when friends nudge you, and a reminder on gym days.</span>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" id="push-yes">Turn on</button><button type="button" class="linkbtn" id="push-no">Not now</button></span></div></div>`;
 
   let stepsHtml = "";
   if (!STEPS_ENABLED){ /* steps hidden */ }
@@ -282,7 +287,9 @@ function viewToday(){
   if ($("nudge-ok")) $("nudge-ok").onclick = dismissNudges;
   if ($("freeze-go")) $("freeze-go").onclick = () => { $("freeze-go").disabled = true; useFreeze(fo.day); };
   if ($("recap-open")) $("recap-open").onclick = () => { try { localStorage.setItem(recapKey, "1"); } catch(_){} recapWhich = "last"; trophyFor = myId; setTab("trophies"); };
-  if ($("steps-setup")) $("steps-setup").onclick = () => { setTab("you"); setTimeout(() => $("health")?.scrollIntoView({behavior:"smooth"}), 50); };
+  if ($("push-yes")) $("push-yes").onclick = async () => { $("push-yes").disabled = true; setAskedPush(); await enablePush(); render(); };
+  if ($("push-no")) $("push-no").onclick = () => { setAskedPush(); toast("You can turn them on in the You tab"); render(); };
+  if ($("steps-setup")) $("steps-setup").onclick =() => { setTab("you"); setTimeout(() => $("health")?.scrollIntoView({behavior:"smooth"}), 50); };
   if ($("pv-save")){
     wirePrivacy(pvDraft, render);
     $("pv-save").onclick = async () => { const b = $("pv-save"); b.disabled = true;
@@ -427,8 +434,10 @@ function viewYou(){
       <div class="sec"><h2 class="sign">Privacy</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
       ${STEPS_ENABLED ? healthCard(m) : ""}
+      ${notifCard()}
       ${lockCard()}
       ${invite}${acct}</div>`;
+    wireNotifCard();
     wireHealth();
     $("editob").onclick = () => startOnboarding(true);
     wireBody();
@@ -440,7 +449,13 @@ function viewYou(){
     });
   }
   $("copylink").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied"); } catch(e){ toast("Copy failed"); } };
-  $("logout").onclick = async () => { await sb.auth.signOut(); };
+  $("logout").onclick = async () => {
+    // stop this device getting your notifications once you've logged out
+    try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager?.getSubscription();
+          if (sub) await sb.rpc("remove_push_sub", { p_endpoint: sub.endpoint }); } catch(_) {}
+    pushOn = false;
+    await sb.auth.signOut();
+  };
 }
 
 // ================= Goals & body (private) =================
@@ -1105,7 +1120,10 @@ async function loadAll(){
       reactions = await fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8)))).catch(() => []);
       nudges = await fetchAll("nudges", "from_user,to_user,day,seen", q => q.gte("day", key(addDays(today(), -1)))).catch(() => []);
       // My private stuff: goal, height and weight log (nobody else can read these)
-      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since").eq("id", myId).maybeSingle();
+      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,remind_at").eq("id", myId).maybeSingle();
+      if (mine.data && "notif_nudge" in mine.data) notif = { nudge: mine.data.notif_nudge, react: mine.data.notif_react, crew: mine.data.notif_crew,
+        remind: mine.data.notif_remind, at: String(mine.data.remind_at || "19:00").slice(0,5) };
+      syncPush();
       body.goals = mine.data?.goals?.length ? mine.data.goals : (mine.data?.goal ? [mine.data.goal] : []);
       body.trainedSince = mine.data?.trained_since || null;
       body.height = mine.data?.height_cm ? Number(mine.data.height_cm) : null;
@@ -1419,6 +1437,113 @@ document.addEventListener("visibilitychange", () => {
   else if (hiddenAt && Date.now() - hiddenAt > LOCK_AFTER_MS && session && lockInfo()){ locked = true; lockErr = ""; render(); }
 });
 
+// ================= Notifications (Web Push) =================
+// Turning them on asks the phone for a private "push address" at Apple/Google plus two encryption keys.
+// We save that in push_subs; the server's "push" function encrypts each message for this phone and posts it there.
+// On iPhone this only works once the app is on the Home Screen (iOS 16.4 or newer).
+let notif = { nudge: true, react: true, crew: true, remind: true, at: "19:00" };
+let pushOn = false, pushBusy = false;
+const PUSH_URL = () => window.GYM_CONFIG.SUPABASE_URL + "/functions/v1/push";
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+function pushState(){
+  if (!pushSupported()) return device.ios && !device.standalone ? "needs-install" : "unsupported";
+  if (Notification.permission === "denied") return "denied";
+  return pushOn ? "on" : "off";
+}
+const askedPush = () => { try { return !!localStorage.getItem("gs-push-asked"); } catch(_) { return true; } };
+const setAskedPush = () => { try { localStorage.setItem("gs-push-asked", "1"); } catch(_) {} };
+const keyBytes = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/") + "===".slice((s.length+3)%4)), c => c.charCodeAt(0));
+async function saveSub(sub){
+  const j = sub.toJSON();
+  const { error } = await sb.rpc("save_push_sub", { p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+  if (error) throw error;
+}
+async function enablePush(){
+  if (pushBusy) return; pushBusy = true;
+  try {
+    // must be called straight from a tap, or iPhone refuses to ask
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted"){ toast(perm === "denied" ? "Notifications blocked" : "Not turned on"); return; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(window.GYM_CONFIG.VAPID_PUBLIC_KEY) });
+    await saveSub(sub);
+    pushOn = true; toast("Notifications on");
+  } catch(e){ showWarn("Couldn't turn on notifications: " + (e.message || e)); }
+  finally { pushBusy = false; render(); }
+}
+async function disablePush(){
+  if (pushBusy) return; pushBusy = true;
+  try {
+    const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
+    if (sub){ await sb.rpc("remove_push_sub", { p_endpoint: sub.endpoint }); await sub.unsubscribe(); }
+    pushOn = false; toast("Notifications off on this device");
+  } catch(e){ showWarn("Couldn't turn them off: " + (e.message || e)); }
+  finally { pushBusy = false; render(); }
+}
+// Every launch: if this phone already said yes, re-save its address (it can change, or a friend may
+// have logged in on this phone before you). No popups here: only an existing yes counts.
+async function syncPush(){
+  if (!pushSupported() || Notification.permission !== "granted" || !myId) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(window.GYM_CONFIG.VAPID_PUBLIC_KEY) });
+    await saveSub(sub);
+    if (!pushOn){ pushOn = true; if (tab === "you" || tab === "today") render(); }
+  } catch(e){ /* try again next launch */ }
+}
+async function saveNotif(patch){
+  const before = notif; notif = { ...notif, ...patch };
+  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", at:"remind_at" }[k]] = v;
+  const { error } = await sb.from("profiles").update(row).eq("id", myId);
+  if (error){ notif = before; showWarn("Couldn't save that: " + error.message); render(); return false; }
+  return true;
+}
+async function sendTestPush(){
+  const { data } = await sb.auth.getSession();
+  const r = await fetch(PUSH_URL(), { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + (data.session?.access_token || "") },
+    body: JSON.stringify({ type: "test" }) });
+  const out = await r.json().catch(() => ({}));
+  if (out.sent) toast("Sent. Check your notifications");
+  else showWarn("Test didn't send: " + (out.error || (out.removed ? "this phone's address expired, turn notifications off and on" : "no device found, try turning them off and on")));
+}
+const NOTIF_TYPES = [
+  ["nudge",  "Nudges", "When a friend nudges you to train"],
+  ["react",  "Reactions", "When someone reacts to your session"],
+  ["crew",   "Crew activity", "When a friend logs today's session"],
+  ["remind", "Gym reminder", "On gym days, if you haven't logged yet"],
+];
+function notifCard(){
+  const st = pushState();
+  const head = `<div class="sec"><h2 class="sign">Notifications</h2><span class="label">${st === "on" ? "On" : "Off"}</span></div>`;
+  if (st === "needs-install") return head + `<div class="card"><p style="margin:0" class="note">On iPhone, notifications only work when Gym Streak is opened from your Home Screen. Add it there, open it from the icon, then come back here.</p></div>`;
+  if (st === "unsupported") return head + `<div class="card"><p style="margin:0" class="note">This browser can't show notifications. On iPhone you need iOS 16.4 or newer, with the app on your Home Screen.</p></div>`;
+  if (st === "denied") return head + `<div class="card"><p style="margin:0" class="note">Notifications are blocked for this app. ${device.ios
+    ? "Open the iPhone <b>Settings</b> app → <b>Notifications</b> → <b>Streak</b> → turn on <b>Allow Notifications</b>, then reopen the app."
+    : "Allow them in your browser or phone settings for this site, then reopen the app."}</p></div>`;
+  const types = NOTIF_TYPES.map(([k, t, sub]) => `<label class="tg" for="nt-${k}"><span><b>${t}</b><small>${sub}</small></span>
+      <input type="checkbox" class="sw" id="nt-${k}" data-nt="${k}" ${notif[k] ? "checked" : ""}></label>`).join("");
+  return head + `<div class="card ncard">
+    <label class="tg" for="nt-main" style="background:transparent;padding:0"><span><b>Notifications on this ${device.phone ? "phone" : "device"}</b>
+      <small>${st === "on" ? "You'll get the ones switched on below." : "Nudges, reactions, crew activity and gym reminders."}</small></span>
+      <input type="checkbox" class="sw" id="nt-main" ${st === "on" ? "checked" : ""} ${pushBusy ? "disabled" : ""}></label>
+    ${st === "on" ? `<div class="ntypes">${types}</div>
+      <div class="ntime ${notif.remind ? "" : "off"}"><span><b>Reminder time</b><small>Only sent if you haven't logged by then</small></span>
+        <input type="time" id="nt-at" value="${esc(notif.at)}" step="300" ${notif.remind ? "" : "disabled"}></div>
+      <button class="cta ghost" id="nt-test" style="margin-top:12px;font-size:18px">Send me a test</button>` : ""}
+  </div>`;
+}
+function wireNotifCard(){
+  const main = $("nt-main"); if (!main) return;
+  main.onchange = () => { setAskedPush(); main.checked ? enablePush() : disablePush(); };
+  document.querySelectorAll("[data-nt]").forEach(c => c.onchange = async () => { if (await saveNotif({ [c.dataset.nt]: c.checked })) render(); });
+  const at = $("nt-at");
+  if (at) at.onchange = async () => { if (/^\d\d:\d\d$/.test(at.value) && await saveNotif({ at: at.value })) toast("Reminder set for " + at.value); };
+  const test = $("nt-test");
+  if (test) test.onclick = async () => { test.disabled = true; test.textContent = "Sending…"; await sendTestPush(); test.disabled = false; test.textContent = "Send me a test"; };
+}
+
 // ================= Shell =================
 const TITLES = {today:"Today",crew:"Crew",trophies:"Trophies",you:"You"};
 function render(){
@@ -1473,7 +1598,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "26";   // bump together with version.json on every release
+const APP_VERSION = "27";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

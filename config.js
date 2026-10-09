@@ -4,5 +4,7 @@
 // NEVER put the service_role / secret key or the database password in this file.
 window.GYM_CONFIG = {
   SUPABASE_URL: "https://ktmntyzswewnnxpzzuhb.supabase.co",
-  SUPABASE_ANON_KEY: "sb_publishable_tanh_bk9W-mi2-jOvhzePg_9FvSE6q0"   // publishable key: safe in public code
+  SUPABASE_ANON_KEY: "sb_publishable_tanh_bk9W-mi2-jOvhzePg_9FvSE6q0",   // publishable key: safe in public code
+  // Push notifications: the PUBLIC half of our VAPID key pair (the private half lives only in the database)
+  VAPID_PUBLIC_KEY: "BN40hm_090v-1bS0DORB735iHgEJKpkBiBjoYteKeSnYRRxtcvMayAzPuU1D9lLaDk4Thvxtq1txKxTTkX1qaQk"
 };
