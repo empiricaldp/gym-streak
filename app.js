@@ -255,11 +255,6 @@ function viewToday(){
     topHtml += `<div class="card banner"><span class="big-emoji">📊</span><div class="grow"><b>Your weekly recap is ready</b>
       <span class="note">${lastWk.hit}/${lastWk.target} last week. See it and share it.</span></div>
       <button type="button" class="chip" id="recap-open">See it</button></div>`;
-  // Invite to turn on notifications (only where it can work, only until they answer)
-  if (!topHtml && pushState() === "off" && Notification.permission === "default" && !askedPush())
-    topHtml += `<div class="card banner"><span class="big-emoji">🔔</span><div class="grow"><b>Turn on notifications?</b>
-      <span class="note">Get pinged when friends nudge you, and a reminder on gym days.</span>
-      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" id="push-yes">Turn on</button><button type="button" class="linkbtn" id="push-no">Not now</button></span></div></div>`;
 
   let stepsHtml = "";
   if (!STEPS_ENABLED){ /* steps hidden */ }
@@ -287,8 +282,6 @@ function viewToday(){
   if ($("nudge-ok")) $("nudge-ok").onclick = dismissNudges;
   if ($("freeze-go")) $("freeze-go").onclick = () => { $("freeze-go").disabled = true; useFreeze(fo.day); };
   if ($("recap-open")) $("recap-open").onclick = () => { try { localStorage.setItem(recapKey, "1"); } catch(_){} recapWhich = "last"; trophyFor = myId; setTab("trophies"); };
-  if ($("push-yes")) $("push-yes").onclick = async () => { $("push-yes").disabled = true; setAskedPush(); await enablePush(); render(); };
-  if ($("push-no")) $("push-no").onclick = () => { setAskedPush(); toast("You can turn them on in the You tab"); render(); };
   if ($("steps-setup")) $("steps-setup").onclick =() => { setTab("you"); setTimeout(() => $("health")?.scrollIntoView({behavior:"smooth"}), 50); };
   if ($("pv-save")){
     wirePrivacy(pvDraft, render);
@@ -1450,8 +1443,61 @@ function pushState(){
   if (Notification.permission === "denied") return "denied";
   return pushOn ? "on" : "off";
 }
-const askedPush = () => { try { return !!localStorage.getItem("gs-push-asked"); } catch(_) { return true; } };
-const setAskedPush = () => { try { localStorage.setItem("gs-push-asked", "1"); } catch(_) {} };
+// "Maybe later" hides the big popup for a day (3 days if they've blocked notifications, since fixing that is more effort)
+const SNOOZE_KEY = "gs-push-snooze";
+const snoozedPush = () => { try { return Number(localStorage.getItem(SNOOZE_KEY) || 0) > Date.now(); } catch(_) { return true; } };
+const setAskedPush = (days = 1) => { try { localStorage.setItem(SNOOZE_KEY, String(Date.now() + days * 864e5)); } catch(_) {} };
+
+// ----- The big "turn notifications on" popup, shown when the app opens -----
+let sheetShown = false;
+function maybeShowPushSheet(){
+  if (sheetShown || document.getElementById("pushsheet")) return;
+  const st = pushState();
+  if (!(st === "off" && Notification.permission === "default") && st !== "denied") return;
+  if (snoozedPush() || !me() || ob || locked || tab !== "today") return;
+  sheetShown = true;
+  setTimeout(showPushSheet, 600);   // let the Today screen land first
+}
+function showPushSheet(){
+  const m = me(); if (!m || document.getElementById("pushsheet")) return;
+  const t = today(), w = slot(m, t)?.w, friend = [...members.values()].find(x => x.id !== myId)?.name || "Your mate";
+  const denied = pushState() === "denied";
+  // same wording as the real notifications (supabase/functions/push), using your own split and streak
+  const n = dayStreak(m), day = w ? w + " day" : "Gym day", line = n >= 2 ? `Your ${n}-day streak is on the line.` : "Start a streak today.";
+  const pn = (title, body, when) => `<div class="pn"><img src="icons/apple-touch-icon.png" alt="" width="34" height="34">
+    <div class="grow"><span class="pn-top"><b>STREAK</b><span>${when}</span></span><b class="pn-t">${esc(title)}</b><span class="pn-b">${esc(body)}</span></div></div>`;
+  const wrap = document.createElement("div");
+  wrap.id = "pushsheet"; wrap.className = "sheetwrap";
+  wrap.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ps-title">
+    <span class="rec">Recommended</span>
+    <h2 class="sign" id="ps-title">Don't miss a nudge</h2>
+    <p class="note">${denied ? "Notifications are blocked for Gym Streak right now. Here's what you're missing:" : "Here's what you'll get. You choose which ones."}</p>
+    <div class="pns">
+      ${pn(`👊 ${friend} nudged you`, `${day} and it's not logged yet. ${line}`, "now")}
+      ${pn(`⏰ ${day}: not logged yet`, `${line} Train, then tap to log it.`, "7:00 pm")}
+      ${pn(`💪 ${friend} just trained`, `Session logged. Your ${w ? w + " session" : "session"} is still waiting.`, "2h ago")}
+    </div>
+    ${denied
+      ? `<ol class="psteps">${device.ios
+          ? "<li>Open the iPhone <b>Settings</b> app</li><li>Tap <b>Notifications</b>, then <b>Streak</b></li><li>Turn on <b>Allow Notifications</b>, then reopen Gym Streak</li>"
+          : "<li>Open your browser or phone settings for this site</li><li>Allow <b>Notifications</b></li><li>Reopen Gym Streak</li>"}</ol>
+         <button class="cta" id="ps-ok">Got it</button>`
+      : `<button class="cta" id="ps-yes">Turn on notifications</button>`}
+    <button class="linkbtn" id="ps-later">Maybe later</button>
+    <p class="note ps-foot">Change them any time in You → Notifications.</p>
+  </div>`;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add("open"));
+  const close = () => { wrap.classList.remove("open"); setTimeout(() => wrap.remove(), 250); };
+  wrap.onclick = e => { if (e.target === wrap){ setAskedPush(denied ? 3 : 1); close(); } };
+  $("ps-later").onclick = () => { setAskedPush(denied ? 3 : 1); close(); };
+  if ($("ps-ok")) $("ps-ok").onclick = () => { setAskedPush(3); close(); };
+  if ($("ps-yes")) $("ps-yes").onclick = async () => {
+    $("ps-yes").disabled = true; $("ps-yes").textContent = "Turning on…";
+    await enablePush();      // straight from the tap, so iPhone shows its "Allow" box
+    setAskedPush(1); close();
+  };
+}
 const keyBytes = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/") + "===".slice((s.length+3)%4)), c => c.charCodeAt(0));
 async function saveSub(sub){
   const j = sub.toJSON();
@@ -1536,7 +1582,7 @@ function notifCard(){
 }
 function wireNotifCard(){
   const main = $("nt-main"); if (!main) return;
-  main.onchange = () => { setAskedPush(); main.checked ? enablePush() : disablePush(); };
+  main.onchange = () => { main.checked ? enablePush() : disablePush(); };
   document.querySelectorAll("[data-nt]").forEach(c => c.onchange = async () => { if (await saveNotif({ [c.dataset.nt]: c.checked })) render(); });
   const at = $("nt-at");
   if (at) at.onchange = async () => { if (/^\d\d:\d\d$/.test(at.value) && await saveNotif({ at: at.value })) toast("Reminder set for " + at.value); };
@@ -1567,6 +1613,7 @@ function render(){
   if (ob){ $("title").textContent = ob.edit ? "Edit" : "Set up"; viewOnboarding(); return; }
   $("title").textContent = TITLES[tab];
   ({today:viewToday,crew:viewCrew,trophies:viewTrophies,you:viewYou})[tab]();
+  maybeShowPushSheet();
 }
 function setTab(t){ tab=t; ob=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
@@ -1598,7 +1645,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "27";   // bump together with version.json on every release
+const APP_VERSION = "28";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -1613,7 +1660,7 @@ checkForUpdate();
 if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("controllerchange", () => checkForUpdate());
 
 // Phones pause apps in the background: refresh when it comes back, and roll over at midnight.
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ checkForUpdate(); if (session) loadAll(); } });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ sheetShown = false; checkForUpdate(); if (session) loadAll(); } });
 let lastDay = key(today());
 setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); render(); } }, 60000);
 

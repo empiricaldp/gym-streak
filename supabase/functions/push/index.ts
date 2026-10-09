@@ -107,9 +107,76 @@ async function send(userIds: string[], note: Note){
   }));
   return { sent, removed };
 }
+// ---------- dates + streak maths (same rules as the app: rest days skipped, freezes keep it alive, today isn't over yet) ----------
+const addDays = (d: string, n: number) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const dowOf = (d: string) => (new Date(d + "T00:00:00Z").getUTCDay() + 6) % 7;      // Mon = 0
+type Ctx = { id: string; name: string; plan: any[]; since: string; track_start: string; days: Set<string>; frozen: Set<string> };
+const slotOf = (m: Ctx, d: string) => (m.plan || [])[dowOf(d)] || null;
+const gymDay = (m: Ctx, d: string) => { const s = slotOf(m, d); return !!s && !s.opt; };
+const hasDay = (m: Ctx, d: string) => m.days.has(d) || (d < m.track_start && d >= m.since && gymDay(m, d));
+function streak(m: Ctx){
+  const t = sydneyDay(); let n = 0;
+  for (let d = t, i = 0; d >= m.since && i < 800; d = addDays(d, -1), i++){
+    if (!gymDay(m, d)) continue;
+    if (hasDay(m, d)) n++;
+    else if (m.frozen.has(d) || d === t) continue;
+    else break;
+  }
+  return n;
+}
+// Everything needed to personalise a message, for several people in 3 queries
+async function contexts(ids: string[]): Promise<Map<string, Ctx>> {
+  const out = new Map<string, Ctx>(); if (!ids.length) return out;
+  const from = addDays(sydneyDay(), -800);
+  const [ps, cs, fs] = await Promise.all([
+    rest(`profiles?select=id,name,plan,since,track_start&id=${inList(ids)}`),
+    rest(`checkins?select=user_id,day&user_id=${inList(ids)}&day=gte.${from}&limit=20000`),
+    rest(`freezes?select=user_id,day&user_id=${inList(ids)}&day=gte.${from}`),
+  ]);
+  for (const p of ps) out.set(p.id, { ...p, days: new Set(), frozen: new Set() });
+  for (const c of cs) out.get(c.user_id)?.days.add(c.day);
+  for (const f of fs) out.get(f.user_id)?.frozen.add(f.day);
+  return out;
+}
+const dayWord = (d: string) => d === sydneyDay() ? "today" : d === addDays(sydneyDay(), -1) ? "yesterday"
+  : "on " + new Date(d + "T12:00:00Z").toLocaleDateString("en-AU", { weekday: "long", timeZone: "UTC" });
+
 const people = async (ids: string[]) =>
   ids.length ? await rest(`profiles?select=id,name,plan,is_public,share_attendance,share_split,notif_nudge,notif_react,notif_crew&id=${inList(ids)}`) : [];
 const EMOJI: Record<string, string> = { fire: "🔥", muscle: "💪", clap: "👏" };
+
+// ---------- the wording ----------
+// Every notification has the same shape:
+//   title = emoji + who/what happened           ("👊 Meha nudged you")
+//   body  = the detail about YOU + what to do     ("Push day and it's not logged yet. Your 6-day streak is on the line.")
+// Pure functions (no database), so tests can check every variation.
+const streakLine = (n: number) => n >= 2 ? `Your ${n}-day streak is on the line.` : "Start a streak today.";
+export function nudgeNote(fromName: string, me: Ctx): Note {
+  const t = sydneyDay(), w = slotOf(me, t)?.w;
+  const body = me.days.has(t) ? "You've already trained today. Show them the receipts 😤"
+    : gymDay(me, t) ? `${w ? w + " day" : "Gym day"} and it's not logged yet. ${streakLine(streak(me))}`
+    : "It's a rest day for you, but they're keeping you honest. Bonus session?";
+  return { title: `👊 ${fromName} nudged you`, body, tag: "nudge" };
+}
+export function reactionNote(fromName: string, emoji: string, me: Ctx, day: string): Note {
+  const w = slotOf(me, day)?.w, n = streak(me);
+  return { title: `${EMOJI[emoji] || "👏"} ${fromName} reacted to your session`,
+    body: `${w ? w + " session" : "Your session"} ${dayWord(day)}.${n >= 2 ? ` ${n}-day streak and counting.` : " Keep it rolling."}`, tag: "react" };
+}
+export function crewNote(who: Ctx, showWorkout: boolean, me: Ctx): Note {
+  const t = sydneyDay(), w = showWorkout ? slotOf(who, t)?.w : null, n = streak(who), mine = slotOf(me, t)?.w;
+  const done = `${w ? w + " done" : "Session logged"}${n >= 2 ? ` · ${n}-day streak` : ""}.`;
+  const you = me.days.has(t) ? "You've both trained today 🤝"
+    : gymDay(me, t) ? `Your ${mine ? mine + " session" : "session"} is still waiting.`
+    : "Rest day for you, so enjoy it.";
+  return { title: `💪 ${who.name} just trained`, body: `${done} ${you}`, tag: "crew-" + who.id };
+}
+export function reminderNote(me: Ctx): Note {
+  const w = slotOf(me, sydneyDay())?.w;
+  return { title: `⏰ ${w ? w + " day" : "Gym day"}: not logged yet`, body: `${streakLine(streak(me))} Train, then tap to log it.`, tag: "remind" };
+}
+export const testNote = (): Note => ({ title: "✅ Notifications are on",
+  body: "You'll get nudges, reactions, crew sessions and gym reminders here. Change them any time in the You tab.", tag: "test" });
 
 // ---------- the four kinds of notification ----------
 async function onNudge(r: any){
@@ -118,7 +185,8 @@ async function onNudge(r: any){
   const [from, to] = await Promise.all([people([r.from_user]), people([r.to_user])]);
   if (!from[0] || !to[0]?.notif_nudge) return { skipped: "off" };
   if (!await firstTime("nudge", r.to_user, r.from_user, r.day)) return { skipped: "dupe" };
-  return send([r.to_user], { title: `${from[0].name} nudged you 👊`, body: "Get to the gym. The crew's watching.", tag: "nudge-" + r.from_user });
+  const me = (await contexts([r.to_user])).get(r.to_user)!;
+  return send([r.to_user], nudgeNote(from[0].name, me));
 }
 async function onReaction(r: any){
   const found = await rest(`reactions?select=emoji&from_user=eq.${r.from_user}&to_user=eq.${r.to_user}&day=eq.${r.day}&emoji=eq.${r.emoji}`);
@@ -126,9 +194,8 @@ async function onReaction(r: any){
   const [from, to] = await Promise.all([people([r.from_user]), people([r.to_user])]);
   if (!from[0] || !to[0]?.notif_react) return { skipped: "off" };
   if (!await firstTime("react", r.to_user, r.from_user + ":" + r.emoji, r.day)) return { skipped: "dupe" };
-  const when = r.day === sydneyDay() ? "today's session" : "your session on " +
-    new Date(r.day + "T12:00:00Z").toLocaleDateString("en-AU", { weekday: "long", timeZone: "UTC" });
-  return send([r.to_user], { title: `${from[0].name} reacted ${EMOJI[r.emoji] || ""}`, body: `to ${when}`, tag: "react-" + r.day });
+  const me = (await contexts([r.to_user])).get(r.to_user)!;
+  return send([r.to_user], reactionNote(from[0].name, r.emoji, me, r.day));
 }
 async function onCheckin(r: any){
   if (r.day !== sydneyDay()) return { skipped: "not today" };          // filling in old days isn't news
@@ -136,21 +203,19 @@ async function onCheckin(r: any){
   if (!found.length) return { skipped: "not found" };
   const [who] = await people([r.user_id]);
   if (!who || !who.is_public || !who.share_attendance) return { skipped: "private" };   // respect their privacy choice
-  const isoDow = (new Date(r.day + "T12:00:00Z").getUTCDay() + 6) % 7;
-  const workout = who.share_split ? who.plan?.[isoDow]?.w : null;
   const others = await rest(`profiles?select=id&notif_crew=eq.true&id=neq.${r.user_id}`);
   const to: string[] = [];
   for (const o of others) if (await firstTime("crew", o.id, r.user_id, r.day)) to.push(o.id);   // once per person per day, even if they untick + tick
-  return send(to, { title: `${who.name} just trained 💪`, body: workout ? `${workout} done. Your turn?` : "Session logged. Your turn?", tag: "crew-" + r.user_id });
+  const ctx = await contexts([r.user_id, ...to]);
+  let sent = 0;
+  for (const id of to){ const me = ctx.get(id); if (me) sent += (await send([id], crewNote(ctx.get(r.user_id)!, who.share_split, me))).sent; }
+  return { to: to.length, sent };
 }
 async function onReminders(){
   const due = await rest("rpc/due_reminders", { method: "POST", body: "{}" });   // also marks them as reminded today
+  const ctx = await contexts(due.map((d: any) => d.uid));
   let sent = 0;
-  for (const d of due){
-    const res = await send([d.uid], { title: d.workout ? `${d.workout} today 🏋️` : "Gym day today 🏋️",
-      body: "Not logged yet. Go train, or tick it off if you already have.", tag: "remind" });
-    sent += res.sent;
-  }
+  for (const d of due){ const me = ctx.get(d.uid); if (me) sent += (await send([d.uid], reminderNote(me))).sent; }
   return { due: due.length, sent };
 }
 async function onTest(req: Request){
@@ -158,7 +223,7 @@ async function onTest(req: Request){
   const u = await fetch(`${SB_URL}/auth/v1/user`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${token}` } });
   if (!u.ok) return { error: "sign in first" };
   const { id } = await u.json();
-  return send([id], { title: "Notifications are on ✅", body: "This is what a Gym Streak notification looks like.", tag: "test" });
+  return send([id], testNote());
 }
 
 export async function handle(req: Request){
