@@ -524,3 +524,11 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .rv span.rest{color:var(--muted);font-weight:600}
 .rvlinks{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:8px}
 .row2 .cta[hidden]{display:none}.row2:has(.cta[hidden]){grid-template-columns:1fr}
+
+/* You tab: separate Name / Plate colour / Split rows */
+.editrow{width:100%;border:0;font:inherit;color:var(--fg);background:var(--card);-webkit-appearance:none;appearance:none;text-align:left;cursor:pointer;gap:10px}
+.editrow .grow{display:flex;flex-direction:column;gap:2px;min-width:0}
+.editrow b{font-size:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.editrow .note{font-size:13px}
+.chev.r{flex:none;transform:rotate(-45deg);margin:0 2px 0 0}
+.editrow+.editrow{border-top:1px solid var(--line)}.editrow:active{background:var(--card2)}

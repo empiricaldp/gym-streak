@@ -298,7 +298,7 @@ function viewToday(){
   main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { goalDraft = toggleIn(goalDraft, b.dataset.goal); render(); });
   if ($("goal-save")) $("goal-save").onclick = async () => { $("goal-save").disabled = true; if (await saveGoals(goalDraft)){ goalDraft = []; toast("Goals saved"); } };
   if ($("nudge-ok")) $("nudge-ok").onclick = dismissNudges;
-  if ($("rename-go")) $("rename-go").onclick = () => startOnboarding(true);
+  if ($("rename-go")) $("rename-go").onclick = () => startOnboarding(true, "name");
   if ($("freeze-go")) $("freeze-go").onclick = () => { $("freeze-go").disabled = true; useFreeze(fo.day); };
   if ($("recap-open")) $("recap-open").onclick = () => { try { localStorage.setItem(recapKey, "1"); } catch(_){} recapWhich = "last"; trophyFor = myId; setTab("trophies"); };
   if ($("steps-setup")) $("steps-setup").onclick =() => { setTab("you"); setTimeout(() => $("health")?.scrollIntoView({behavior:"smooth"}), 50); };
@@ -440,9 +440,14 @@ function viewYou(){
       <div class="card hero" style="${pc(m)}"><span class="label">${plateName(m.plate)} plate · since ${fmt(parse(m.since))}</span>
         <div class="work sign">${esc(m.name)}</div>
         <p class="sub">Week ${weekNo(m)} · ${dayStreak(m)} day streak · ${Object.keys(m.days||{}).length} sessions logged${body.trainedSince ? ` · lifting since ${parse(body.trainedSince).toLocaleDateString("en-AU",{month:"short",year:"numeric"})}` : ""}</p></div>
+      <div class="sec"><h2 class="sign">Profile</h2></div>
+      <div class="list editrows">
+        <button type="button" class="li editrow" data-edit="name"><span class="grow"><span class="label">Name</span><b>${esc(m.name)}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
+        <button type="button" class="li editrow" data-edit="plate"><span class="grow"><span class="label">Plate colour</span><b style="display:flex;align-items:center;gap:8px">${plateSvg(m.plate, 22)}${plateName(m.plate)}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
+        <button type="button" class="li editrow" data-edit="split"><span class="grow"><span class="label">Split</span><b>${esc(splitLabel(m))}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
+      </div>
       <div class="sec"><h2 class="sign">Your split</h2></div>
       <div class="list">${plan}</div>
-      <button class="cta ghost" id="editob">Edit name, plate or split</button>
       ${bodyCard()}
       <div class="sec"><h2 class="sign">Privacy</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
@@ -452,7 +457,7 @@ function viewYou(){
       ${invite}${acct}</div>`;
     wireNotifCard();
     wireHealth();
-    $("editob").onclick = () => startOnboarding(true);
+    main().querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(true, b.dataset.edit));
     wireBody();
     wireLockCard();
     const p = pvFrom(m);
@@ -943,9 +948,10 @@ function wireDur(id, d, onChange){
   });
 }
 // ================= Onboarding =================
-function startOnboarding(edit){
+// startOnboarding(true, "split") edits just that one thing (from the You tab); no review screen
+function startOnboarding(edit, only){
   const m = edit ? me() : null;
-  ob = { edit, step:0, name: m?.name || "", plate: m?.plate || PLATES[members.size % PLATES.length].id,
+  ob = { edit, only: edit ? only || null : null, step:0, name: m?.name || "", plate: m?.plate || PLATES[members.size % PLATES.length].id,
     plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false],
     exp: { n: 6, unit: "months" },      // how long you've been going to the gym at all
     streak: { n: 0, unit: "weeks" },    // how long you've been going consistently (sets your streak)
@@ -954,33 +960,34 @@ function startOnboarding(edit){
 }
 function viewOnboarding(){
   // Steps by name, so adding a question is just adding a word here
-  const STEPS = ob.edit ? ["name","goal","plate","split","review"] : ["name","goal","plate","split","experience","streak","privacy","review"];
+  const STEPS = ob.only ? [ob.only] : ob.edit ? ["name","goal","plate","split","review"] : ["name","goal","plate","split","experience","streak","privacy","review"];
   const total = STEPS.length, s = ob.step, k = STEPS[s], qn = s + 1;
-  const dots = `<div class="steps">${Array.from({length:total},(_,i)=>`<i class="${i<=s?"on":""}"></i>`).join("")}</div>`;
+  const ql = ob.only ? "Edit" : "Question " + qn;      // label above each question
+  const dots = ob.only ? "" : `<div class="steps">${Array.from({length:total},(_,i)=>`<i class="${i<=s?"on":""}"></i>`).join("")}</div>`;
   let body = "", canNext = true;
-  if (k==="name"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What should the crew call you?</h2>
+  if (k==="name"){ body = `<span class="label">${ql}</span><h2 class="sign">What should the crew call you?</h2>
       <input class="field" id="f-name" type="text" maxlength="20" placeholder="e.g. DP" value="${esc(ob.name)}" autocomplete="nickname" autocapitalize="words" spellcheck="false">
       <p class="note namemsg ${ob.nameState === "taken" || ob.nameState === "bad" ? "bad" : ob.nameState === "ok" ? "ok" : ""}" id="name-msg">${esc(ob.nameMsg || "Letters and numbers only, no emoji. Each name can only be used once.")}</p>`;
     canNext = ob.nameState === "ok"; }
-  if (k==="goal"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What are your goals?</h2>
+  if (k==="goal"){ body = `<span class="label">${ql}</span><h2 class="sign">What are your goals?</h2>
       <p class="note">Only you see this. It tunes your motivation messages and your weight trend.</p>${goalPicker(ob.goals)}`;
     canNext = ob.goals.length > 0; }
-  if (k==="plate"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">Pick your plate</h2>
+  if (k==="plate"){ body = `<span class="label">${ql}</span><h2 class="sign">Pick your plate</h2>
       <p class="note">Your colour across the app. Everyone in the crew gets their own plate.</p>
       <div class="platepick">${PLATES.map(p=>`<button data-plate="${p.id}" aria-pressed="${ob.plate===p.id}" aria-label="${p.name} plate">${plateSvg(p.id, 52)}<small>${p.name}</small></button>`).join("")}</div>`; }
-  if (k==="split"){ body = splitStepHtml(qn); canNext = splitReady(); }
-  if (k==="experience"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">How long have you been going to the gym?</h2>
+  if (k==="split"){ body = splitStepHtml(ql); canNext = splitReady(); }
+  if (k==="experience"){ body = `<span class="label">${ql}</span><h2 class="sign">How long have you been going to the gym?</h2>
       <p class="note">Overall, even with breaks. Only you see this.</p>
       ${durPicker("exp", ob.exp, ["days","weeks","months","years"])}
       <p class="note dprev" id="exp-prev">${expPreview()}</p>`; }
-  if (k==="streak"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">How long have you been going consistently?</h2>
+  if (k==="streak"){ body = `<span class="label">${ql}</span><h2 class="sign">How long have you been going consistently?</h2>
       <p class="note">Without missing your planned gym days. This sets your starting streak, so be honest. 0 is fine.</p>
       ${durPicker("stk", ob.streak, ["days","weeks","months","years"])}
       <p class="note dprev" id="stk-prev">${streakPreview()}</p>`; }
-  if (k==="privacy"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What can the crew see?</h2>
+  if (k==="privacy"){ body = `<span class="label">${ql}</span><h2 class="sign">What can the crew see?</h2>
       <p class="note">You can change this any time in the You tab.</p>${privacyPicker(ob.pv)}`; }
-  const last = k === "review";
-  if (last){ const gym = ob.plan.filter((w,i)=>normalizeWorkout(w)&&!ob.opt[i]).length;
+  const isReview = k === "review", last = isReview || !!ob.only;
+  if (isReview){ const gym = ob.plan.filter((w,i)=>normalizeWorkout(w)&&!ob.opt[i]).length;
     body = `<span class="label">Check it</span><h2 class="sign">${ob.edit?"Save changes":"Ready to lift"}</h2>
       <div class="review" style="--c:var(--p-${ob.plate})">
         <div><span>Name</span><b>${esc(ob.name)}</b></div>
@@ -993,7 +1000,7 @@ function viewOnboarding(){
         ${DAYS.map((d,i)=>{ const w = normalizeWorkout(ob.plan[i]); return `<div><span>${d}</span><b>${w?esc(w)+(ob.opt[i]?" (optional)":""):"Rest"}</b></div>`; }).join("")}
       </div>`; }
   main().innerHTML = `<div class="card ob">${dots}${body}
-    <div class="row2"><button class="cta ghost" id="ob-back">${s===0?"Cancel":"Back"}</button>
+    <div class="row2"><button class="cta ghost" id="ob-back">${s===0 && !(k==="split" && (ob.splitMode==="ready" || ob.splitMode==="custom" || (ob.splitMode==="review" && !ob.edit))) ? "Cancel" : "Back"}</button>
     <button class="cta" id="ob-next" ${canNext?"":"disabled"} ${k==="split" && (ob.splitMode===null || ob.splitMode==="ready") ? "hidden" : ""}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
   const nextBtn = $("ob-next");
   const refresh = () => { const ok = k==="name" ? ob.nameState === "ok" : k==="goal" ? ob.goals.length > 0 : k==="split" ? splitReady() : true; nextBtn.disabled = !ok; };
@@ -1036,15 +1043,22 @@ function viewOnboarding(){
 //   ready   → cards grouped Beginner / Popular / Advanced; one tap picks one
 //   custom  → 7 day rows; tap a day to pick from the basics (or Rest)
 //   review  → your week at a glance, with "Change a day"
+// "Push Pull Legs" if your week matches a ready-made split, otherwise "Custom · 4 gym days"
+function splitLabel(m){
+  const mine = (m.plan || []).map(x => x ? normalizeWorkout(x.w) : "");
+  const hit = SPLITS.find(x => x.days.every((d,i) => normalizeWorkout(d) === mine[i]));
+  const n = (m.plan || []).filter(x => x && !x.opt).length;
+  return (hit ? hit.name : "Custom") + ` · ${n} gym day${n===1?"":"s"}`;
+}
 const LEVELS = [["beginner","Beginner"],["popular","Popular"],["advanced","Advanced"]];
 const hasPlan = () => ob.plan.some(w => normalizeWorkout(w));
 const splitReady = () => ob.plan.some((w,i) => normalizeWorkout(w) && !ob.opt[i]) && (ob.splitMode === "review" || ob.splitMode === "custom");
 const shortName = w => w.replace(/Upper Body/g,"Upper").replace(/Lower Body/g,"Lower");
 const gymDays = days => days.filter(Boolean).length;
 const weekStrip = days => `<span class="wstrip">${days.map((w,i)=>`<i class="${w?"on":""}" title="${DAYS[i]}: ${esc(w||"Rest")}">${DAYS[i][0]}</i>`).join("")}</span>`;
-function splitStepHtml(qn){
+function splitStepHtml(ql){
   if (ob.splitMode === undefined) ob.splitMode = ob.edit && hasPlan() ? "review" : null;
-  const head = (title, sub) => `<span class="label">Question ${qn}</span><h2 class="sign">${title}</h2>${sub ? `<p class="note">${sub}</p>` : ""}`;
+  const head = (title, sub) => `<span class="label">${ql}</span><h2 class="sign">${title}</h2>${sub ? `<p class="note">${sub}</p>` : ""}`;
   if (ob.splitMode === null) return head("Your weekly split") + `
     <div class="pathpick">
       <button type="button" class="path" data-path="ready"><span class="rec">Recommended</span><b>Pick a ready-made split</b><small>Popular plans. One tap.</small></button>
@@ -1124,7 +1138,10 @@ async function saveOnboarding(){
   // and a new row must have a start date, which is why editing used to fail.)
   // Joining: INSERT the full profile.
   const { error } = old
-    ? await sb.from("profiles").update({ name: row.name, plate: row.plate, plan: row.plan, goals: row.goals, goal: row.goal }).eq("id", myId)
+    ? await sb.from("profiles").update(
+        // editing one thing from the You tab only sends that one thing
+        ob.only === "name" ? { name: row.name } : ob.only === "plate" ? { plate: row.plate } : ob.only === "split" ? { plan: row.plan }
+        : { name: row.name, plate: row.plate, plan: row.plan, goals: row.goals, goal: row.goal }).eq("id", myId)
     : await sb.from("profiles").insert(row);
   if (error){
     if (btn) btn.disabled = false;
@@ -1133,7 +1150,7 @@ async function saveOnboarding(){
     if (nameErr){ ob.step = 0; ob.nameState = "bad"; ob.nameMsg = nameErr; render(); return; }   // the name question is step 0
     showWarn("Couldn't save: " + error.message); return;
   }
-  ob = null; tab = "today";
+  ob = null; tab = wasEdit ? "you" : "today";
   await loadAll();
   if (!wasEdit){ toast("Welcome to the crew"); burst(); } else toast("Saved");
 }
@@ -1721,7 +1738,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "34";   // bump together with version.json on every release
+const APP_VERSION = "35";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
