@@ -143,12 +143,17 @@ const LOCK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke
 const $ = id => document.getElementById(id);
 const main = () => $("main");
 
+let newPlate = -1;   // index of the plate you just loaded, so only that one animates
 function barbell(m, w){
   const n = Math.max(1, Math.min(8, w.target)), left = Math.ceil(n/2), right = Math.floor(n/2);
   const H = [64,58,52,46]; let svg = "";
   const plate = (x, i, k) => {
     const h = H[Math.min(i,3)], y = 44 - h/2, filled = k < w.hit;
-    return filled ? `<rect class="plate" x="${x}" y="${y}" width="13" height="${h}" rx="3"/><rect class="rim" x="${x+1}" y="${y+1}" width="11" height="${h-2}" rx="2.5"/>`
+    // A loaded plate: colour, a soft highlight down its face, and a small engraved "CREW" reading upwards
+    return filled ? `<g class="pl${k === newPlate && m.id === myId ? " new" : ""}"><rect class="plate" x="${x}" y="${y}" width="13" height="${h}" rx="3"/>
+        <rect class="sheen" x="${x}" y="${y}" width="13" height="${h}" rx="3"/>
+        <rect class="rim" x="${x+1}" y="${y+1}" width="11" height="${h-2}" rx="2.5"/>
+        <text class="pbrand" transform="translate(${x+6.5} 44) rotate(-90)">CREW</text></g>`
                   : `<rect class="slot" x="${x}" y="${y}" width="13" height="${h}" rx="3"/>`;
   };
   // fill order: L0, R0, L1, R1 ...
@@ -156,6 +161,8 @@ function barbell(m, w){
   for (let i=0;i<right;i++) svg += plate(209 + i*16, i, i*2+1);
   let knurl = ""; for (let x=128;x<=192;x+=4) knurl += `<line class="knurl" x1="${x}" y1="41" x2="${x+3}" y2="47" stroke-width="1"/>`;
   return `<svg class="barbell" viewBox="0 0 320 88" role="img" aria-label="${w.hit} of ${w.target} plates loaded this week">
+    <defs><linearGradient id="plsheen" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".12"/></linearGradient></defs>
     <rect class="rod" x="6" y="40" width="308" height="8" rx="3"/>
     <rect class="rod" x="20" y="37" width="96" height="14" rx="3"/><rect class="rod" x="204" y="37" width="96" height="14" rx="3"/>
     ${knurl}<rect class="collar" x="114" y="32" width="6" height="24" rx="2"/><rect class="collar" x="200" y="32" width="6" height="24" rx="2"/>${svg}</svg>`;
@@ -1149,7 +1156,10 @@ async function toggleDay(d){
   const k = key(d); if (busy.has(k)) return; busy.add(k);
   const was = !!(m.days && m.days[k]), before = weekStats(m,startOfWeek(d));
   const days = {...(m.days||{})}; if (was) delete days[k]; else days[k] = 1;
-  members.set(myId, {...m, days}); render();   // show it instantly, save in the background
+  members.set(myId, {...m, days});
+  if (!was && isGym(m,d) && key(startOfWeek(d)) === key(startOfWeek(today()))){   // the new plate slides on
+    newPlate = weekStats(me(), startOfWeek(d)).hit - 1; setTimeout(() => { newPlate = -1; }, 700); }
+  render();   // show it instantly, save in the background
   if (!was){
     try{ navigator.vibrate && navigator.vibrate(15); }catch(e){}
     burst();
@@ -1645,7 +1655,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "29";   // bump together with version.json on every release
+const APP_VERSION = "30";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

@@ -62,6 +62,14 @@ button,input{font:inherit;color:inherit}
 .barbell .slot{fill:none;stroke:var(--line2);stroke-dasharray:4 4;stroke-width:1.5}
 .barbell .plate{fill:var(--c)}
 .barbell .rim{fill:none;stroke:color-mix(in srgb,#000 22%,var(--c));stroke-width:2}
+.barbell .sheen{fill:url(#plsheen)}
+/* the brand on each plate: small, quiet, like it's stamped into the iron */
+.barbell .pbrand{font:800 5.4px "Archivo",system-ui,sans-serif;font-stretch:75%;letter-spacing:1.3px;text-anchor:middle;dominant-baseline:central;
+  fill:var(--on-c,#fff);fill-opacity:.62}
+/* the plate you just loaded slides onto the bar */
+.barbell .pl.new{animation:plate-on .5s cubic-bezier(.2,.8,.2,1) both;transform-box:fill-box;transform-origin:center}
+@keyframes plate-on{from{opacity:0;transform:translateY(-6px) scale(.96)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.barbell .pl.new{animation:none}}
 .plates-cap{display:flex;justify-content:space-between;font:700 12px var(--mono);color:var(--muted)}
 .cta{border:0;border-radius:14px;padding:16px;cursor:pointer;background:var(--iron);color:var(--on-iron);font-family:var(--display);font-stretch:75%;font-weight:900;font-size:22px;letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:10px;transition:transform .12s ease, background .2s}
 .cta:active{transform:scale(.97)}
