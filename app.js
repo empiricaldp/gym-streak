@@ -13,9 +13,9 @@ function plateSvg(id, size = 48){
   return `<svg class="plate-svg" width="${size}" height="${size}" viewBox="0 0 100 100" style="${pc({plate:id})}" aria-hidden="true">
     <circle cx="50" cy="50" r="48" class="ps-plate"/><circle cx="50" cy="50" r="44" class="ps-rim"/>
     <circle cx="50" cy="50" r="20" class="ps-hub"/><circle cx="50" cy="50" r="10" class="ps-hole"/>
-    <path id="${arc}" d="M 19 50 A 31 31 0 0 1 81 50" fill="none"/>
-    <text class="ps-brand"><textPath href="#${arc}" startOffset="50%" text-anchor="middle">CREW</textPath></text>
-    <circle cx="50" cy="81" r="2.6" class="ps-dot"/></svg>`;
+    <path id="${arc}" d="M 23 50 A 27 27 0 0 1 77 50" fill="none"/>
+    <text class="ps-brand"><textPath href="#${arc}" startOffset="51.77%" text-anchor="middle">CREW</textPath></text>
+    <circle cx="50" cy="82" r="2.4" class="ps-dot"/></svg>`;
 }
 
 const MILESTONES = [
@@ -153,7 +153,7 @@ function barbell(m, w){
     return filled ? `<g class="pl${k === newPlate && m.id === myId ? " new" : ""}"><rect class="plate" x="${x}" y="${y}" width="13" height="${h}" rx="3"/>
         <rect class="sheen" x="${x}" y="${y}" width="13" height="${h}" rx="3"/>
         <rect class="rim" x="${x+1}" y="${y+1}" width="11" height="${h-2}" rx="2.5"/>
-        <text class="pbrand" transform="translate(${x+6.5} 44) rotate(-90)">CREW</text></g>`
+        <text class="pbrand" x="0" y="0" dy="2.1" text-anchor="middle" transform="translate(${x+6.5} 44) rotate(-90) translate(.75 0)">CREW</text></g>`
                   : `<rect class="slot" x="${x}" y="${y}" width="13" height="${h}" rx="3"/>`;
   };
   // fill order: L0, R0, L1, R1 ...
@@ -349,7 +349,8 @@ function viewCrew(){
     const tag = (w.over||!w.left) ? (w.hit>=w.target?["done","Target hit"]:["todo","Missed "+(w.target-w.hit)]) : w.missed?["todo","Missed "+w.missed]:["todo",w.left+" to go"];
     return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${w.hit} of ${w.target} gym days${w.bonus?` · +${w.bonus} bonus`:""}</span></div><span class="status ${tag[0]}">${tag[1]}</span></div>`; }).join("");
   main().innerHTML = `<div class="view">
-    <div class="sec" style="margin-top:0"><h2 class="sign">Leaderboard</h2><span class="label">By day streak</span></div>${board}
+    <div class="sec" style="margin-top:0"><h2 class="sign">Leaderboard</h2><span class="label">By day streak</span></div>
+    <div class="crewkey" aria-hidden="true"><span><span class="week7"><i class="d"></i></span>Trained</span><span><span class="week7"><i class="m"></i></span>Missed</span><span><span class="week7"><i class="f"></i></span>Freeze</span><span><span class="week7"><i class="g"></i></span>To come</span></div>${board}
     ${(() => { if (!STEPS_ENABLED) return "";
       const sharers = roster().filter(seesSteps);
       if (!sharers.length) return "";
@@ -1655,7 +1656,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "30";   // bump together with version.json on every release
+const APP_VERSION = "31";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
