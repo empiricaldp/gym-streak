@@ -45,7 +45,7 @@ checks the rules and undoes itself.
 
 Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, `002_privacy.sql`, `003_steps.sql`,
 `004_member_count.sql`, `005_social_body.sql`, `006_more_plates.sql`, `007_goals_experience.sql`,
-`008_notifications.sql` (then insert the VAPID keys into `push_config`, see the file).
+`008_notifications.sql` (then insert the VAPID keys into `push_config`, see the file), `009_more_goals.sql`.
 Tests in `supabase/tests/` print PASS/FAIL and undo themselves.
 
 ## Apple Health steps (paused)

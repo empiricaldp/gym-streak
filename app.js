@@ -185,8 +185,15 @@ function quote(m){
               bulk:["Building muscle: eat, lift, sleep, repeat.","Growth needs fuel. Hit your protein."],
               recomp:["Recomp is slow and steady. Keep stacking days.","Lift heavy, eat clean, trust the process."],
               strength:["Stronger every week. Add a little weight.","Strength is a skill. Practise it."],
-              fitness:["Moving every day beats perfect days.","Show up. That's the whole trick."] };
+              fitness:["Moving every day beats perfect days.","Show up. That's the whole trick."],
+              happy:["Be happy. The gym's just the bonus.","Good music, good set, good mood. That's a win."] };
   for (const g of (body.goals || [])) if (G[g]) L.push(G[g]);
+  // "Keep an eye on my friends": point at someone who hasn't trained yet today
+  if ((body.goals || []).includes("friends")){
+    const slacker = others.find(o => isGym(o,t) && !has(o,t));
+    L.push(slacker ? [`${esc(slacker.name)} hasn't trained yet today.`, "Keep an eye on them. Send a nudge from the crew list."]
+                   : ["Your crew's all on it today.", "Keep an eye out. Keep each other honest."]);
+  }
   if (trendLine()) L.push(["Your scale this month", trendLine()]);
   return L[(new Date().getHours()+t.getDate()) % L.length] || L[0];
 }
@@ -468,10 +475,15 @@ const GOALS = [
   { id:"recomp",   label:"Recomp",          sub:"Lose fat and build muscle at once" },
   { id:"strength", label:"Get stronger",    sub:"Lift heavier" },
   { id:"fitness",  label:"General fitness", sub:"Feel good, stay consistent" },
+  { id:"happy",    label:"Be happy",        sub:"Enjoy it and leave smiling" },
+  { id:"friends",  label:"Keep an eye on my friends", sub:"Make sure the crew keeps showing up" },
 ];
 const goalLabel = id => GOALS.find(g => g.id === id)?.label || "";
 // Which way the scale should move for each goal (+1 up, -1 down, 0 steady, null = doesn't matter)
-const GOAL_DIR = { lose:-1, cut:-1, maintain:0, bulk:1, recomp:null, strength:null, fitness:null };
+const GOAL_DIR = { lose:-1, cut:-1, maintain:0, bulk:1, recomp:null, strength:null, fitness:null, happy:null, friends:null };
+// The old single-goal column only accepts the original 7, so it gets the first of those (or nothing)
+const LEGACY_GOALS = ["lose","cut","maintain","bulk","recomp","strength","fitness"];
+const legacyGoal = goals => goals.find(g => LEGACY_GOALS.includes(g)) || null;
 
 // Pick as many as apply (e.g. Build muscle + Get stronger)
 function goalPicker(sel){
@@ -484,7 +496,7 @@ function goalPicker(sel){
 const toggleIn = (arr, id) => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id];
 const goalsText = gs => (gs || []).map(goalLabel).filter(Boolean).join(", ");
 async function saveGoals(goals){
-  const { error } = await sb.from("profiles").update({ goals, goal: goals[0] || null }).eq("id", myId);
+  const { error } = await sb.from("profiles").update({ goals, goal: legacyGoal(goals) }).eq("id", myId);
   if (error){ showWarn("Couldn't save goals: " + error.message); return false; }
   body.goals = goals; render(); return true;
 }
@@ -1054,7 +1066,7 @@ async function saveOnboarding(){
   const plan = ob.plan.map((w,i)=> { const t = normalizeWorkout(w); return t ? {w:t, opt:!!ob.opt[i]} : null; });
   const old = ob.edit ? me() : null;
   const ws = startOfWeek(today());
-  const row = { id: myId, name: ob.name.trim().slice(0,20), plate: ob.plate, plan, goals: ob.goals, goal: ob.goals[0] || null };
+  const row = { id: myId, name: ob.name.trim().slice(0,20), plate: ob.plate, plan, goals: ob.goals, goal: legacyGoal(ob.goals) };
   if (!old){ row.since = key(streakStart(ob.streak)); row.track_start = key(ws);
     // you can't have been consistent for longer than you've been going at all
     const exp = durStart(ob.exp); row.trained_since = key(exp < parse(row.since) ? exp : parse(row.since));
@@ -1656,7 +1668,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "31";   // bump together with version.json on every release
+const APP_VERSION = "32";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
