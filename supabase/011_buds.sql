@@ -102,13 +102,12 @@ select
   case when p.id = auth.uid() then p.seen_update end as seen_update,
   (select b.status from buds b where b.follower = auth.uid() and b.followee = p.id) as i_bud,      -- my bud with them
   (select b.status from buds b where b.follower = p.id and b.followee = auth.uid()) as they_bud,   -- their bud with me
-  -- Profile counts (like Instagram): Buds = budded each other, Spotting = they bud someone one-way, Spotters = someone buds them one-way
+  -- Profile counts (like Instagram): Spotting = everyone they bud, Spotters = everyone who buds them,
+  -- Buds = people on both lists (so a Bud also counts once in Spotting and once in Spotters)
   (select count(*) from buds x where x.follower = p.id and x.status = 'accepted'
      and exists (select 1 from buds y where y.follower = x.followee and y.followee = p.id and y.status = 'accepted'))::int as n_buds,
-  (select count(*) from buds x where x.follower = p.id and x.status = 'accepted'
-     and not exists (select 1 from buds y where y.follower = x.followee and y.followee = p.id and y.status = 'accepted'))::int as n_spotting,
-  (select count(*) from buds x where x.followee = p.id and x.status = 'accepted'
-     and not exists (select 1 from buds y where y.follower = p.id and y.followee = x.follower and y.status = 'accepted'))::int as n_spotters
+  (select count(*) from buds x where x.follower = p.id and x.status = 'accepted')::int as n_spotting,
+  (select count(*) from buds x where x.followee = p.id and x.status = 'accepted')::int as n_spotters
 from public.profiles p
 where auth.uid() is not null;
 revoke all on public.people from public, anon;

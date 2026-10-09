@@ -122,7 +122,8 @@ const followersOf = () => [...members.values()].filter(m => m.theyBud === "accep
 const isMutual = m => !!m && m.iBud === "accepted" && m.theyBud === "accepted";
 const relation = m => isMutual(m) ? "buds" : m?.iBud === "accepted" ? "spotting" : m?.theyBud === "accepted" ? "spotter" : m?.iBud === "pending" ? "requested" : "";
 const counts = () => { const all = [...members.values()].filter(m => m.id !== myId);
-  return { buds: all.filter(isMutual).length, spotting: all.filter(m => relation(m) === "spotting").length, spotters: all.filter(m => relation(m) === "spotter").length }; };
+  // like Instagram: a Bud also counts in Spotting and in Spotters
+  return { buds: all.filter(isMutual).length, spotting: all.filter(m => m.iBud === "accepted").length, spotters: all.filter(m => m.theyBud === "accepted").length }; };
 const everyone = () => [...members.values()].filter(m => m.name && m.id !== myId).sort((a,b) => a.name.localeCompare(b.name));
 // Nudges: buds once a day; a non-bud can nudge a PUBLIC account once ever; never a private non-bud
 const canNudge = o => !!o && o.id !== myId && (isBud(o) ? !nudgedToday(o.id) : (!o.private && !sentNudgeTo.has(o.id)));
@@ -1885,12 +1886,13 @@ function countsRow(o, mine){
                                   : `<span><b>${c[k]}</b><span>${label}</span></span>`;
   return `<div class="pfcounts">${cell("buds","buds")}${cell("spotting","spotting")}${cell("spotters","spotters")}</div>`;
 }
-const LISTS = { buds: ["Buds", "You bud each other.", "buds"], spotting: ["Spotting", "You bud them, they haven't budded you back yet.", "spotting"],
-                spotters: ["Spotters", "They bud you. Bud them back to become Buds.", "spotter"] };
+const LISTS = { buds: ["Buds", "You bud each other.", o => isMutual(o)],
+                spotting: ["Spotting", "Everyone you bud. 🤝 = they bud you back.", o => o.iBud === "accepted"],
+                spotters: ["Spotters", "Everyone who buds you. Bud them back to become Buds.", o => o.theyBud === "accepted"] };
 function viewPeopleList(kind){
   const [title, sub, rel] = LISTS[kind];
   $("title").textContent = title;
-  const list = everyone().filter(o => relation(o) === rel);
+  const list = everyone().filter(rel);
   main().innerHTML = `<div class="view"><button type="button" class="linkbtn pfback" id="you-back">‹ Profile</button>
     <p class="note" style="margin:0">${sub}</p>
     ${list.length ? `<div class="list peoplelist">${list.map(personRow).join("")}</div>`
@@ -1990,7 +1992,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b4";   // bump together with version.json on every release
+const APP_VERSION = "b5";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
