@@ -425,10 +425,12 @@ function viewYou(){
       <div class="sec"><h2 class="sign">Privacy</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
       ${STEPS_ENABLED ? healthCard(m) : ""}
+      ${lockCard()}
       ${invite}${acct}</div>`;
     wireHealth();
     $("editob").onclick = () => startOnboarding(true);
     wireBody();
+    wireLockCard();
     const p = pvFrom(m);
     wirePrivacy(p, async () => {
       if ($("pv-status")) $("pv-status").textContent = "Saving…";
@@ -1211,6 +1213,89 @@ function viewInstall(){
   $("i-skip").onclick = () => { try { sessionStorage.setItem(skipKey, "1"); } catch(_) {} render(); };
 }
 
+// ================= Face ID / fingerprint lock (optional) =================
+// Uses the phone's built-in biometrics through WebAuthn (the same tech as passkeys).
+// It's a privacy lock on THIS device, like the Face ID lock in WhatsApp: you stay logged in,
+// and opening the app asks for your face or finger first. Nothing biometric ever leaves the phone.
+const LOCK_KEY = "gs-lock";               // { uid, cred } saved on this device only
+const LOCK_AFTER_MS = 60 * 1000;          // re-lock if the app was in the background for a minute
+let locked = false, lockErr = "", bioAvailable = false, hiddenAt = 0;
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+const rand = n => crypto.getRandomValues(new Uint8Array(n));
+function lockInfo(){ try { const v = JSON.parse(localStorage.getItem(LOCK_KEY) || "null"); return v && v.uid === myId ? v : null; } catch(_) { return null; } }
+const bioName = () => device.ios ? (screen.height >= 812 ? "Face ID" : "Touch ID") : device.android ? "fingerprint or face unlock" : "Touch ID / Windows Hello";
+(async () => {
+  try { bioAvailable = !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); }
+  catch(_) { bioAvailable = false; }
+  if (tab === "you" && session) render();
+})();
+
+async function enableLock(){
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: rand(32),
+      rp: { name: "Gym Streak", id: location.hostname },
+      user: { id: new TextEncoder().encode(myId), name: session?.user?.email || "Gym Streak", displayName: me()?.name || "Gym Streak" },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
+      timeout: 60000,
+    }});
+    if (!cred) throw new Error("cancelled");
+    localStorage.setItem(LOCK_KEY, JSON.stringify({ uid: myId, cred: b64u(cred.rawId) }));
+    toast(`${bioName()} lock on`); render();
+  } catch(e){
+    if (e && e.name === "NotAllowedError") toast("Cancelled");
+    else showWarn(`Couldn't turn on ${bioName()}: ${e && e.message ? e.message : e}`);
+  }
+}
+function disableLock(){ try { localStorage.removeItem(LOCK_KEY); } catch(_) {} toast("Lock off"); render(); }
+
+async function unlock(){
+  const info = lockInfo(); if (!info){ locked = false; return render(); }
+  lockErr = "";
+  try {
+    const ok = await navigator.credentials.get({ publicKey: {
+      challenge: rand(32), rpId: location.hostname, timeout: 60000, userVerification: "required",
+      allowCredentials: [{ type: "public-key", id: unb64u(info.cred) }],
+    }});
+    if (ok){ locked = false; render(); return; }
+  } catch(e){
+    lockErr = e && e.name === "NotAllowedError" ? "Didn't work. Try again." : "Couldn't use " + bioName() + ".";
+  }
+  render();
+}
+function viewLock(){
+  $("title").textContent = "Locked";
+  const m = me();
+  main().innerHTML = `<div class="card lockcard">
+    <img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
+    <h2 class="sign">Gym Streak</h2>
+    <p class="note">${m ? esc(m.name) + ", unlock" : "Unlock"} with ${bioName()} to open the app.</p>
+    <button class="cta" id="lk-go">Unlock</button>
+    ${lockErr ? `<p class="err">${esc(lockErr)}</p>` : ""}
+    <button class="linkbtn" id="lk-pass">Use my password instead</button></div>`;
+  $("lk-go").onclick = unlock;
+  // Fallback: sign out and log back in with email + password (also turns the lock off on this device)
+  $("lk-pass").onclick = async () => { try { localStorage.removeItem(LOCK_KEY); } catch(_) {} locked = false; await sb.auth.signOut(); };
+}
+function lockCard(){
+  if (!bioAvailable) return "";
+  const on = !!lockInfo();
+  return `<div class="sec"><h2 class="sign">Security</h2><span class="label">${on ? "On" : "Off"}</span></div>
+  <div class="card"><label class="tg" for="lk-toggle" style="background:transparent;padding:0"><span><b>Lock with ${bioName()}</b>
+    <small>Asks for ${bioName()} when you open the app. You stay logged in either way.</small></span>
+    <input type="checkbox" class="sw" id="lk-toggle" ${on ? "checked" : ""}></label></div>`;
+}
+function wireLockCard(){
+  const t = $("lk-toggle"); if (!t) return;
+  t.onchange = () => { if (t.checked) enableLock(); else disableLock(); };
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") hiddenAt = Date.now();
+  else if (hiddenAt && Date.now() - hiddenAt > LOCK_AFTER_MS && session && lockInfo()){ locked = true; lockErr = ""; render(); }
+});
+
 // ================= Shell =================
 const TITLES = {today:"Today",crew:"Crew",trophies:"Trophies",you:"You"};
 function render(){
@@ -1219,13 +1304,17 @@ function render(){
   $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
-  $("tabbar").hidden = !signedIn || !!ob || gate;
+  $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
   renderOnline();
   if (!sb) return viewSetup();
   if (authMode==="newpass") return viewAuth();
   if (gate) return viewInstall();            // phones in a browser: get it on the Home Screen first
+  // Wait until we KNOW whether you're logged in. Renewing your login can take a few seconds on
+  // gym signal; showing the sign-in form during that made it look like you'd been logged out.
+  if (!authKnown){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="splash"><img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72"><span class="label">Loading…</span></div>`; return; }
   if (!signedIn) return viewAuth();
+  if (locked) return viewLock();
   if (!ready){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="skel">Loading the crew…</div>`; return; }
   if (ob){ $("title").textContent = ob.edit ? "Edit" : "Set up"; viewOnboarding(); return; }
   $("title").textContent = TITLES[tab];
@@ -1234,16 +1323,23 @@ function render(){
 function setTab(t){ tab=t; ob=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
-let sb = null, session = null;
+let sb = null, session = null, authKnown = false;
 (function boot(){
   const cfg = window.GYM_CONFIG || {};
   if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY || !window.supabase){ render(); return; }
-  sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } });
+  sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } });   // keep the default storage key: changing it would log everyone out
+  // Ask the phone to treat our saved data (including your login) as important, so it isn't cleared to save space
+  try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch(_) {}
+  // Safety net: if the login check somehow never answers, stop waiting after 8 s
+  setTimeout(() => { if (!authKnown){ authKnown = true; render(); } }, 8000);
   db = sb;
   sb.auth.onAuthStateChange((event, s) => {
     if (event === "PASSWORD_RECOVERY") authMode = "newpass";
     const was = session?.user?.id;
     session = s; myId = s?.user?.id || null;
+    if (event === "INITIAL_SESSION" && myId && lockInfo()) locked = true;   // Face ID lock on app open
+    if (event === "SIGNED_OUT") locked = false;
+    authKnown = true;
     if (myId && myId !== was){ ready = false; loadAll(); subscribe(); }
     if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); }
     render();
@@ -1254,7 +1350,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "19";   // bump together with version.json on every release
+const APP_VERSION = "20";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
