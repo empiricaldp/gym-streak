@@ -1,4 +1,4 @@
-// push: sends phone notifications (Web Push) for Gym Streak.
+// push: sends phone notifications (Web Push) for CREW.
 //
 // Who calls it:
 //   * the database, straight after a nudge / reaction / today's tick is saved (triggers in 008_notifications.sql)

@@ -1,4 +1,4 @@
-# Gym Streak
+# CREW
 
 A phone-first app for a crew of friends to log gym sessions, keep streaks alive and compete.
 

@@ -1,4 +1,4 @@
-// Gym Streak — the whole app. Screens are drawn from the `members` data; Supabase stores it.
+// CREW (repo: gym-streak) — the whole app. Screens are drawn from the `members` data; Supabase stores it.
 "use strict";
 // ================= Config =================
 const PLATES = [
@@ -734,7 +734,7 @@ async function shareRecap(m){
   x.globalAlpha = .14; x.strokeStyle = plate; x.lineWidth = 90; x.beginPath(); x.arc(W-60, 220, 260, 0, 7); x.stroke();
   x.lineWidth = 16; x.beginPath(); x.arc(W-60, 220, 120, 0, 7); x.stroke(); x.globalAlpha = 1;
   // text
-  x.fillStyle = "#8d9196"; font(700, 34, false); x.fillText(`GYM STREAK · WEEK ${r.weekNo} RECAP`, 90, 140);
+  x.fillStyle = "#8d9196"; font(700, 34, false); x.fillText(`CREW · WEEK ${r.weekNo} RECAP`, 90, 140);
   x.fillText(`${fmt(r.start).toUpperCase()} – ${fmt(r.end).toUpperCase()}`, 90, 190);
   x.fillStyle = "#ececea"; font(900, 120, true); x.fillText((m.name || "").toUpperCase(), 90, 340);
   x.fillStyle = plate; font(900, 96, true); x.fillText(recapHeadline(r).toUpperCase(), 90, 450);
@@ -1198,7 +1198,7 @@ function renderOnline(){
   const el = $("online"); if (!el) return;
   const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown;
   el.hidden = !show; if (!show) return;
-  el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined Gym Streak`);
+  el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
 }
 
@@ -1295,13 +1295,13 @@ function viewInstall(){
   $("title").textContent = "Welcome";
   const link = location.origin + location.pathname;
   const head = `<div class="ihead"><img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
-    <div><span class="label">Gym Streak</span><h2 class="sign">Put it on your Home Screen</h2>
+    <div><span class="label">CREW</span><h2 class="sign">Put it on your Home Screen</h2>
     <p class="note">It takes 10 seconds. Then it opens like a normal app, full screen, and stays logged in.</p></div></div>`;
   const step = (n, title, sub) => `<li class="istep"><span class="inum mono">${n}</span><div><b>${title}</b>${sub ? `<span class="note">${sub}</span>` : ""}</div></li>`;
   let body = "", pointer = false;
 
   if (installed){
-    body = `<ol class="isteps">${step("✓", "Done! It's on your Home Screen", "Close this browser and open <b>Gym Streak</b> from your Home Screen to sign up.")}</ol>`;
+    body = `<ol class="isteps">${step("✓", "Done! It's on your Home Screen", "Close this browser and open <b>CREW</b> from your Home Screen to sign up.")}</ol>`;
   } else if (device.inApp){
     body = `<p class="ilead">You opened this inside another app. Open it in your normal browser to add it:</p>
       <ol class="isteps">
@@ -1315,7 +1315,7 @@ function viewInstall(){
     body = `<ol class="isteps">
         ${step(1, `Tap the Share button ${ICON_SHARE}`, `${device.iphone ? "It's in the bar at the bottom." : "It's at the top of the screen."} Can't see it? Tap ${ICON_DOTS} first.`)}
         ${step(2, `Tap <span class="pill">${ICON_ADD} Add to Home Screen</span>`, "You may need to scroll down a little.")}
-        ${step(3, "Tap <b>Add</b>", "Then open Gym Streak from your Home Screen and sign up there.")}
+        ${step(3, "Tap <b>Add</b>", "Then open CREW from your Home Screen and sign up there.")}
       </ol>`;
   } else if (device.android && installPrompt){
     body = `<button class="cta" id="i-install">Install app</button>
@@ -1324,7 +1324,7 @@ function viewInstall(){
     body = `<ol class="isteps">
         ${step(1, `Tap the menu ${ICON_KEBAB}`, "Top right of your browser.")}
         ${step(2, `Tap <b>Install app</b> or <b>Add to Home screen</b>`, "")}
-        ${step(3, "Open Gym Streak from your Home Screen", "Sign up there.")}
+        ${step(3, "Open CREW from your Home Screen", "Sign up there.")}
       </ol>`;
   }
   main().innerHTML = `<div class="card install">${head}${body}
@@ -1369,8 +1369,8 @@ async function enableLock(){
   try {
     const cred = await navigator.credentials.create({ publicKey: {
       challenge: rand(32),
-      rp: { name: "Gym Streak", id: location.hostname },
-      user: { id: new TextEncoder().encode(myId), name: session?.user?.email || "Gym Streak", displayName: me()?.name || "Gym Streak" },
+      rp: { name: "CREW", id: location.hostname },
+      user: { id: new TextEncoder().encode(myId), name: session?.user?.email || "CREW", displayName: me()?.name || "CREW" },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
       timeout: 60000,
@@ -1404,7 +1404,7 @@ function viewLock(){
   const m = me();
   main().innerHTML = `<div class="card lockcard">
     <img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
-    <h2 class="sign">Gym Streak</h2>
+    <h2 class="sign">CREW</h2>
     <p class="note">${m ? esc(m.name) + ", unlock" : "Unlock"} with ${bioName()} to open the app.</p>
     <button class="cta" id="lk-go">Unlock</button>
     ${lockErr ? `<p class="err">${esc(lockErr)}</p>` : ""}
@@ -1465,13 +1465,13 @@ function showPushSheet(){
   // same wording as the real notifications (supabase/functions/push), using your own split and streak
   const n = dayStreak(m), day = w ? w + " day" : "Gym day", line = n >= 2 ? `Your ${n}-day streak is on the line.` : "Start a streak today.";
   const pn = (title, body, when) => `<div class="pn"><img src="icons/apple-touch-icon.png" alt="" width="34" height="34">
-    <div class="grow"><span class="pn-top"><b>STREAK</b><span>${when}</span></span><b class="pn-t">${esc(title)}</b><span class="pn-b">${esc(body)}</span></div></div>`;
+    <div class="grow"><span class="pn-top"><b>CREW</b><span>${when}</span></span><b class="pn-t">${esc(title)}</b><span class="pn-b">${esc(body)}</span></div></div>`;
   const wrap = document.createElement("div");
   wrap.id = "pushsheet"; wrap.className = "sheetwrap";
   wrap.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ps-title">
     <span class="rec">Recommended</span>
     <h2 class="sign" id="ps-title">Don't miss a nudge</h2>
-    <p class="note">${denied ? "Notifications are blocked for Gym Streak right now. Here's what you're missing:" : "Here's what you'll get. You choose which ones."}</p>
+    <p class="note">${denied ? "Notifications are blocked for CREW right now. Here's what you're missing:" : "Here's what you'll get. You choose which ones."}</p>
     <div class="pns">
       ${pn(`👊 ${friend} nudged you`, `${day} and it's not logged yet. ${line}`, "now")}
       ${pn(`⏰ ${day}: not logged yet`, `${line} Train, then tap to log it.`, "7:00 pm")}
@@ -1479,8 +1479,8 @@ function showPushSheet(){
     </div>
     ${denied
       ? `<ol class="psteps">${device.ios
-          ? "<li>Open the iPhone <b>Settings</b> app</li><li>Tap <b>Notifications</b>, then <b>Streak</b></li><li>Turn on <b>Allow Notifications</b>, then reopen Gym Streak</li>"
-          : "<li>Open your browser or phone settings for this site</li><li>Allow <b>Notifications</b></li><li>Reopen Gym Streak</li>"}</ol>
+          ? "<li>Open the iPhone <b>Settings</b> app</li><li>Tap <b>Notifications</b>, then <b>CREW</b> (or <b>Streak</b> if you added it before the rename)</li><li>Turn on <b>Allow Notifications</b>, then reopen CREW</li>"
+          : "<li>Open your browser or phone settings for this site</li><li>Allow <b>Notifications</b></li><li>Reopen CREW</li>"}</ol>
          <button class="cta" id="ps-ok">Got it</button>`
       : `<button class="cta" id="ps-yes">Turn on notifications</button>`}
     <button class="linkbtn" id="ps-later">Maybe later</button>
@@ -1563,10 +1563,10 @@ const NOTIF_TYPES = [
 function notifCard(){
   const st = pushState();
   const head = `<div class="sec"><h2 class="sign">Notifications</h2><span class="label">${st === "on" ? "On" : "Off"}</span></div>`;
-  if (st === "needs-install") return head + `<div class="card"><p style="margin:0" class="note">On iPhone, notifications only work when Gym Streak is opened from your Home Screen. Add it there, open it from the icon, then come back here.</p></div>`;
+  if (st === "needs-install") return head + `<div class="card"><p style="margin:0" class="note">On iPhone, notifications only work when CREW is opened from your Home Screen. Add it there, open it from the icon, then come back here.</p></div>`;
   if (st === "unsupported") return head + `<div class="card"><p style="margin:0" class="note">This browser can't show notifications. On iPhone you need iOS 16.4 or newer, with the app on your Home Screen.</p></div>`;
   if (st === "denied") return head + `<div class="card"><p style="margin:0" class="note">Notifications are blocked for this app. ${device.ios
-    ? "Open the iPhone <b>Settings</b> app → <b>Notifications</b> → <b>Streak</b> → turn on <b>Allow Notifications</b>, then reopen the app."
+    ? "Open the iPhone <b>Settings</b> app → <b>Notifications</b> → <b>CREW</b> (or <b>Streak</b>) → turn on <b>Allow Notifications</b>, then reopen the app."
     : "Allow them in your browser or phone settings for this site, then reopen the app."}</p></div>`;
   const types = NOTIF_TYPES.map(([k, t, sub]) => `<label class="tg" for="nt-${k}"><span><b>${t}</b><small>${sub}</small></span>
       <input type="checkbox" class="sw" id="nt-${k}" data-nt="${k}" ${notif[k] ? "checked" : ""}></label>`).join("");
@@ -1645,7 +1645,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "28";   // bump together with version.json on every release
+const APP_VERSION = "29";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
