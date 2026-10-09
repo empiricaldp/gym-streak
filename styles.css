@@ -181,7 +181,7 @@ button,input{font:inherit;color:inherit}
 .presets{display:flex;gap:8px;flex-wrap:wrap}
 .dayrow{display:grid;grid-template-columns:44px 1fr auto;gap:8px;align-items:center}
 .dayrow b{font-size:20px}
-.dayrow input[type=text]{border:1.5px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;font-size:15px;font-weight:600;min-width:0;width:100%;outline:none}
+.dayrow input[type=text]{border:1.5px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;font-size:16px;font-weight:600;min-width:0;width:100%;outline:none}
 .dayrow input[type=text]:focus{border-color:var(--iron)}
 .opt{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .stepper{display:flex;align-items:center;gap:16px;justify-content:center}
@@ -393,3 +393,26 @@ button,input{font:inherit;color:inherit}
 .lockcard h2{margin:0;font-size:40px}
 .lockcard .cta{width:100%;max-width:280px}
 @media (prefers-reduced-motion:reduce){.splash .iapp{animation:none}}
+
+
+/* ---------- no accidental zoom ----------
+   "manipulation" turns off iPhone's double-tap-to-zoom, so tapping + quickly just counts up. */
+html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulation}
+
+/* ---------- goals: multi-select ---------- */
+.goal{position:relative;padding-right:34px}
+.gtick{position:absolute;top:9px;right:9px;width:20px;height:20px;border-radius:6px;box-shadow:inset 0 0 0 1.5px var(--line2);display:grid;place-items:center}
+.goal.on .gtick{background:var(--iron);box-shadow:none}
+.gtick svg{width:12px;height:12px;stroke:var(--on-iron)}
+
+/* ---------- "how long?" picker ---------- */
+.dur{display:grid;grid-template-columns:56px 1fr 56px;gap:10px;align-items:center;margin-top:4px}
+.dstep{height:56px;border-radius:16px;border:1.5px solid var(--line2);background:var(--card);font-size:28px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.dstep:active{transform:scale(.94)}
+.dnum{width:100%;min-width:0;height:72px;text-align:center;border:1.5px solid var(--line2);border-radius:16px;background:var(--card);color:var(--fg);
+  font-family:var(--display);font-stretch:62%;font-weight:900;font-size:56px;line-height:1;outline:none;-moz-appearance:textfield;font-variant-numeric:tabular-nums}
+.dnum:focus{border-color:var(--iron)}
+.dnum::-webkit-outer-spin-button,.dnum::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.dunits{margin-top:10px}
+.dprev{margin-top:12px;font-size:14px;line-height:1.4}
+.dprev b{color:var(--fg)}

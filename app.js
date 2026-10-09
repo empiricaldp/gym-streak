@@ -101,7 +101,7 @@ const weekNo = m => weeksDone(m)+1;
 // ================= State =================
 let db = null, members = new Map(), myId = null, ready = false;
 let reactions = [], nudges = [];                      // social bits
-const body = { goal: null, height: null, weights: [] };   // my private body data
+const body = { goals: [], height: null, weights: [], trainedSince: null };   // my private body data
 let tab = "today", weekOffset = 0, trophyFor = null, ob = null; // ob = onboarding draft
 try { tab = localStorage.getItem("gs-tab") || "today"; } catch(e){}
 const me = () => myId ? members.get(myId) : null;
@@ -178,8 +178,8 @@ function quote(m){
               bulk:["Building muscle: eat, lift, sleep, repeat.","Growth needs fuel. Hit your protein."],
               recomp:["Recomp is slow and steady. Keep stacking days.","Lift heavy, eat clean, trust the process."],
               strength:["Stronger every week. Add a little weight.","Strength is a skill. Practise it."],
-              fitness:["Moving every day beats perfect days.","Show up. That's the whole trick."] }[body.goal];
-  if (G) L.push(G);
+              fitness:["Moving every day beats perfect days.","Show up. That's the whole trick."] };
+  for (const g of (body.goals || [])) if (G[g]) L.push(G[g]);
   if (trendLine()) L.push(["Your scale this month", trendLine()]);
   return L[(new Date().getHours()+t.getDate()) % L.length] || L[0];
 }
@@ -244,8 +244,9 @@ function viewToday(){
   if (fo) topHtml += `<div class="card banner freezebanner"><span class="big-emoji">❄️</span><div class="grow"><b>You missed ${DAYS_LONG[dow(fo.day)]}</b>
       <span class="note">Use this month's streak freeze to keep your ${fo.saved}-day streak. One per month.</span></div>
       <button type="button" class="cta" id="freeze-go" style="font-size:16px;padding:10px 14px">Use freeze</button></div>`;
-  if (m.privacyChosen && !body.goal) topHtml += `<div class="card"><span class="label">One quick thing</span>
-      <h2 class="sign" style="margin:4px 0 8px;font-size:28px">What's your goal?</h2>${goalPicker(null)}
+  if (m.privacyChosen && !(body.goals || []).length) topHtml += `<div class="card"><span class="label">One quick thing</span>
+      <h2 class="sign" style="margin:4px 0 8px;font-size:28px">What are your goals?</h2>${goalPicker(goalDraft)}
+      <button class="cta" id="goal-save" style="margin-top:10px" ${goalDraft.length ? "" : "disabled"}>Save</button>
       <p class="note" style="margin-top:8px">Only you see this. It tunes your motivation messages.</p></div>`;
   const recapKey = "gs-recap-" + key(startOfWeek(t));
   let recapSeen = false; try { recapSeen = !!localStorage.getItem(recapKey); } catch(_){}
@@ -276,7 +277,8 @@ function viewToday(){
   $("logbtn").onclick = () => toggleDay(t);
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
   main().querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => { b.disabled = true; sendNudge(b.dataset.nudge); });
-  main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => saveGoal(b.dataset.goal));
+  main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { goalDraft = toggleIn(goalDraft, b.dataset.goal); render(); });
+  if ($("goal-save")) $("goal-save").onclick = async () => { $("goal-save").disabled = true; if (await saveGoals(goalDraft)){ goalDraft = []; toast("Goals saved"); } };
   if ($("nudge-ok")) $("nudge-ok").onclick = dismissNudges;
   if ($("freeze-go")) $("freeze-go").onclick = () => { $("freeze-go").disabled = true; useFreeze(fo.day); };
   if ($("recap-open")) $("recap-open").onclick = () => { try { localStorage.setItem(recapKey, "1"); } catch(_){} recapWhich = "last"; trophyFor = myId; setTab("trophies"); };
@@ -288,7 +290,7 @@ function viewToday(){
   }
   if ($("pv-open")) $("pv-open").onclick = () => setTab("you");
 }
-let pvDraft = null;
+let pvDraft = null, goalDraft = [];
 
 function viewJoin(){
   main().innerHTML = `<div class="view">
@@ -417,7 +419,7 @@ function viewYou(){
     main().innerHTML = `<div class="view">
       <div class="card hero" style="${pc(m)}"><span class="label">${plateName(m.plate)} plate · since ${fmt(parse(m.since))}</span>
         <div class="work sign">${esc(m.name)}</div>
-        <p class="sub">Week ${weekNo(m)} · ${dayStreak(m)} day streak · ${Object.keys(m.days||{}).length} sessions logged</p></div>
+        <p class="sub">Week ${weekNo(m)} · ${dayStreak(m)} day streak · ${Object.keys(m.days||{}).length} sessions logged${body.trainedSince ? ` · lifting since ${parse(body.trainedSince).toLocaleDateString("en-AU",{month:"short",year:"numeric"})}` : ""}</p></div>
       <div class="sec"><h2 class="sign">Your split</h2></div>
       <div class="list">${plan}</div>
       <button class="cta ghost" id="editob">Edit name, plate or split</button>
@@ -455,15 +457,25 @@ const goalLabel = id => GOALS.find(g => g.id === id)?.label || "";
 // Which way the scale should move for each goal (+1 up, -1 down, 0 steady, null = doesn't matter)
 const GOAL_DIR = { lose:-1, cut:-1, maintain:0, bulk:1, recomp:null, strength:null, fitness:null };
 
+// Pick as many as apply (e.g. Build muscle + Get stronger)
 function goalPicker(sel){
-  return `<div class="goals" role="radiogroup" aria-label="Your goal">${GOALS.map(g =>
-    `<button type="button" class="goal ${sel===g.id?"on":""}" data-goal="${g.id}" role="radio" aria-checked="${sel===g.id}">
-      <b>${g.label}</b><span>${g.sub}</span></button>`).join("")}</div>`;
+  sel = sel || [];
+  return `<div class="goals" role="group" aria-label="Your goals">${GOALS.map(g => { const on = sel.includes(g.id);
+    return `<button type="button" class="goal ${on?"on":""}" data-goal="${g.id}" aria-pressed="${on}">
+      <span class="gtick" aria-hidden="true">${on ? CHECK : ""}</span><b>${g.label}</b><span>${g.sub}</span></button>`; }).join("")}</div>
+    <p class="note" style="margin:6px 0 0">Pick as many as you like.</p>`;
 }
-async function saveGoal(goal){
-  const { error } = await sb.from("profiles").update({ goal }).eq("id", myId);
-  if (error){ showWarn("Couldn't save goal: " + error.message); return false; }
-  body.goal = goal; render(); toast(goalLabel(goal)); return true;
+const toggleIn = (arr, id) => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id];
+const goalsText = gs => (gs || []).map(goalLabel).filter(Boolean).join(", ");
+async function saveGoals(goals){
+  const { error } = await sb.from("profiles").update({ goals, goal: goals[0] || null }).eq("id", myId);
+  if (error){ showWarn("Couldn't save goals: " + error.message); return false; }
+  body.goals = goals; render(); return true;
+}
+// Scale direction for your goals combined: only when they all agree (e.g. Lose weight + Cut = down)
+function goalDir(){
+  const dirs = [...new Set((body.goals || []).map(g => GOAL_DIR[g]).filter(d => d !== null && d !== undefined))];
+  return dirs.length === 1 ? dirs[0] : null;
 }
 
 // BMI = weight (kg) / height (m)^2
@@ -495,7 +507,7 @@ function weightChart(){
 // One line about the scale, judged against the goal
 function trendLine(){
   const ch = weightChange(28); if (!ch) return "";
-  const dir = GOAL_DIR[body.goal], sign = ch.kg > 0 ? "+" : "";
+  const dir = goalDir(), sign = ch.kg > 0 ? "+" : "";
   let verdict = "";
   if (dir === -1) verdict = ch.kg < 0 ? "Heading the right way." : "Not moving down yet. Keep at it.";
   if (dir ===  1) verdict = ch.kg > 0 ? "Gaining, right on plan." : "Not moving up yet. Eat a bit more.";
@@ -509,7 +521,7 @@ function bodyCard(){
   return `<div class="sec" id="body"><h2 class="sign">Goal &amp; body</h2><span class="label">${LOCK} Only you see this</span></div>
   <div class="card bodycard">
     <span class="label">Your goal</span>
-    ${goalPicker(body.goal)}
+    ${goalPicker(body.goals)}
     <div class="bodyrow">
       <label class="bfield"><span class="label">Height</span><span class="bin"><input type="number" id="b-height" inputmode="decimal" min="100" max="250" step="0.5" placeholder="178" value="${body.height ?? ""}"><i>cm</i></span></label>
       <label class="bfield"><span class="label">Weight ${loggedToday ? "today" : ""}</span><span class="bin"><input type="number" id="b-kg" inputmode="decimal" min="25" max="350" step="0.1" placeholder="${lw ? lw.kg : "75.0"}" value="${loggedToday ? lw.kg : ""}"><i>kg</i></span></label>
@@ -528,7 +540,7 @@ function bodyCard(){
   </div>`;
 }
 function wireBody(){
-  main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => saveGoal(b.dataset.goal));
+  main().querySelectorAll("[data-goal]").forEach(b => b.onclick = async () => { if (await saveGoals(toggleIn(body.goals, b.dataset.goal))) toast("Goals saved"); });
   const save = $("b-save"); if (!save) return;
   save.onclick = async () => {
     const h = parseFloat($("b-height").value), kg = parseFloat($("b-kg").value);
@@ -800,26 +812,88 @@ function wireHealth(){
   };
 }
 
+
+// ---- "How long?" picker: type a number (or use − / +) and pick Days / Weeks / Months / Years ----
+const UNIT_MAX = { days: 3650, weeks: 520, months: 120, years: 40 };
+const UNIT_ONE = { days: "day", weeks: "week", months: "month", years: "year" };
+const durText = d => d.n === 0 ? "Just starting" : `${d.n} ${d.n === 1 ? UNIT_ONE[d.unit] : d.unit}`;
+// The date that's d before today
+function durStart(d){
+  const t = today(), x = new Date(t);
+  if (d.unit === "days") x.setDate(x.getDate() - d.n);
+  if (d.unit === "weeks") x.setDate(x.getDate() - 7 * d.n);
+  if (d.unit === "months") x.setMonth(x.getMonth() - d.n);
+  if (d.unit === "years") x.setFullYear(x.getFullYear() - d.n);
+  return x;
+}
+// Streak start: weeks/months/years line up with a Monday so whole weeks count; days stay exact.
+// Days in the current week are never pre-filled: you tick those yourself.
+function streakStart(d){
+  const ws = startOfWeek(today());
+  if (d.n === 0) return ws;
+  let x = durStart(d);
+  if (d.unit !== "days") x = d.unit === "weeks" ? addDays(ws, -7 * d.n) : startOfWeek(x);
+  return x < ws ? x : ws;
+}
+function previewMember(){
+  const plan = ob.plan.map((w,i) => { const t = normalizeWorkout(w); return t ? { w: t, opt: !!ob.opt[i] } : null; });
+  return { plan, since: key(streakStart(ob.streak)), trackStart: key(startOfWeek(today())), days: {}, frozen: {} };
+}
+function streakPreview(){
+  const pm = previewMember();
+  let credited = 0;
+  for (let d = parse(pm.since); d < parse(pm.trackStart); d = addDays(d,1)) if (isGym(pm,d)) credited++;
+  if (!credited) return `You'll start fresh on <b>Week 1</b>. Tick this week's sessions once you're in.`;
+  return `You'll start on <b>Week ${weekNo(pm)}</b> with <b>${credited}</b> past session${credited === 1 ? "" : "s"} counted. Tick this week's sessions once you're in.`;
+}
+function expPreview(){
+  if (ob.exp.n === 0) return "Everyone starts somewhere. Welcome.";
+  return `Lifting since about <b>${durStart(ob.exp).toLocaleDateString("en-AU", { month: "long", year: "numeric" })}</b>.`;
+}
+function durPicker(id, d, units){
+  return `<div class="dur">
+      <button type="button" class="dstep" id="${id}-minus" aria-label="Less">−</button>
+      <input class="dnum" id="${id}-n" type="number" inputmode="numeric" pattern="[0-9]*" min="0" max="${UNIT_MAX[d.unit]}" value="${d.n}" aria-label="Number of ${d.unit}">
+      <button type="button" class="dstep" id="${id}-plus" aria-label="More">+</button>
+    </div>
+    <div class="seg dunits" role="group" aria-label="Unit">${units.map(u => `<button type="button" data-unit="${u}" aria-pressed="${d.unit === u}">${u[0].toUpperCase() + u.slice(1)}</button>`).join("")}</div>`;
+}
+function wireDur(id, d, onChange){
+  const inp = $(id + "-n");
+  const set = n => { d.n = Math.max(0, Math.min(UNIT_MAX[d.unit], Math.round(Number(n) || 0))); inp.value = d.n; onChange(); };
+  inp.oninput = () => { if (inp.value !== "") set(inp.value); };
+  inp.onblur = () => set(inp.value);
+  inp.onfocus = () => inp.select();
+  $(id + "-minus").onclick = () => set(d.n - 1);
+  $(id + "-plus").onclick = () => set(d.n + 1);
+  main().querySelectorAll("[data-unit]").forEach(b => b.onclick = () => {
+    d.unit = b.dataset.unit; d.n = Math.min(d.n, UNIT_MAX[d.unit]);
+    main().querySelectorAll("[data-unit]").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.unit === d.unit)));
+    inp.max = UNIT_MAX[d.unit]; inp.value = d.n; inp.setAttribute("aria-label", "Number of " + d.unit); onChange();
+  });
+}
 // ================= Onboarding =================
 function startOnboarding(edit){
   const m = edit ? me() : null;
   ob = { edit, step:0, name: m?.name || "", plate: m?.plate || PLATES[members.size % PLATES.length].id,
-    plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false], weeks: 0,
-    pv: { pub:true, att:true, split:true, steps:false }, goal: body.goal };
+    plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false],
+    exp: { n: 6, unit: "months" },      // how long you've been going to the gym at all
+    streak: { n: 0, unit: "weeks" },    // how long you've been going consistently (sets your streak)
+    pv: { pub:true, att:true, split:true, steps:false }, goals: [...(body.goals || [])] };
   render();
 }
 function viewOnboarding(){
   // Steps by name, so adding a question is just adding a word here
-  const STEPS = ob.edit ? ["name","goal","plate","split","review"] : ["name","goal","plate","split","weeks","privacy","review"];
+  const STEPS = ob.edit ? ["name","goal","plate","split","review"] : ["name","goal","plate","split","experience","streak","privacy","review"];
   const total = STEPS.length, s = ob.step, k = STEPS[s], qn = s + 1;
   const dots = `<div class="steps">${Array.from({length:total},(_,i)=>`<i class="${i<=s?"on":""}"></i>`).join("")}</div>`;
   let body = "", canNext = true;
   if (k==="name"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What should the crew call you?</h2>
       <input class="field" id="f-name" type="text" maxlength="20" placeholder="e.g. DP" value="${esc(ob.name)}" autocomplete="nickname">`;
     canNext = !!ob.name.trim(); }
-  if (k==="goal"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What's your goal?</h2>
-      <p class="note">Only you see this. It tunes your motivation messages and your weight trend.</p>${goalPicker(ob.goal)}`;
-    canNext = !!ob.goal; }
+  if (k==="goal"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What are your goals?</h2>
+      <p class="note">Only you see this. It tunes your motivation messages and your weight trend.</p>${goalPicker(ob.goals)}`;
+    canNext = ob.goals.length > 0; }
   if (k==="plate"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">Pick your plate</h2>
       <p class="note">Your colour across the app. Everyone in the crew gets their own plate.</p>
       <div class="platepick">${PLATES.map(p=>`<button data-plate="${p.id}" aria-pressed="${ob.plate===p.id}" aria-label="${p.name} plate">${plateSvg(p.id, 52)}<small>${p.name}</small></button>`).join("")}</div>`; }
@@ -836,10 +910,14 @@ function viewOnboarding(){
         <div class="trayc">${QUICK.map(q=>`<button type="button" class="chip" data-q="${esc(q)}">${q}</button>`).join("")}
           <button type="button" class="chip ghostchip" data-q="__rest">Rest day</button></div></div>`;
     canNext = ob.plan.some((w,i)=>normalizeWorkout(w) && !ob.opt[i]); }
-  if (k==="weeks"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">How many weeks have you already been going?</h2>
-      <p class="note">Count full weeks in a row before today. They count toward your milestones.</p>
-      <div class="stepper"><button id="w-minus" aria-label="Fewer weeks">−</button><b class="sign" id="w-n">${ob.weeks}</b><button id="w-plus" aria-label="More weeks">+</button></div>
-      <p class="note" style="text-align:center">You'll start on <b>Week ${ob.weeks+1}</b>.</p>`; }
+  if (k==="experience"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">How long have you been going to the gym?</h2>
+      <p class="note">Overall, even with breaks. Only you see this.</p>
+      ${durPicker("exp", ob.exp, ["days","weeks","months","years"])}
+      <p class="note dprev" id="exp-prev">${expPreview()}</p>`; }
+  if (k==="streak"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">How long have you been going consistently?</h2>
+      <p class="note">Without missing your planned gym days. This sets your starting streak, so be honest. 0 is fine.</p>
+      ${durPicker("stk", ob.streak, ["days","weeks","months","years"])}
+      <p class="note dprev" id="stk-prev">${streakPreview()}</p>`; }
   if (k==="privacy"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What can the crew see?</h2>
       <p class="note">You can change this any time in the You tab.</p>${privacyPicker(ob.pv)}`; }
   const last = k === "review";
@@ -847,10 +925,11 @@ function viewOnboarding(){
     body = `<span class="label">Check it</span><h2 class="sign">${ob.edit?"Save changes":"Ready to lift"}</h2>
       <div class="review" style="--c:var(--p-${ob.plate})">
         <div><span>Name</span><b>${esc(ob.name)}</b></div>
-        <div><span>Goal</span><b>${esc(goalLabel(ob.goal) || "Not set")}</b></div>
+        <div><span>Goals</span><b>${esc(goalsText(ob.goals) || "Not set")}</b></div>
         <div><span>Plate</span><b style="display:flex;align-items:center;gap:6px">${plateSvg(ob.plate, 22)}${plateName(ob.plate)}</b></div>
         <div><span>Gym days a week</span><b>${gym}</b></div>
-        ${ob.edit?"":`<div><span>Starting on</span><b>Week ${ob.weeks+1}</b></div>
+        ${ob.edit?"":`<div><span>Gym experience</span><b>${esc(durText(ob.exp))}</b></div>
+          <div><span>Starting on</span><b>Week ${weekNo(previewMember())}</b></div>
           <div><span>Crew sees</span><b>${privacySummary({isPublic:ob.pv.pub, shareAtt:ob.pv.att, shareSplit:ob.pv.split}).replace(/^Private: /,"Private · ")}</b></div>`}
         ${DAYS.map((d,i)=>{ const w = normalizeWorkout(ob.plan[i]); return `<div><span>${d}</span><b>${w?esc(w)+(ob.opt[i]?" (optional)":""):"Rest"}</b></div>`; }).join("")}
       </div>`; }
@@ -858,13 +937,14 @@ function viewOnboarding(){
     <div class="row2"><button class="cta ghost" id="ob-back">${s===0?"Cancel":"Back"}</button>
     <button class="cta" id="ob-next" ${canNext?"":"disabled"}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
   const nextBtn = $("ob-next");
-  const refresh = () => { const ok = k==="name" ? !!ob.name.trim() : k==="goal" ? !!ob.goal : k==="split" ? ob.plan.some((w,i)=>normalizeWorkout(w)&&!ob.opt[i]) : true; nextBtn.disabled = !ok; };
+  const refresh = () => { const ok = k==="name" ? !!ob.name.trim() : k==="goal" ? ob.goals.length > 0 : k==="split" ? ob.plan.some((w,i)=>normalizeWorkout(w)&&!ob.opt[i]) : true; nextBtn.disabled = !ok; };
   if (k==="name"){ const f = $("f-name"); f.oninput = () => { ob.name = f.value; refresh(); }; f.focus(); f.onkeydown = e => { if (e.key==="Enter" && ob.name.trim()) nextBtn.click(); }; }
-  if (k==="goal") main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { ob.goal = b.dataset.goal; render(); });
+  if (k==="goal") main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { ob.goals = toggleIn(ob.goals, b.dataset.goal); render(); });
   if (k==="plate") main().querySelectorAll("[data-plate]").forEach(b => b.onclick = () => { ob.plate = b.dataset.plate; render(); });
   if (k==="split") wireSplitStep(refresh);
   if (k==="privacy") wirePrivacy(ob.pv, render);
-  if (k==="weeks"){ $("w-minus").onclick = () => { ob.weeks = Math.max(0,ob.weeks-1); render(); }; $("w-plus").onclick = () => { ob.weeks = Math.min(260,ob.weeks+1); render(); }; }
+  if (k==="experience") wireDur("exp", ob.exp, () => { $("exp-prev").innerHTML = expPreview(); });
+  if (k==="streak") wireDur("stk", ob.streak, () => { $("stk-prev").innerHTML = streakPreview(); });
   $("ob-back").onclick = () => { if (s===0){ ob = null; } else ob.step--; render(); };
   nextBtn.onclick = () => { if (last) saveOnboarding(); else { ob.step++; render(); } };
 }
@@ -921,8 +1001,10 @@ async function saveOnboarding(){
   const plan = ob.plan.map((w,i)=> { const t = normalizeWorkout(w); return t ? {w:t, opt:!!ob.opt[i]} : null; });
   const old = ob.edit ? me() : null;
   const ws = startOfWeek(today());
-  const row = { id: myId, name: ob.name.trim().slice(0,20), plate: ob.plate, plan, goal: ob.goal || null };
-  if (!old){ row.since = key(addDays(ws,-7*ob.weeks)); row.track_start = key(ws);
+  const row = { id: myId, name: ob.name.trim().slice(0,20), plate: ob.plate, plan, goals: ob.goals, goal: ob.goals[0] || null };
+  if (!old){ row.since = key(streakStart(ob.streak)); row.track_start = key(ws);
+    // you can't have been consistent for longer than you've been going at all
+    const exp = durStart(ob.exp); row.trained_since = key(exp < parse(row.since) ? exp : parse(row.since));
     Object.assign(row, { is_public:ob.pv.pub, share_attendance:ob.pv.att, share_split:ob.pv.split, share_steps:!!ob.pv.steps, privacy_chosen:true }); }
   const wasEdit = ob.edit;
   const btn = $("ob-next"); if (btn) btn.disabled = true;
@@ -930,7 +1012,7 @@ async function saveOnboarding(){
   // and a new row must have a start date, which is why editing used to fail.)
   // Joining: INSERT the full profile.
   const { error } = old
-    ? await sb.from("profiles").update({ name: row.name, plate: row.plate, plan: row.plan, goal: row.goal }).eq("id", myId)
+    ? await sb.from("profiles").update({ name: row.name, plate: row.plate, plan: row.plan, goals: row.goals, goal: row.goal }).eq("id", myId)
     : await sb.from("profiles").insert(row);
   if (error){ if (btn) btn.disabled = false; showWarn("Couldn't save: " + error.message); return; }
   ob = null; tab = "today";
@@ -986,8 +1068,10 @@ async function loadAll(){
       reactions = await fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8)))).catch(() => []);
       nudges = await fetchAll("nudges", "from_user,to_user,day,seen", q => q.gte("day", key(addDays(today(), -1)))).catch(() => []);
       // My private stuff: goal, height and weight log (nobody else can read these)
-      const mine = await sb.from("profiles").select("goal,height_cm").eq("id", myId).maybeSingle();
-      body.goal = mine.data?.goal || null; body.height = mine.data?.height_cm ? Number(mine.data.height_cm) : null;
+      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since").eq("id", myId).maybeSingle();
+      body.goals = mine.data?.goals?.length ? mine.data.goals : (mine.data?.goal ? [mine.data.goal] : []);
+      body.trainedSince = mine.data?.trained_since || null;
+      body.height = mine.data?.height_cm ? Number(mine.data.height_cm) : null;
       body.weights = (await fetchAll("bodyweight", "day,kg", q => q.order("day")).catch(() => [])).map(r => ({ day: r.day, kg: Number(r.kg) }));
       members = next; ready = true; $("warn").hidden = true;
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
@@ -1352,7 +1436,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "22";   // bump together with version.json on every release
+const APP_VERSION = "23";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
