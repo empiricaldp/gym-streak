@@ -522,6 +522,11 @@ function bodyCard(){
   <div class="card bodycard">
     <span class="label">Your goal</span>
     ${goalPicker(body.goals)}
+    <div class="xpbox"><span class="label">Gym experience</span>
+      <p class="note" style="margin:2px 0 0">How long you've been going to the gym, breaks included.</p>
+      ${durPicker("xp", xpDraft(), ["days","weeks","months","years"])}
+      <div class="xprow"><p class="note dprev" id="xp-prev" style="margin:0">${xpPreview()}</p>
+        <button class="cta ghost" id="xp-save" style="font-size:16px;padding:10px 16px">Save</button></div></div>
     <div class="bodyrow">
       <label class="bfield"><span class="label">Height</span><span class="bin"><input type="number" id="b-height" inputmode="decimal" min="100" max="250" step="0.5" placeholder="178" value="${body.height ?? ""}"><i>cm</i></span></label>
       <label class="bfield"><span class="label">Weight ${loggedToday ? "today" : ""}</span><span class="bin"><input type="number" id="b-kg" inputmode="decimal" min="25" max="350" step="0.1" placeholder="${lw ? lw.kg : "75.0"}" value="${loggedToday ? lw.kg : ""}"><i>kg</i></span></label>
@@ -539,7 +544,39 @@ function bodyCard(){
     </details>
   </div>`;
 }
+// ---- Gym experience (You tab) ----
+let xpEdit = null;   // what you're editing; starts from your saved answer
+function xpDraft(){
+  if (xpEdit) return xpEdit;
+  const ts = body.trainedSince ? parse(body.trainedSince) : null;
+  if (!ts) return (xpEdit = { n: 0, unit: "months" });
+  // turn the saved date back into the friendliest unit
+  const t = today(), days = Math.round((t - ts) / 864e5);
+  const months = (t.getFullYear() - ts.getFullYear()) * 12 + (t.getMonth() - ts.getMonth());
+  xpEdit = months >= 24 ? { n: Math.round(months / 12), unit: "years" }
+         : months >= 2  ? { n: months, unit: "months" }
+         : days >= 14   ? { n: Math.round(days / 7), unit: "weeks" }
+         :                { n: days, unit: "days" };
+  return xpEdit;
+}
+function xpPreview(){
+  const d = xpDraft();
+  if (d.n === 0) return body.trainedSince ? "Set to just starting." : "Not set yet.";
+  return `Lifting since about <b>${durStart(d).toLocaleDateString("en-AU", { month: "long", year: "numeric" })}</b>.`;
+}
+async function saveExperience(){
+  const d = xpDraft(), btn = $("xp-save"); if (btn) btn.disabled = true;
+  const trained_since = d.n === 0 ? key(today()) : key(durStart(d));
+  const { error } = await sb.from("profiles").update({ trained_since }).eq("id", myId);
+  if (error){ if (btn) btn.disabled = false; return showWarn("Couldn't save: " + error.message); }
+  body.trainedSince = trained_since; xpEdit = null; toast("Experience saved"); render();
+}
+
 function wireBody(){
+  if ($("xp-n")){
+    wireDur("xp", xpDraft(), () => { $("xp-prev").innerHTML = xpPreview(); });
+    $("xp-save").onclick = saveExperience;
+  }
   main().querySelectorAll("[data-goal]").forEach(b => b.onclick = async () => { if (await saveGoals(toggleIn(body.goals, b.dataset.goal))) toast("Goals saved"); });
   const save = $("b-save"); if (!save) return;
   save.onclick = async () => {
@@ -1436,7 +1473,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "24";   // bump together with version.json on every release
+const APP_VERSION = "25";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

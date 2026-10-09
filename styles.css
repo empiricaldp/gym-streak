@@ -419,3 +419,10 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .dunits button:focus-visible{outline:3px solid var(--iron);outline-offset:2px}
 .dprev{margin-top:12px;font-size:14px;line-height:1.4}
 .dprev b{color:var(--fg)}
+
+/* gym experience box in the You tab */
+.xpbox{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:12px 0}
+.xpbox .dnum{height:60px;font-size:44px}
+.xpbox .dstep{height:48px}
+.xpbox .dur{grid-template-columns:48px 1fr 48px}
+.xprow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:4px}
