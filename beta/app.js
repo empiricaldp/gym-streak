@@ -118,6 +118,11 @@ const isBud = m => !!m && m.iBud === "accepted";                       // I'm th
 const budsCrew = () => statsCrew().filter(o => o.id === myId || isBud(o));
 const requestsIn = () => [...members.values()].filter(m => m.theyBud === "pending");
 const followersOf = () => [...members.values()].filter(m => m.theyBud === "accepted");
+// Terminology: both budded each other = "Buds"; only you → you're "Spotting" them; only them → they're your "Spotter"
+const isMutual = m => !!m && m.iBud === "accepted" && m.theyBud === "accepted";
+const relation = m => isMutual(m) ? "buds" : m?.iBud === "accepted" ? "spotting" : m?.theyBud === "accepted" ? "spotter" : m?.iBud === "pending" ? "requested" : "";
+const counts = () => { const all = [...members.values()].filter(m => m.id !== myId);
+  return { buds: all.filter(isMutual).length, spotting: all.filter(m => relation(m) === "spotting").length, spotters: all.filter(m => relation(m) === "spotter").length }; };
 const everyone = () => [...members.values()].filter(m => m.name && m.id !== myId).sort((a,b) => a.name.localeCompare(b.name));
 // Nudges: buds once a day; a non-bud can nudge a PUBLIC account once ever; never a private non-bud
 const canNudge = o => !!o && o.id !== myId && (isBud(o) ? !nudgedToday(o.id) : (!o.private && !sentNudgeTo.has(o.id)));
@@ -234,7 +239,7 @@ function viewToday(){
   const crew = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o));   // just your buds
   let crewHtml = "";
   if (crew.length){
-    crewHtml = `<div class="sec"><h2 class="sign">Buds today</h2><span class="label">${crew.length} bud${crew.length===1?"":"s"}</span></div><div class="list">` +
+    crewHtml = `<div class="sec"><h2 class="sign">Your crew today</h2><span class="label">${crew.length} ${crew.length===1?"person":"people"}</span></div><div class="list">` +
       crew.map(o=>{
         if (!sharesStats(o)) return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · keeps stats private</span></div><span class="status rest">${LOCK}</span></div>`;
@@ -244,8 +249,8 @@ function viewToday(){
         return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span>${action ? `<span class="rowact">${action}</span>` : ""}</div>
           <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>`;
-  } else crewHtml = `<div class="card"><span class="label">Buds</span><p style="margin:6px 0 0;font-weight:600">Your buds' sessions show up here.</p>
-      <p class="note">Bud your gym mates to see who's trained today and nudge them.</p>
+  } else crewHtml = `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">Your buds' sessions show up here.</p>
+      <p class="note">Bud your gym mates to see who's trained today and nudge them. Bud each other and you're Buds.</p>
       <button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find your buds</button></div>`;
 
   // Existing members get asked once; anyone hidden gets a gentle nudge to share.
@@ -355,7 +360,7 @@ function cellBtn(o,d){
 }
 
 function viewCrew(){
-  const seg = `<div class="seg levelseg crewseg" role="tablist">${[["buds","Buds"],["everyone","Everyone"]].map(([id,l]) =>
+  const seg = `<div class="seg levelseg crewseg" role="tablist">${[["buds","My crew"],["everyone","Everyone"]].map(([id,l]) =>
     `<button type="button" role="tab" data-crewview="${id}" aria-pressed="${crewView===id}">${l}</button>`).join("")}</div>`;
   if (crewView === "everyone"){
     const top = seg + `<input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -365,15 +370,16 @@ function viewCrew(){
     wireFind();
   } else {
     const list = budsCrew();
-    const empty = list.length <= 1 ? `<div class="card"><p style="margin:0;font-weight:600">No buds yet.</p><p class="note">Bud your gym mates to see their weeks and streaks here.</p>
+    const empty = list.length <= 1 ? `<div class="card"><p style="margin:0;font-weight:600">No one here yet.</p><p class="note">Bud your gym mates to see their weeks and streaks here.</p>
       <button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find your buds</button></div>` : "";
-    crewBoard(list, [], seg + empty, { title: "Your buds", weekBoard: list.length > 1 });
+    crewBoard(list, [], seg + empty, { title: "My crew", weekBoard: list.length > 1 });
   }
   main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
 }
 // One row in "Find people": plate, name, streak (or Private), bud button
 function personRow(o){
-  const sub = o.visible && sharesStats(o) ? `${dayStreak(o)} day streak · Week ${weekNo(o)}` : o.private ? `${LOCK} Private` : "Just joined";
+  const rel = relation(o) === "spotter" ? " · Spots you" : relation(o) === "buds" ? " · 🤝 Buds" : "";
+  const sub = (o.visible && sharesStats(o) ? `${dayStreak(o)} day streak · Week ${weekNo(o)}` : o.private ? `${LOCK} Private` : "Just joined") + rel;
   return `<div class="li prow tappable" data-profile="${esc(o.id)}" data-name="${esc(tidyName(o.name).toLowerCase())}" style="${pc(o)}"><span class="dot"></span>
     <div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${sub}</span></div>${budBtn(o)}</div>`;
 }
@@ -473,6 +479,7 @@ function viewTrophies(){
 function viewYou(){
   const m = me();
   if (m && youView === "profile") return viewProfile(true);
+  if (m && youView.startsWith("list:")) return viewPeopleList(youView.slice(5));
   const link = location.origin + location.pathname.replace(/beta\/(index\.html)?$/, "");   // invites always go to the main app
   const invite = `<div class="card"><span class="label">Bring a friend in</span>
     <ol style="margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15px">
@@ -1248,7 +1255,7 @@ async function loadAll(){
       const [profiles, checkins] = await Promise.all([
         // "crew" is a database view that already strips out whatever each person keeps private
         // "people" (database view) = everyone, with only what I'm allowed to see about each person
-        fetchAll("people", "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud"),
+        fetchAll("people", "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters"),
         fetchAll("checkins", "user_id,day")
       ]);
       // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
@@ -1263,7 +1270,7 @@ async function loadAll(){
       const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
       for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
         isPublic:!p.private, shareAtt:p.visible, shareSplit:!p.split_hidden, privacyChosen:true, shareSteps:false,
-        private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud,
+        private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0,
         days:{}, steps:{}, stepsAt:null });
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
@@ -1762,16 +1769,16 @@ function wireNotifCard(){
 // ================= Buds: actions =================
 function budBtn(o){
   if (!o || o.id === myId) return "";
-  if (o.iBud === "accepted") return `<button type="button" class="chip budbtn on" data-unbud="${esc(o.id)}">Buds ✓</button>`;
+  if (o.iBud === "accepted") return `<button type="button" class="chip budbtn on" data-unbud="${esc(o.id)}">${isMutual(o) ? "Buds ✓" : "Spotting ✓"}</button>`;
   if (o.iBud === "pending")  return `<button type="button" class="chip budbtn" data-unbud="${esc(o.id)}">Requested</button>`;
-  return `<button type="button" class="chip budbtn go" data-bud="${esc(o.id)}">${o.private ? "Request" : "Bud"}</button>`;
+  return `<button type="button" class="chip budbtn go" data-bud="${esc(o.id)}">${o.theyBud === "accepted" ? "Bud back" : "Bud"}</button>`;
 }
 async function budUp(id){
   const o = members.get(id); if (!o) return;
   o.iBud = o.private ? "pending" : "accepted"; render();
   const { error } = await sb.from("buds").insert({ follower: myId, followee: id });
   if (error && error.code !== "23505"){ o.iBud = null; render(); return showWarn("Couldn't bud: " + error.message); }
-  toast(o.private ? `Request sent to ${o.name}` : `You and ${o.name} are buds 🤝`);
+  toast(o.private ? `Bud request sent to ${o.name}` : o.theyBud === "accepted" ? `You and ${o.name} are Buds 🤝` : `You're spotting ${o.name}`);
   loadAll();
 }
 async function unBud(id, confirmed){
@@ -1780,7 +1787,7 @@ async function unBud(id, confirmed){
   unbudAsk = null; const was = o.iBud; o.iBud = null; render();
   const { error } = await sb.from("buds").delete().eq("follower", myId).eq("followee", id);
   if (error){ o.iBud = was; render(); return showWarn("Couldn't undo: " + error.message); }
-  toast(was === "pending" ? "Request cancelled" : `Unbudded ${o.name}`); loadAll();
+  toast(was === "pending" ? "Request cancelled" : `Stopped spotting ${o.name}`); loadAll();
 }
 let unbudAsk = null;
 async function answerRequest(id, accept){
@@ -1788,7 +1795,8 @@ async function answerRequest(id, accept){
   const { error } = accept ? await sb.rpc("accept_bud", { p_follower: id })
                            : await sb.from("buds").delete().eq("follower", id).eq("followee", myId);
   if (error) return showWarn("Couldn't save that: " + error.message);
-  toast(accept ? `${nameOf(id)} is now your bud` : "Request declined"); loadAll();
+  const r = members.get(id);
+  toast(!accept ? "Request declined" : r && r.iBud === "accepted" ? `You and ${nameOf(id)} are Buds 🤝` : `${nameOf(id)} is now spotting you`); loadAll();
 }
 async function removeFollower(id){
   const { error } = await sb.from("buds").delete().eq("follower", id).eq("followee", myId);
@@ -1799,7 +1807,7 @@ function openProfile(id){ if (!members.has(id)) return; profileId = id; unbudAsk
 function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); setTimeout(() => $("find-q")?.focus(), 50); }
 // One click handler for the whole app: profiles, bud buttons, requests (works on every screen)
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-bud],[data-unbud],[data-accept],[data-decline],[data-unfollow],[data-pnudge],[data-goto-find],[data-goto-buds],[data-profile],[data-unbud-yes],[data-unbud-no]");
+  const t = e.target.closest("[data-bud],[data-unbud],[data-accept],[data-decline],[data-unfollow],[data-pnudge],[data-goto-find],[data-goto-buds],[data-list],[data-profile],[data-unbud-yes],[data-unbud-no]");
   if (!t || !t.closest("#main, #wn")) return;
   if (t.hasAttribute("data-profile") && (wnActive || e.target.closest("button, input, label, a"))) return;   // a button inside a row does its own thing
   e.stopPropagation();
@@ -1813,6 +1821,7 @@ document.addEventListener("click", e => {
   else if (t.dataset.pnudge){ t.disabled = true; sendNudge(t.dataset.pnudge); }
   else if (t.hasAttribute("data-goto-find")) goFind();
   else if (t.hasAttribute("data-goto-buds")){ crewView = "buds"; setTab("crew"); }
+  else if (t.dataset.list){ youView = "list:" + t.dataset.list; render(); window.scrollTo(0,0); }
   else if (t.dataset.profile) openProfile(t.dataset.profile);
 });
 
@@ -1828,7 +1837,7 @@ function viewProfile(inYou){
     main().innerHTML = `<div class="view">${back}<div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate</span>
       <div class="work sign">${esc(o.name)}</div>
       <p class="sub">${o.private ? "This account is private. Send a bud request to see their week and streak." : "Hasn't logged anything yet."}</p>
-      <div class="pfacts">${budBtn(o)}</div></div></div>`;
+      <div class="pfacts">${budBtn(o)}</div></div>${countsRow(o, false)}</div>`;
     $("pf-back").onclick = () => { profileId = null; render(); }; return;
   }
   const boxes = Array.from({length:7},(_,k)=>{ const d = addDays(ws,k);
@@ -1839,23 +1848,22 @@ function viewProfile(inYou){
     : !self && nudgedToday(o.id) ? `<span class="nudged">👀 Nudged</span>` : "";
   const req = o.theyBud === "pending" ? `<div class="card banner"><span class="big-emoji">🤝</span><div class="grow"><b>${esc(o.name)} wants to be your bud</b>
       <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(o.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(o.id)}">Decline</button></span></div></div>` : "";
-  const ask = unbudAsk === o.id ? `<div class="card banner"><div class="grow"><b>Unbud ${esc(o.name)}?</b><span class="note">${o.private ? "You'll need to request again to see their profile." : "You can bud them again any time."}</span>
-      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-unbud-yes="${esc(o.id)}">Unbud</button><button type="button" class="linkbtn" data-unbud-no>Keep</button></span></div></div>` : "";
+  const ask = unbudAsk === o.id ? `<div class="card banner"><div class="grow"><b>${isMutual(o) ? "Unbud" : "Stop spotting"} ${esc(o.name)}?</b><span class="note">${o.private ? "You'll need to send a bud request again to see their profile." : "You can bud them again any time."}</span>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-unbud-yes="${esc(o.id)}">${isMutual(o) ? "Unbud" : "Stop spotting"}</button><button type="button" class="linkbtn" data-unbud-no>Keep</button></span></div></div>` : "";
   const split = o.plan ? o.plan.map((s,i)=>`<div class="li"><b class="sign" style="font-size:20px;width:44px">${DAYS[i]}</b><span class="grow">${s ? (s.w ? esc(s.w) : '<span class="note">Gym day</span>') : '<span class="note">Rest</span>'}</span>${s?.opt?'<span class="label">Optional</span>':""}</div>`).join("") : "";
   // Your own profile (You tab): requests, bud counts, Edit profile + Settings
   const mine = inYou ? `${requestsIn().map(r => `<div class="card banner"><span class="big-emoji">🤝</span><div class="grow"><b>${esc(r.name)} wants to be your bud</b>
       <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(r.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(r.id)}">Decline</button></span></div></div>`).join("")}` : "";
-  const youBar = inYou ? `<div class="pfcounts"><button type="button" data-goto-buds><b>${budsCrew().length - 1}</b><span>buds</span></button>
-      <span><b>${followersOf().length}</b><span>budded you</span></span>
-      <span><b>${Object.keys(o.days||{}).length}</b><span>sessions</span></span></div>
-    <div class="row2"><button class="cta ghost" id="you-edit" style="font-size:18px">Edit profile</button><button class="cta ghost" id="you-settings" style="font-size:18px">⚙️ Settings</button></div>` : "";
+  const youBar = inYou ? `<div class="row2"><button class="cta ghost" id="you-edit" style="font-size:18px">Edit profile</button><button class="cta ghost" id="you-settings" style="font-size:18px">⚙️ Settings</button></div>` : "";
   main().innerHTML = `<div class="view">${back}${mine}${req}${ask}
     <div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate${self && !inYou ? " · how others see you" : ""}</span>
       <div class="work sign">${esc(o.name)}</div>
+      ${!self && relation(o) ? `<span class="reltag">${({buds:"🤝 Buds", spotting:"You're spotting them", spotter:"Spots you", requested:"Request sent"})[relation(o)]}</span>` : ""}
       <div class="pfweek">${boxes}</div>
       <p class="sub">This week: ${w.hit} of ${w.target} gym days${w.bonus ? ` · +${w.bonus} bonus` : ""}</p>
       ${self ? "" : `<div class="pfacts">${budBtn(o)}${nudge}</div>`}
-      ${!self && o.theyBud === "accepted" && me()?.private ? `<button type="button" class="linkbtn" data-unfollow="${esc(o.id)}" style="padding-left:0">Remove from my buds</button>` : ""}</div>
+      ${!self && o.theyBud === "accepted" && me()?.private ? `<button type="button" class="linkbtn" data-unfollow="${esc(o.id)}" style="padding-left:0">Remove as spotter</button>` : ""}</div>
+    ${countsRow(o, inYou)}
     <div class="tiles" style="${pc(o)}">
       <div class="tile accent"><b class="sign mono-n">${dayStreak(o)}</b><span class="label">Day streak</span></div>
       <div class="tile"><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
@@ -1870,6 +1878,26 @@ function viewProfile(inYou){
               $("you-settings").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); }; }
 }
 
+// Buds · Spotting · Spotters, like Instagram's followers/following. On your own profile they open the lists.
+function countsRow(o, mine){
+  const self = o.id === myId, c = self ? counts() : { buds: o.nBuds, spotting: o.nSpotting, spotters: o.nSpotters };
+  const cell = (k, label) => mine ? `<button type="button" data-list="${k}"><b>${c[k]}</b><span>${label}</span></button>`
+                                  : `<span><b>${c[k]}</b><span>${label}</span></span>`;
+  return `<div class="pfcounts">${cell("buds","buds")}${cell("spotting","spotting")}${cell("spotters","spotters")}</div>`;
+}
+const LISTS = { buds: ["Buds", "You bud each other.", "buds"], spotting: ["Spotting", "You bud them, they haven't budded you back yet.", "spotting"],
+                spotters: ["Spotters", "They bud you. Bud them back to become Buds.", "spotter"] };
+function viewPeopleList(kind){
+  const [title, sub, rel] = LISTS[kind];
+  $("title").textContent = title;
+  const list = everyone().filter(o => relation(o) === rel);
+  main().innerHTML = `<div class="view"><button type="button" class="linkbtn pfback" id="you-back">‹ Profile</button>
+    <p class="note" style="margin:0">${sub}</p>
+    ${list.length ? `<div class="list peoplelist">${list.map(personRow).join("")}</div>`
+      : `<div class="card"><p class="note" style="margin:0">No one here yet.</p><button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find people</button></div>`}</div>`;
+  $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
+}
+
 // ================= What's new (shown once to existing members) =================
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
@@ -1882,7 +1910,7 @@ function viewWhatsNew(){
   if (wnStep === 2) body = `<span class="label">What's new</span><h2 class="sign">Three things</h2>
       <div class="wnlist">
         <div><span>👤</span><p><b>Profiles</b><small>Tap anyone to see their week, streak and trophies.</small></p></div>
-        <div><span>🤝</span><p><b>Buds</b><small>Bud your gym mates. Today now shows just them.</small></p></div>
+        <div><span>🤝</span><p><b>Buds</b><small>Tap Bud on your gym mates. Bud each other and you're Buds. One way, you're spotting them. Today shows just your crew.</small></p></div>
         <div><span>🔍</span><p><b>Find people</b><small>Search the crew and bud them in one tap.</small></p></div>
       </div><button class="cta" id="wn-next">Next</button>`;
   if (wnStep === 3) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
@@ -1962,7 +1990,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b3";   // bump together with version.json on every release
+const APP_VERSION = "b4";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
