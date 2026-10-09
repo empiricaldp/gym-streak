@@ -2,8 +2,8 @@
 -- Before: the table itself allowed ONE nudge per person per day (primary key from_user + to_user + day).
 -- Now each nudge gets its own id, and the limits are rules instead:
 --   Buds (both bud each other) → once every 10 minutes
---   Spotting (one-way bud)     → once a day
---   Live app's old rule        → once a day (unchanged for everyone on the old app)
+--   Spotting (one-way bud)     → no nudges
+--   Live app's old rule        → once a day (kept only until the new version launches)
 
 -- 1. Each nudge is its own row
 alter table public.nudges drop constraint if exists nudges_pkey;
@@ -33,11 +33,7 @@ create policy "send nudges" on public.nudges for insert to authenticated
   with check (auth.uid() = from_user and public.shares_attendance(to_user)
               and day = (now() at time zone 'Australia/Sydney')::date and seen = false
               and not public.nudged_today(auth.uid(), to_user));
-drop policy if exists "nudge my buds" on public.nudges;              -- spotting (one-way): once a day
-create policy "nudge my buds" on public.nudges for insert to authenticated
-  with check (auth.uid() = from_user and public.is_bud(auth.uid(), to_user)
-              and day = (now() at time zone 'Australia/Sydney')::date and seen = false
-              and not public.nudged_today(auth.uid(), to_user));
+drop policy if exists "nudge my buds" on public.nudges;              -- one-way spotting: NO nudges (DP's call: nudges are for Buds)
 drop policy if exists "nudge buds every 10 min" on public.nudges;    -- Buds (both ways): every 10 minutes
 create policy "nudge buds every 10 min" on public.nudges for insert to authenticated
   with check (auth.uid() = from_user and public.is_bud(auth.uid(), to_user) and public.is_bud(to_user, auth.uid())
