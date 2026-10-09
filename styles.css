@@ -426,3 +426,7 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .xpbox .dstep{height:48px}
 .xpbox .dur{grid-template-columns:48px 1fr 48px}
 .xprow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:4px}
+
+/* section headers: let a long label drop under the heading instead of running off-screen */
+.sec{flex-wrap:wrap;gap:4px 12px}
+.sec .label{min-width:0;overflow-wrap:anywhere}
