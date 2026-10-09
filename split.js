@@ -103,21 +103,44 @@
   const QUICK = ["Push", "Pull", "Legs", "Upper Body", "Lower Body", "Full Body", "Chest", "Back", "Shoulders",
     "Arms", "Biceps", "Triceps", "Abs", "Core", "Glutes", "Hamstrings", "Quads", "Calves", "Cardio", "HIIT", "Mobility"];
 
-  // Ready-made weekly splits, Mon..Sun ("" = rest)
-  const PRESETS = {
-    "Push Pull Legs": ["Push", "Pull", "Legs", "Push", "Pull", "Legs", ""],
-    "Classic pairs": ["Chest + Triceps", "Back + Biceps", "Legs + Shoulders", "Chest + Triceps", "Back + Biceps", "Legs + Shoulders", ""],
-    "Upper / Lower": ["Upper Body", "Lower Body", "", "Upper Body", "Lower Body", "", ""],
-    "Upper Lower + PPL": ["Upper Body", "Lower Body", "", "Push", "Pull", "Legs", ""],
-    "Bro split": ["Chest", "Back", "Shoulders", "Arms", "Legs", "", ""],
-    "Arnold split": ["Chest + Back", "Shoulders + Arms", "Legs", "Chest + Back", "Shoulders + Arms", "Legs", ""],
-    "Full body ×3": ["Full Body", "", "Full Body", "", "Full Body", "", ""],
-    "Glute focus": ["Glutes + Hamstrings", "Upper Body", "Quads + Calves", "", "Glutes", "Upper Body", ""],
-    "Strength + cardio": ["Upper Body", "Cardio", "Lower Body", "Cardio", "Full Body", "", ""],
-    "4-day split": ["Chest + Triceps", "Back + Biceps", "", "Shoulders + Abs", "Legs", "", ""],
-  };
+  // Ready-made weekly splits, Mon..Sun ("" = rest), grouped by level for the sign-up screen.
+  // These are the splits most gym-goers actually run; descriptions stay to one short line on purpose.
+  const SPLITS = [
+    { name: "Full Body ×2",       level: "beginner", desc: "Whole body, twice a week. Easiest way to start.",
+      days: ["Full Body", "", "", "Full Body", "", "", ""] },
+    { name: "Full Body ×3",       level: "beginner", desc: "Whole body every session. Great for building the habit.",
+      days: ["Full Body", "", "Full Body", "", "Full Body", "", ""] },
+    { name: "Push Pull Legs ×1",  level: "beginner", desc: "Each muscle group once a week.",
+      days: ["Push", "", "Pull", "", "Legs", "", ""] },
+    { name: "Upper / Lower",      level: "popular",  desc: "Top half, bottom half, twice each.",
+      days: ["Upper Body", "Lower Body", "", "Upper Body", "Lower Body", "", ""] },
+    { name: "Push Pull Legs",     level: "popular",  desc: "The classic. Everything twice a week.",
+      days: ["Push", "Pull", "Legs", "Push", "Pull", "Legs", ""] },
+    { name: "Upper Lower + PPL",  level: "popular",  desc: "Best of both, five days.",
+      days: ["Upper Body", "Lower Body", "", "Push", "Pull", "Legs", ""] },
+    { name: "Bro split",          level: "popular",  desc: "One muscle group a day.",
+      days: ["Chest", "Back", "Shoulders", "Arms", "Legs", "", ""] },
+    { name: "Classic pairs",      level: "popular",  desc: "Muscles that work together, trained together.",
+      days: ["Chest + Triceps", "Back + Biceps", "Legs + Shoulders", "Chest + Triceps", "Back + Biceps", "Legs + Shoulders", ""] },
+    { name: "Glute focus",        level: "popular",  desc: "Extra glute and leg days, upper body twice.",
+      days: ["Glutes + Hamstrings", "Upper Body", "Quads + Calves", "", "Glutes", "Upper Body", ""] },
+    { name: "PHUL",               level: "advanced", desc: "Heavy upper/lower early in the week, volume later.",
+      days: ["Upper Body", "Lower Body", "", "Upper Body", "Lower Body", "", ""] },
+    { name: "PHAT",               level: "advanced", desc: "Power days plus bodybuilding days.",
+      days: ["Upper Body", "Lower Body", "", "Back + Shoulders", "Legs", "Chest + Arms", ""] },
+    { name: "Arnold split",       level: "advanced", desc: "Chest with back, shoulders with arms. Six days.",
+      days: ["Chest + Back", "Shoulders + Arms", "Legs", "Chest + Back", "Shoulders + Arms", "Legs", ""] },
+    { name: "4-day split",        level: "advanced", desc: "Classic bodybuilding pairs over four days.",
+      days: ["Chest + Triceps", "Back + Biceps", "", "Shoulders + Abs", "Legs", "", ""] },
+    { name: "Strength + cardio",  level: "advanced", desc: "Lifting with cardio days in between.",
+      days: ["Upper Body", "Cardio", "Lower Body", "Cardio", "Full Body", "", ""] },
+  ];
+  const PRESETS = Object.fromEntries(SPLITS.map(x => [x.name, x.days]));   // name -> days (older code + tests)
 
-  const api = { normalizeWorkout, QUICK, PRESETS };
+  // The only choices shown when building a day yourself: the basics
+  const BASICS = ["Push", "Pull", "Legs", "Upper Body", "Lower Body", "Full Body", "Chest", "Back", "Shoulders", "Arms", "Cardio"];
+
+  const api = { normalizeWorkout, QUICK, PRESETS, SPLITS, BASICS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;   // for tests in Node
   else Object.assign(root, api);                                               // for the app in the browser
 })(typeof window !== "undefined" ? window : globalThis);

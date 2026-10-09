@@ -22,7 +22,7 @@ const MILESTONES = [
   {n:1,name:"Empty Bar"},{n:2,name:"Warm-Up Set"},{n:4,name:"Iron Month"},{n:6,name:"Six Pack"},
   {n:8,name:"Two Plates"},{n:12,name:"Quarter Grind"},{n:16,name:"Locked In"},{n:26,name:"Half Year"},{n:52,name:"Year of Iron"}
 ];
-// PRESETS, QUICK and normalizeWorkout() come from split.js
+// SPLITS, BASICS, PRESETS and normalizeWorkout() come from split.js
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const DAYS_LONG = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
@@ -968,19 +968,7 @@ function viewOnboarding(){
   if (k==="plate"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">Pick your plate</h2>
       <p class="note">Your colour across the app. Everyone in the crew gets their own plate.</p>
       <div class="platepick">${PLATES.map(p=>`<button data-plate="${p.id}" aria-pressed="${ob.plate===p.id}" aria-label="${p.name} plate">${plateSvg(p.id, 52)}<small>${p.name}</small></button>`).join("")}</div>`; }
-  if (k==="split"){ ob.active = ob.active ?? ob.plan.findIndex(w=>!w.trim()); if (ob.active < 0) ob.active = 0;
-    body = `<span class="label">Question ${qn}</span><h2 class="sign">Your weekly split</h2>
-      <p class="note">Pick a ready-made split, or tap a day and build it with the buttons below it. You can also just type: we'll tidy it up.</p>
-      <div class="presets">${Object.keys(PRESETS).map(k=>`<button class="chip" data-preset="${esc(k)}">${k}</button>`).join("")}</div>
-      <div class="daylist">${DAYS.map((d,i)=>`<div class="dayrow ${ob.active===i?"active":""}" id="row-${i}" data-row="${i}">
-        <b class="sign">${d}</b>
-        <div class="dayin"><input type="text" id="f-day-${i}" data-i="${i}" maxlength="40" placeholder="Rest" value="${esc(ob.plan[i])}" autocapitalize="words" enterkeyhint="next">
-          <small class="tidy" id="tidy-${i}"></small></div>
-        <label class="opt"><input type="checkbox" id="f-opt-${i}" data-o="${i}" ${ob.opt[i]?"checked":""}>Optional</label></div>`).join("")}</div>
-      <div class="quicktray" id="tray"><span class="label" id="tray-label"></span>
-        <div class="trayc">${QUICK.map(q=>`<button type="button" class="chip" data-q="${esc(q)}">${q}</button>`).join("")}
-          <button type="button" class="chip ghostchip" data-q="__rest">Rest day</button></div></div>`;
-    canNext = ob.plan.some((w,i)=>normalizeWorkout(w) && !ob.opt[i]); }
+  if (k==="split"){ body = splitStepHtml(qn); canNext = splitReady(); }
   if (k==="experience"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">How long have you been going to the gym?</h2>
       <p class="note">Overall, even with breaks. Only you see this.</p>
       ${durPicker("exp", ob.exp, ["days","weeks","months","years"])}
@@ -1006,9 +994,9 @@ function viewOnboarding(){
       </div>`; }
   main().innerHTML = `<div class="card ob">${dots}${body}
     <div class="row2"><button class="cta ghost" id="ob-back">${s===0?"Cancel":"Back"}</button>
-    <button class="cta" id="ob-next" ${canNext?"":"disabled"}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
+    <button class="cta" id="ob-next" ${canNext?"":"disabled"} ${k==="split" && (ob.splitMode===null || ob.splitMode==="ready") ? "hidden" : ""}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
   const nextBtn = $("ob-next");
-  const refresh = () => { const ok = k==="name" ? ob.nameState === "ok" : k==="goal" ? ob.goals.length > 0 : k==="split" ? ob.plan.some((w,i)=>normalizeWorkout(w)&&!ob.opt[i]) : true; nextBtn.disabled = !ok; };
+  const refresh = () => { const ok = k==="name" ? ob.nameState === "ok" : k==="goal" ? ob.goals.length > 0 : k==="split" ? splitReady() : true; nextBtn.disabled = !ok; };
   if (k==="name"){
     const f = $("f-name"), msg = $("name-msg");
     const show = (state, text) => { ob.nameState = state; ob.nameMsg = text; msg.textContent = text;
@@ -1033,60 +1021,75 @@ function viewOnboarding(){
   }
   if (k==="goal") main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { ob.goals = toggleIn(ob.goals, b.dataset.goal); render(); });
   if (k==="plate") main().querySelectorAll("[data-plate]").forEach(b => b.onclick = () => { ob.plate = b.dataset.plate; render(); });
-  if (k==="split") wireSplitStep(refresh);
+  if (k==="split") wireSplitStep();
   if (k==="privacy") wirePrivacy(ob.pv, render);
   if (k==="experience") wireDur("exp", ob.exp, () => { $("exp-prev").innerHTML = expPreview(); });
   if (k==="streak") wireDur("stk", ob.streak, () => { $("stk-prev").innerHTML = streakPreview(); });
-  $("ob-back").onclick = () => { if (s===0){ ob = null; } else ob.step--; render(); };
+  $("ob-back").onclick = () => {
+    if (k==="split" && (ob.splitMode === "ready" || ob.splitMode === "custom")){ ob.splitMode = hasPlan() ? "review" : null; render(); return; }
+    if (k==="split" && ob.splitMode === "review" && !ob.edit){ ob.splitMode = null; render(); return; }
+    if (s===0){ ob = null; } else ob.step--; render(); };
   nextBtn.onclick = () => { if (last) saveOnboarding(); else { ob.step++; render(); } };
 }
-// ---- Split step: tap a day, then tap buttons to build it; typing gets tidied ----
-function wireSplitStep(refresh){
-  const tray = $("tray");
-  const parts = i => normalizeWorkout(ob.plan[i]).split(" + ").filter(Boolean);
-  const paint = i => {                       // update one day's input, tidy hint and the button states
-    const inp = $("f-day-"+i), tidy = $("tidy-"+i), clean = normalizeWorkout(ob.plan[i]);
-    if (document.activeElement !== inp) inp.value = clean || "";
-    const typed = ob.plan[i].trim();
-    tidy.textContent = typed && clean !== typed ? (clean ? "→ " + clean : "→ Rest day") : "";
-    if (i === ob.active){
-      const have = parts(i);
-      tray.querySelectorAll("[data-q]").forEach(b => b.setAttribute("aria-pressed", b.dataset.q === "__rest" ? String(!clean) : String(have.includes(b.dataset.q))));
-      $("tray-label").textContent = `Building ${DAYS_LONG[i]}` + (clean ? `: ${clean}` : " (rest)");
-    }
-  };
-  const select = i => {                       // move the button tray under the chosen day
-    ob.active = i;
-    main().querySelectorAll(".dayrow").forEach(r => r.classList.toggle("active", +r.dataset.row === i));
-    $("row-"+i).insertAdjacentElement("afterend", tray);
-    paint(i);
-  };
-  main().querySelectorAll("[data-i]").forEach(inp => {
-    const i = +inp.dataset.i;
-    inp.onfocus = () => { if (ob.active !== i) select(i); };
-    inp.oninput = () => { ob.plan[i] = inp.value; paint(i); refresh(); };
-    inp.onblur  = () => { ob.plan[i] = normalizeWorkout(inp.value); inp.value = ob.plan[i]; paint(i); refresh(); };
-    inp.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); const nx = $("f-day-"+(i+1)); nx ? nx.focus() : inp.blur(); } };
-  });
-  main().querySelectorAll(".dayrow").forEach(r => r.onclick = e => { if (e.target.closest("input,label")) return; select(+r.dataset.row); });
-  main().querySelectorAll("[data-o]").forEach(cb => cb.onchange = () => { ob.opt[+cb.dataset.o] = cb.checked; refresh(); });
-  tray.querySelectorAll("[data-q]").forEach(b => {
-    b.onpointerdown = e => e.preventDefault();         // keep the keyboard from jumping around
-    b.onclick = () => {
-      const i = ob.active, q = b.dataset.q;
-      if (q === "__rest"){ ob.plan[i] = ""; ob.opt[i] = false; $("f-opt-"+i).checked = false; }
-      else { const have = parts(i); ob.plan[i] = (have.includes(q) ? have.filter(x => x !== q) : [...have, q]).join(" + "); }
-      $("f-day-"+i).value = ob.plan[i];
-      paint(i); refresh();
-    };
-  });
-  main().querySelectorAll("[data-preset]").forEach(b => b.onclick = () => {
-    ob.plan = [...PRESETS[b.dataset.preset]]; ob.opt = ob.opt.map(()=>false);
-    for (let i = 0; i < 7; i++){ $("f-day-"+i).value = ob.plan[i]; $("f-opt-"+i).checked = false; paint(i); }
-    refresh(); toast(b.dataset.preset);
-  });
-  for (let i = 0; i < 7; i++) paint(i);
-  select(ob.active);
+// ---- Split step: a simple choice first, then either a ready-made split or building it day by day ----
+//   choose  → "Pick a ready-made split" / "Build my own"
+//   ready   → cards grouped Beginner / Popular / Advanced; one tap picks one
+//   custom  → 7 day rows; tap a day to pick from the basics (or Rest)
+//   review  → your week at a glance, with "Change a day"
+const LEVELS = [["beginner","Beginner"],["popular","Popular"],["advanced","Advanced"]];
+const hasPlan = () => ob.plan.some(w => normalizeWorkout(w));
+const splitReady = () => ob.plan.some((w,i) => normalizeWorkout(w) && !ob.opt[i]) && (ob.splitMode === "review" || ob.splitMode === "custom");
+const shortName = w => w.replace(/Upper Body/g,"Upper").replace(/Lower Body/g,"Lower");
+const gymDays = days => days.filter(Boolean).length;
+const weekStrip = days => `<span class="wstrip">${days.map((w,i)=>`<i class="${w?"on":""}" title="${DAYS[i]}: ${esc(w||"Rest")}">${DAYS[i][0]}</i>`).join("")}</span>`;
+function splitStepHtml(qn){
+  if (ob.splitMode === undefined) ob.splitMode = ob.edit && hasPlan() ? "review" : null;
+  const head = (title, sub) => `<span class="label">Question ${qn}</span><h2 class="sign">${title}</h2>${sub ? `<p class="note">${sub}</p>` : ""}`;
+  if (ob.splitMode === null) return head("Your weekly split") + `
+    <div class="pathpick">
+      <button type="button" class="path" data-path="ready"><span class="rec">Recommended</span><b>Pick a ready-made split</b><small>Popular plans. One tap.</small></button>
+      <button type="button" class="path" data-path="custom"><b>Build my own</b><small>Choose what you train each day.</small></button>
+    </div>`;
+  if (ob.splitMode === "ready"){
+    const lvl = ob.splitLevel || "popular";
+    const cards = SPLITS.filter(x => x.level === lvl).map(x => `<button type="button" class="splitcard" data-split="${esc(x.name)}">
+        <span class="sc-top"><b>${esc(x.name)}</b><span class="sc-days">${gymDays(x.days)} days</span></span>
+        <small>${esc(x.desc)}</small>${weekStrip(x.days)}</button>`).join("");
+    return head("Pick a split") + `<div class="seg levelseg" role="tablist">${LEVELS.map(([id,l]) =>
+        `<button type="button" role="tab" data-level="${id}" aria-pressed="${id===lvl}">${l}</button>`).join("")}</div>
+      <div class="splitcards">${cards}</div>`;
+  }
+  if (ob.splitMode === "custom"){
+    const a = ob.active ?? -1;
+    const rows = DAYS.map((d,i) => { const w = normalizeWorkout(ob.plan[i]), open = a === i, parts = w ? w.split(" + ") : [];
+      return `<div class="crow ${open?"open":""}">
+        <button type="button" class="crow-h" data-day="${i}"><b class="sign">${d}</b><span class="${w?"":"rest"}">${esc(w ? shortName(w) : "Rest")}${ob.opt[i]&&w?' <em>optional</em>':""}</span><i class="chev"></i></button>
+        ${open ? `<div class="crow-b"><div class="basics">${BASICS.map(q => `<button type="button" class="chip" data-basic="${esc(q)}" aria-pressed="${parts.includes(q)}">${esc(shortName(q))}</button>`).join("")}
+            <button type="button" class="chip ghostchip" data-basic="__rest" aria-pressed="${!w}">Rest</button></div>
+          ${w ? `<label class="tg optrow" for="f-opt-${i}"><span><b>Optional day</b><small>Skipping it won't break your streak</small></span><input type="checkbox" class="sw" id="f-opt-${i}" data-o="${i}" ${ob.opt[i]?"checked":""}></label>` : ""}
+        </div>` : ""}</div>`; }).join("");
+    return head("Build your week", "Tap a day. Tap two to combine, like Chest + Arms.") + `<div class="clist">${rows}</div>`;
+  }
+  // review
+  const list = DAYS.map((d,i) => { const w = normalizeWorkout(ob.plan[i]);
+    return `<div class="rv"><b class="sign">${d}</b><span class="${w?"":"rest"}">${esc(w || "Rest")}</span>${w && ob.opt[i] ? '<span class="label">Optional</span>' : ""}</div>`; }).join("");
+  return head("Your week", `${ob.plan.filter((w,i)=>normalizeWorkout(w)&&!ob.opt[i]).length} gym days. Looks right?`) + `<div class="rvlist">${list}</div>
+    <div class="rvlinks"><button type="button" class="linkbtn" data-path="custom">Change a day</button><button type="button" class="linkbtn" data-path="ready">Pick a different split</button></div>`;
+}
+function wireSplitStep(){
+  main().querySelectorAll("[data-path]").forEach(b => b.onclick = () => { ob.splitMode = b.dataset.path; if (ob.splitMode === "custom" && ob.active === undefined) ob.active = 0; render(); });
+  main().querySelectorAll("[data-level]").forEach(b => b.onclick = () => { ob.splitLevel = b.dataset.level; render(); });
+  main().querySelectorAll("[data-split]").forEach(b => b.onclick = () => {
+    const x = SPLITS.find(s => s.name === b.dataset.split); if (!x) return;
+    ob.plan = [...x.days]; ob.opt = ob.opt.map(() => false); ob.splitMode = "review"; render(); window.scrollTo(0,0); });
+  main().querySelectorAll("[data-day]").forEach(b => b.onclick = () => { const i = +b.dataset.day; ob.active = ob.active === i ? -1 : i; render(); });
+  main().querySelectorAll("[data-basic]").forEach(b => b.onclick = () => {
+    const i = ob.active, q = b.dataset.basic; if (i < 0) return;
+    if (q === "__rest"){ ob.plan[i] = ""; ob.opt[i] = false; }
+    else { const have = normalizeWorkout(ob.plan[i]).split(" + ").filter(Boolean);
+      ob.plan[i] = (have.includes(q) ? have.filter(x => x !== q) : [...have, q]).join(" + "); }
+    render(); });
+  main().querySelectorAll("[data-o]").forEach(cb => cb.onchange = () => { ob.opt[+cb.dataset.o] = cb.checked; render(); });
 }
 
 // ---- Name rules: letters (any language), numbers, spaces and . ' - _ only; no emoji; one of each name in the crew ----
@@ -1718,7 +1721,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "33";   // bump together with version.json on every release
+const APP_VERSION = "34";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
