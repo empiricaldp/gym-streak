@@ -3,8 +3,8 @@
 // It caches the app's own files so the app opens instantly and works on a bad connection.
 // Strategy: "network first" for our files (always try for the newest version, fall back to the cache).
 // Database calls to Supabase are never cached, so your data is always live.
-const CACHE = "crew-beta-b7";
-const SHELL = ["./", "index.html", "styles.css?v=b7", "app.js?v=b7", "config.js?v=b7", "split.js?v=b7", "manifest.webmanifest",
+const CACHE = "crew-beta-b8";
+const SHELL = ["./", "index.html", "styles.css?v=b8", "app.js?v=b8", "config.js?v=b8", "split.js?v=b8", "manifest.webmanifest",
                "../icons/icon-192.png", "../icons/icon-512.png", "../icons/apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
@@ -20,7 +20,7 @@ self.addEventListener("push", e => {
   try { d = e.data ? e.data.json() : {}; } catch (_) { d = { body: e.data && e.data.text() }; }
   e.waitUntil(self.registration.showNotification(d.title || "CREW", {
     body: d.body || "", tag: d.tag, renotify: !!d.tag, data: { url: d.url || "./" },
-    icon: "icons/icon-192.png", badge: "icons/icon-192.png",
+    icon: "../icons/icon-192.png", badge: "../icons/icon-192.png",
   }));
 });
 // Tapping a notification: bring the app to the front (or open it)

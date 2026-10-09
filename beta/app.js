@@ -111,6 +111,7 @@ const roster = () => [...members.entries()].map(([id,m])=>({id,...m})).filter(m=
 const sharesStats = m => !!m && (m.id === myId || (m.visible && !!m.since));
 // ---- Buds (stage 1) ----
 const BETA = !!window.GYM_BETA;
+const ICON = (window.GYM_BETA ? "../" : "") + "icons/apple-touch-icon.png";
 let youView = "profile";   // You tab: "profile" | "edit" | "settings"
 let crewView = "buds", profileId = null, findQ = "", sentNudgeTo = new Set(), wnActive = false, wnDone = false, wnStep = 1, wnPv = null;
 try { crewView = localStorage.getItem("gs-crewview") || "buds"; } catch(e){}
@@ -125,17 +126,18 @@ const counts = () => { const all = [...members.values()].filter(m => m.id !== my
   // like Instagram: a Bud also counts in Spotting and in Spotters
   return { buds: all.filter(isMutual).length, spotting: all.filter(m => m.iBud === "accepted").length, spotters: all.filter(m => m.theyBud === "accepted").length }; };
 const everyone = () => [...members.values()].filter(m => m.name && m.id !== myId).sort((a,b) => a.name.localeCompare(b.name));
-// Nudges: buds once a day; a non-bud can nudge a PUBLIC account once ever; never a private non-bud
-// Nudges are for Buds only (both bud each other), once every 10 minutes
+// Nudges: Buds (both bud each other) every 10 minutes; circle-mates once a day; nobody else
 const NUDGE_GAP_MIN = 10;
 const nudgeWait = o => {   // minutes until I can nudge them again (0 = now)
   const last = nudges.filter(n => n.from_user === myId && n.to_user === o.id).map(n => Date.parse(n.created_at || 0)).sort((a,b) => b-a)[0];
   return last ? Math.max(0, Math.ceil(NUDGE_GAP_MIN - (Date.now() - last) / 60000)) : 0; };
-const canNudge = o => !!o && o.id !== myId && isMutual(o) && nudgeWait(o) === 0;
-// the nudge control for a Bud: a button, or "Nudged · 7m" while waiting; nothing for non-Buds
-const nudgeCtl = (o, attr) => !isMutual(o) || o.id === myId ? "" : canNudge(o)
+let circles = [], circleId = null, circleMode = "view", circleDraft = null, pendingJoin = null, joinPreview = null;
+const circleMate = o => !!o && circles.some(c => c.members.some(m => m.user_id === o.id));
+const canNudge = o => !!o && o.id !== myId && (isMutual(o) ? nudgeWait(o) === 0 : circleMate(o) && !nudgedToday(o.id));
+// the nudge control: a button, or "Nudged · 7m" (Buds) / "Nudged today" (circle-mates) while waiting; nothing for anyone else
+const nudgeCtl = (o, attr) => o.id === myId || !(isMutual(o) || circleMate(o)) ? "" : canNudge(o)
   ? `<button type="button" class="${attr === "data-pnudge" ? "chip" : "nudge"}" ${attr}="${esc(o.id)}">👀 Nudge</button>`
-  : `<span class="nudged" data-wait>👀 Nudged · ${nudgeWait(o)}m</span>`;
+  : isMutual(o) ? `<span class="nudged" data-wait>👀 Nudged · ${nudgeWait(o)}m</span>` : `<span class="nudged">👀 Nudged today</span>`;
 const statsCrew = () => roster().filter(sharesStats);
 const quietCrew = () => roster().filter(o => o.id !== myId && !sharesStats(o));
 const workLabel = s => s && s.w ? esc(s.w) : "Gym day";   // split hidden -> just "Gym day"
@@ -324,7 +326,8 @@ function viewToday(){
       <div class="q">Track your steps here<small>Connect Apple Health with a 2-minute Shortcut.</small>
       <button class="linkbtn" id="steps-setup" style="padding-left:0">Set it up</button></div></div>`;
   }
-  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${tiles}${stepsHtml}${q}${crewHtml}</div>`;
+  const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
+  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${tiles}${stepsHtml}${q}${crewHtml}${circleRow}</div>`;
   $("logbtn").onclick = () => toggleDay(t);
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
   main().querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => { b.disabled = true; sendNudge(b.dataset.nudge); });
@@ -370,9 +373,10 @@ function cellBtn(o,d){
 }
 
 function viewCrew(){
-  const seg = `<div class="seg levelseg crewseg" role="tablist">${[["buds","My crew"],["everyone","Everyone"]].map(([id,l]) =>
+  const seg = `<div class="seg levelseg crewseg" role="tablist">${[["buds","My crew"],["circles","Circles"],["everyone","Everyone"]].map(([id,l]) =>
     `<button type="button" role="tab" data-crewview="${id}" aria-pressed="${crewView===id}">${l}</button>`).join("")}</div>`;
-  if (crewView === "everyone"){
+  if (crewView === "circles"){ viewCirclesTab(seg); }
+  else if (crewView === "everyone"){
     const top = seg + `<input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
       <div class="list peoplelist" id="people">${everyone().map(personRow).join("")}</div>
       <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
@@ -402,7 +406,7 @@ function wireFind(){
 }
 function crewBoard(list, quiet, top, opts){
   const t = today(), ws = startOfWeek(t);
-  if (!list.length){ main().innerHTML = `<div class="view">${top}</div>`; return; }
+  if (!list.length){ main().innerHTML = `<div class="view">${top}${opts.bottom || ""}</div>`; return; }
   const quietHtml = quiet.length ? `<div class="sec"><h2 class="sign">Keeping it private</h2><span class="label">${quiet.length}</span></div>
     <div class="list">${quiet.map(o=>`<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
       <span class="note">Not sharing attendance</span></div><span class="status rest">${LOCK}</span></div>`).join("")}</div>` : "";
@@ -451,7 +455,7 @@ function crewBoard(list, quiet, top, opts){
       <button class="navbtn" id="next" aria-label="Next week" ${weekOffset>=0?"disabled":""}>›</button></div>
     <div class="scrollx">${grid}</div>
     <p class="note">Tap your own column to tick a day you forgot, or to undo one.</p>
-    <div class="list">${sums}</div>`}${quietHtml}</div>`;
+    <div class="list">${sums}</div>`}${quietHtml}${opts.bottom || ""}</div>`;
   main().querySelectorAll("[data-sm]").forEach(b => b.onclick = () => { stepsMode = b.dataset.sm; try{localStorage.setItem("gs-steps",stepsMode);}catch(e){} render(); });
   if ($("prev")) $("prev").onclick = () => { weekOffset--; render(); };
   if ($("next")) $("next").onclick = () => { if (weekOffset<0){ weekOffset++; render(); } };
@@ -1285,6 +1289,12 @@ async function loadAll(){
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       // Streak freezes (the database only returns your own + people who share attendance)
+      // Circles I'm in (the database only returns those) and their members
+      const [cRows, cmRows] = await Promise.all([
+        fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at").catch(() => []),
+        fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at").catch(() => [])]);
+      circles = cRows.map(c => ({ ...c, members: cmRows.filter(m => m.circle_id === c.id).sort((a,b) => String(a.joined_at).localeCompare(String(b.joined_at))) }))
+        .sort((a,b) => String(a.created_at).localeCompare(String(b.created_at)));
       const freezeRows = await fetchAll("freezes", "user_id,day").catch(() => []);
       for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
       // Reactions from the last week, nudges to/from me from the last 2 days
@@ -1320,6 +1330,8 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"nudges" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"freezes" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"buds" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"circles" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"circle_members" }, reloadSoon)
     .subscribe();
 }
 
@@ -1478,11 +1490,14 @@ const ICON_KEBAB = '<svg class="gl" viewBox="0 0 24 24" aria-hidden="true"><circ
 function viewInstall(){
   $("title").textContent = "Welcome";
   const link = location.origin + location.pathname;
-  const head = `<div class="ihead"><img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
+  const head = `<div class="ihead"><img class="iapp" src="${ICON}" alt="" width="72" height="72">
     <div><span class="label">CREW</span><h2 class="sign">Put it on your Home Screen</h2>
     <p class="note">It takes 10 seconds. Then it opens like a normal app, full screen, and stays logged in.</p></div></div>`;
   const step = (n, title, sub) => `<li class="istep"><span class="inum mono">${n}</span><div><b>${title}</b>${sub ? `<span class="note">${sub}</span>` : ""}</div></li>`;
   let body = "", pointer = false;
+  const inv = pendingJoin ? `<div class="card invitecode"><b>🎉 You've been invited to a circle</b>
+      <span class="note">Copy this code. After you open CREW from your Home Screen, go to <b>Crew → Circles → Join with code</b>.</span>
+      <span class="codebox mono">${esc(pendingJoin)}</span><button type="button" class="chip" id="inv-copy">Copy code</button></div>` : "";
 
   if (installed){
     body = `<ol class="isteps">${step("✓", "Done! It's on your Home Screen", "Close this browser and open <b>CREW</b> from your Home Screen to sign up.")}</ol>`;
@@ -1511,10 +1526,11 @@ function viewInstall(){
         ${step(3, "Open CREW from your Home Screen", "Sign up there.")}
       </ol>`;
   }
-  main().innerHTML = `<div class="card install">${head}${body}
+  main().innerHTML = `${inv}<div class="card install">${head}${body}
     <button class="linkbtn" id="i-skip">Use it in the browser for now</button></div>
     ${pointer ? `<div class="ipoint" aria-hidden="true"><span>Share is down here</span><svg viewBox="0 0 24 24"><path d="M12 4v15M6 13l6 6 6-6"/></svg></div>` : ""}`;
 
+  const ic = $("inv-copy"); if (ic) ic.onclick = async () => { try { await navigator.clipboard.writeText(pendingJoin); ic.textContent = "Copied ✓"; } catch(_) {} };
   const cp = $("i-copy"); if (cp) cp.onclick = async () => {
     try { await navigator.clipboard.writeText(link); cp.textContent = "Copied ✓"; }
     catch(_) { cp.textContent = link; }
@@ -1587,7 +1603,7 @@ function viewLock(){
   $("title").textContent = "Locked";
   const m = me();
   main().innerHTML = `<div class="card lockcard">
-    <img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
+    <img class="iapp" src="${ICON}" alt="" width="72" height="72">
     <h2 class="sign">CREW</h2>
     <p class="note">${m ? esc(m.name) + ", unlock" : "Unlock"} with ${bioName()} to open the app.</p>
     <button class="cta" id="lk-go">Unlock</button>
@@ -1649,7 +1665,7 @@ function showPushSheet(){
   const denied = pushState() === "denied";
   // same wording as the real notifications (supabase/functions/push), using your own split and streak
   const n = dayStreak(m), day = w ? w + " day" : "Gym day", line = n >= 2 ? `Your ${n}-day streak is on the line.` : "Start a streak today.";
-  const pn = (title, body, when) => `<div class="pn"><img src="icons/apple-touch-icon.png" alt="" width="34" height="34">
+  const pn = (title, body, when) => `<div class="pn"><img src="${ICON}" alt="" width="34" height="34">
     <div class="grow"><span class="pn-top"><b>CREW</b><span class="pn-ex">Example</span></span><b class="pn-t">${esc(title)}</b><span class="pn-b">${esc(body)}</span></div></div>`;
   const wrap = document.createElement("div");
   wrap.id = "pushsheet"; wrap.className = "sheetwrap";
@@ -1775,6 +1791,217 @@ function wireNotifCard(){
   const test = $("nt-test");
   if (test) test.onclick = async () => { test.disabled = true; test.textContent = "Sending…"; await sendTestPush(); test.disabled = false; test.textContent = "Send me a test"; };
 }
+
+// ================= Circles (WhatsApp-style groups) =================
+const CIRCLE_EMOJI = ["🔥","💪","🏋️","⚡","🦍","🌅","🏆","🐺","🚀","🥊","🧠","🍑"];
+const circleOf = id => circles.find(c => c.id === id);
+const amAdmin = c => !!c && c.members.some(m => m.user_id === myId && m.role === "admin");
+const myRow = c => c?.members.find(m => m.user_id === myId);
+const circlePeople = c => c.members.map(m => members.get(m.user_id)).filter(Boolean);
+const trainedToday = c => circlePeople(c).filter(o => sharesStats(o) && has(o, today())).length;
+const inviteLink = c => location.origin + location.pathname.replace(/index\.html$/, "") + "#join=" + c.invite_code;
+function circleCard(c, small){
+  const ppl = circlePeople(c), n = trainedToday(c);
+  return `<button type="button" class="circlecard ${small ? "small" : ""}" data-circle="${esc(c.id)}">
+    <span class="cc-emoji">${esc(c.emoji)}</span>
+    <span class="cc-main"><b>${esc(c.name)}</b><small>${n} of ${ppl.length} trained today</small>
+      <span class="cc-dots">${ppl.slice(0, 12).map(o => `<i style="${pc(o)}" class="${sharesStats(o) && has(o, today()) ? "on" : ""}"></i>`).join("")}</span></span>
+    ${small ? "" : `<i class="chev r"></i>`}</button>`;
+}
+function viewCirclesTab(seg){
+  main().innerHTML = `<div class="view">${seg}
+    ${circles.length ? `<div class="circlelist">${circles.map(c => circleCard(c)).join("")}</div>`
+      : `<div class="card"><p style="margin:0;font-weight:600">No circles yet.</p><p class="note">Make a circle for your gym group, like a WhatsApp group: add people, see who's trained today and nudge each other.</p></div>`}
+    <button class="cta" id="circle-new" style="margin-top:4px">＋ New circle</button>
+    <div class="card joincode"><b>Got an invite?</b><span class="note">Paste the link or code.</span>
+      <div class="joinrow"><input class="field" id="join-q" placeholder="Invite code" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="chip" id="join-go">Join</button></div></div></div>`;
+  $("join-go").onclick = () => { const m = $("join-q").value.match(/([a-f0-9]{10})/i);
+    if (!m) return toast("That code doesn't look right"); pendingJoin = m[1].toLowerCase(); render(); };
+  $("circle-new").onclick = () => { circleDraft = { name: "", emoji: "🔥", picked: new Set() }; circleMode = "new"; circleId = null; render(); window.scrollTo(0,0); };
+  main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
+}
+// People picker with search (used to create a circle and to add people). Buds first.
+function pickerHtml(exclude){
+  const list = everyone().filter(o => !exclude.has(o.id)).sort((a,b) => (isMutual(b) - isMutual(a)) || (b.iBud === "accepted") - (a.iBud === "accepted") || a.name.localeCompare(b.name));
+  return `<input class="field findq" id="find-q" type="search" placeholder="Search people" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="list peoplelist" id="people">${list.map(o => `<button type="button" class="li pickrow ${circleDraft.picked.has(o.id) ? "on" : ""}" data-pick="${esc(o.id)}" data-name="${esc(tidyName(o.name).toLowerCase())}" style="${pc(o)}">
+      <span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${isMutual(o) ? "🤝 Buds" : o.iBud === "accepted" ? "Spotting" : o.private ? `${LOCK} Private` : ""}</span></span><span class="tick">${CHECK}</span></button>`).join("")}</div>
+    <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
+}
+function wirePicker(onChange){
+  wireFind();
+  main().querySelectorAll("[data-pick]").forEach(b => b.onclick = () => {
+    const id = b.dataset.pick; if (circleDraft.picked.has(id)) circleDraft.picked.delete(id); else circleDraft.picked.add(id);
+    b.classList.toggle("on", circleDraft.picked.has(id)); onChange(); });
+}
+function viewCircleRoute(){
+  if (circleMode === "new") return viewCircleNew();
+  const c = circleOf(circleId);
+  if (!c){ circleId = null; circleMode = "view"; return render(); }      // left / removed / deleted
+  if (circleMode === "add") return viewCircleAdd(c);
+  if (circleMode === "edit") return viewCircleEdit(c);
+  return viewCircle(c);
+}
+const backTo = (label, fn) => { const b = `<button type="button" class="linkbtn pfback" id="c-back">‹ ${label}</button>`; setTimeout(() => { if ($("c-back")) $("c-back").onclick = fn; }); return b; };
+function emojiPicker(sel){ return `<div class="emojis">${CIRCLE_EMOJI.map(e => `<button type="button" class="emo ${e === sel ? "on" : ""}" data-emoji="${e}">${e}</button>`).join("")}</div>`; }
+function viewCircleNew(){
+  $("title").textContent = "New circle";
+  const d = circleDraft;
+  main().innerHTML = `<div class="view">${backTo("Circles", () => { circleMode = "view"; circleDraft = null; render(); })}
+    <div class="card ob"><span class="label">Name</span>
+      <input class="field" id="c-name" maxlength="30" placeholder="e.g. Uni gym boys" value="${esc(d.name)}" autocapitalize="words">
+      <span class="label" style="margin-top:12px">Emoji</span>${emojiPicker(d.emoji)}</div>
+    <div class="sec"><h2 class="sign">Add people</h2><span class="label" id="c-count">${d.picked.size} added</span></div>
+    ${pickerHtml(new Set())}
+    <button class="cta" id="c-create" ${d.name.trim() ? "" : "disabled"}>Create circle</button></div>`;
+  const name = $("c-name"), go = $("c-create");
+  name.oninput = () => { d.name = name.value; go.disabled = !d.name.trim(); };
+  main().querySelectorAll("[data-emoji]").forEach(b => b.onclick = () => { d.emoji = b.dataset.emoji; main().querySelectorAll("[data-emoji]").forEach(x => x.classList.toggle("on", x === b)); });
+  wirePicker(() => { $("c-count").textContent = `${d.picked.size} added`; });
+  go.onclick = async () => {
+    go.disabled = true; go.textContent = "Creating…";
+    const { data, error } = await sb.rpc("create_circle", { p_name: d.name.trim(), p_emoji: d.emoji, p_members: [...d.picked] });
+    if (error){ go.disabled = false; go.textContent = "Create circle"; return showWarn("Couldn't create the circle: " + error.message); }
+    circleDraft = null; circleMode = "view"; circleId = data; toast(`${d.emoji} ${d.name.trim()} created`);
+    await loadAll(); window.scrollTo(0,0);
+  };
+}
+function viewCircleAdd(c){
+  $("title").textContent = "Add people";
+  circleDraft = circleDraft || { picked: new Set() };
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+    <p class="note" style="margin:0">They'll be added straight in, like a WhatsApp group. They can leave any time.</p>
+    ${pickerHtml(new Set(c.members.map(m => m.user_id)))}
+    <button class="cta" id="c-add" disabled>Add</button></div>`;
+  const go = $("c-add");
+  wirePicker(() => { go.disabled = !circleDraft.picked.size; go.textContent = circleDraft.picked.size ? `Add ${circleDraft.picked.size}` : "Add"; });
+  go.onclick = async () => {
+    go.disabled = true;
+    const { error } = await sb.rpc("add_to_circle", { p_circle: c.id, p_members: [...circleDraft.picked] });
+    if (error){ go.disabled = false; return showWarn("Couldn't add: " + error.message); }
+    toast(`Added ${circleDraft.picked.size} to ${c.name}`); circleDraft = null; circleMode = "view"; await loadAll();
+  };
+}
+function viewCircleEdit(c){
+  $("title").textContent = "Edit circle";
+  const d = circleDraft = circleDraft || { name: c.name, emoji: c.emoji };
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+    <div class="card ob"><span class="label">Name</span>
+      <input class="field" id="c-name" maxlength="30" value="${esc(d.name)}" autocapitalize="words">
+      <span class="label" style="margin-top:12px">Emoji</span>${emojiPicker(d.emoji)}
+      <button class="cta" id="c-save" style="margin-top:12px">Save</button></div>
+    <div class="card"><b>Invite link</b><p class="note">Resetting makes the old link stop working.</p>
+      <button class="cta ghost" id="c-reset" style="font-size:18px">Reset invite link</button></div></div>`;
+  const name = $("c-name");
+  name.oninput = () => { d.name = name.value; $("c-save").disabled = !d.name.trim(); };
+  main().querySelectorAll("[data-emoji]").forEach(b => b.onclick = () => { d.emoji = b.dataset.emoji; main().querySelectorAll("[data-emoji]").forEach(x => x.classList.toggle("on", x === b)); });
+  $("c-save").onclick = async () => {
+    const { error } = await sb.rpc("edit_circle", { p_circle: c.id, p_name: d.name.trim(), p_emoji: d.emoji });
+    if (error) return showWarn("Couldn't save: " + error.message);
+    toast("Saved"); circleDraft = null; circleMode = "view"; await loadAll(); };
+  $("c-reset").onclick = async () => {
+    const { error } = await sb.rpc("reset_invite", { p_circle: c.id });
+    if (error) return showWarn("Couldn't reset: " + error.message);
+    toast("New invite link made"); await loadAll(); };
+}
+let circleAsk = null;   // "leave" or a user id to remove, waiting for "are you sure?"
+function viewCircle(c){
+  $("title").textContent = "Circle";
+  const t = today(), admin = amAdmin(c), mine = myRow(c);
+  const ppl = circlePeople(c), list = ppl.filter(sharesStats);
+  const todayRows = ppl.map(o => {
+    const st = !sharesStats(o) ? "rest" : isGym(o,t) ? (has(o,t) ? "done" : "todo") : (ticked(o,t) ? "done" : "rest");
+    const act = st === "todo" ? nudgeCtl(o, "data-pnudge") : "";
+    return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}${o.id===myId?'<span class="youtag">YOU</span>':""}</span>
+      <span class="note">${sharesStats(o) ? `${isGym(o,t) ? workLabel(slot(o,t)) : "Rest day"} · ${dayStreak(o)} day streak` : "Hasn't logged yet"}</span>${act ? `<span class="rowact">${act}</span>` : ""}</div>
+      <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("");
+  const ask = circleAsk === "leave" ? `<div class="card banner"><div class="grow"><b>Leave ${esc(c.name)}?</b><span class="note">${admin && c.members.filter(m => m.role === "admin").length === 1 && c.members.length > 1 ? "You're the only admin, so the longest-standing member becomes admin." : "You can rejoin with the invite link."}</span>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" id="c-leave-yes">Leave</button><button type="button" class="linkbtn" id="c-ask-no">Stay</button></span></div></div>`
+    : circleAsk ? `<div class="card banner"><div class="grow"><b>Remove ${esc(nameOf(circleAsk))}?</b>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" id="c-remove-yes">Remove</button><button type="button" class="linkbtn" id="c-ask-no">Cancel</button></span></div></div>` : "";
+  const memberRows = c.members.map(m => { const o = members.get(m.user_id); if (!o) return "";
+    const isMe = m.user_id === myId;
+    const tools = admin && !isMe ? `<span class="mtools"><button type="button" class="linkbtn" data-role="${esc(m.user_id)}" data-to="${m.role === "admin" ? "member" : "admin"}">${m.role === "admin" ? "Remove admin" : "Make admin"}</button>
+      <button type="button" class="linkbtn danger" data-remove="${esc(m.user_id)}">Remove</button></span>` : "";
+    return `<div class="li tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}${isMe ? '<span class="youtag">YOU</span>' : ""}${m.role === "admin" ? '<span class="admintag">Admin</span>' : ""}</span>${tools}</div></div>`; }).join("");
+  const top = `${backTo("Circles", () => { circleId = null; circleAsk = null; crewView = "circles"; render(); })}${ask}
+    <div class="card hero circlehero"><span class="cc-emoji big">${esc(c.emoji)}</span><div class="work sign">${esc(c.name)}</div>
+      <p class="sub">${c.members.length} member${c.members.length===1?"":"s"} · ${trainedToday(c)} trained today</p>
+      <div class="pfacts"><button type="button" class="chip" id="c-invite">🔗 Invite</button>
+        <button type="button" class="chip" id="c-mute">${mine?.muted ? "🔕 Muted" : "🔔 Notifications on"}</button>
+        ${admin ? `<button type="button" class="chip" id="c-edit">⚙️ Edit</button>` : ""}</div></div>
+    <div class="sec"><h2 class="sign">Today</h2><span class="label">${trainedToday(c)}/${ppl.length} done</span></div><div class="list">${todayRows}</div>`;
+  const bottom = `<div class="sec"><h2 class="sign">Members</h2><span class="label">${c.members.length}</span></div>
+    <div class="list">${memberRows}</div>
+    ${admin ? `<button class="cta ghost" id="c-addppl" style="font-size:18px">＋ Add people</button>` : ""}
+    <button class="cta ghost danger" id="c-leave" style="font-size:18px">Leave circle</button>`;
+  crewBoard(list, [], top, { title: "Leaderboard", weekBoard: list.length > 1, bottom });
+  $("title").textContent = "Circle";
+  $("c-invite").onclick = async () => {
+    const url = inviteLink(c), text = `Join my circle ${c.emoji} ${c.name} on CREW! In the app: Crew → Circles → Join with code: ${c.invite_code}`;
+    try { if (navigator.share){ await navigator.share({ title: "CREW", text, url }); return; } } catch(e){ if (e.name === "AbortError") return; }
+    try { await navigator.clipboard.writeText(url); toast("Invite link copied"); } catch(e){ toast("Copy failed"); } };
+  $("c-mute").onclick = async () => {
+    const to = !mine?.muted; if (mine) mine.muted = to; render();
+    const { error } = await sb.rpc("mute_circle", { p_circle: c.id, p_muted: to });
+    if (error){ if (mine) mine.muted = !to; render(); return showWarn("Couldn't change that: " + error.message); }
+    toast(to ? "Circle muted" : "Circle notifications on"); };
+  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
+  if ($("c-addppl")) $("c-addppl").onclick = () => { circleDraft = { picked: new Set() }; circleMode = "add"; render(); window.scrollTo(0,0); };
+  $("c-leave").onclick = () => { circleAsk = "leave"; render(); window.scrollTo(0,0); };
+  if ($("c-ask-no")) $("c-ask-no").onclick = () => { circleAsk = null; render(); };
+  if ($("c-leave-yes")) $("c-leave-yes").onclick = async () => {
+    const { error } = await sb.rpc("leave_circle", { p_circle: c.id });
+    if (error) return showWarn("Couldn't leave: " + error.message);
+    toast(`Left ${c.name}`); circleAsk = null; circleId = null; crewView = "circles"; await loadAll(); };
+  if ($("c-remove-yes")) $("c-remove-yes").onclick = async () => {
+    const who = circleAsk; const { error } = await sb.rpc("remove_from_circle", { p_circle: c.id, p_user: who });
+    if (error) return showWarn("Couldn't remove: " + error.message);
+    toast(`Removed ${nameOf(who)}`); circleAsk = null; await loadAll(); };
+  main().querySelectorAll("[data-remove]").forEach(b => b.onclick = e => { e.stopPropagation(); circleAsk = b.dataset.remove; render(); window.scrollTo(0,0); });
+  main().querySelectorAll("[data-role]").forEach(b => b.onclick = async e => {
+    e.stopPropagation(); const { error } = await sb.rpc("set_circle_role", { p_circle: c.id, p_user: b.dataset.role, p_role: b.dataset.to });
+    if (error) return showWarn(error.message.includes("at least one admin") ? "A circle needs at least one admin." : "Couldn't change that: " + error.message);
+    toast(b.dataset.to === "admin" ? `${nameOf(b.dataset.role)} is now an admin` : `${nameOf(b.dataset.role)} is no longer an admin`); await loadAll(); });
+}
+// Opening an invite link: "Join 🔥 Uni gym boys? 6 members"
+async function checkJoinLink(){
+  const m = location.hash.match(/join=([a-f0-9]{6,20})/i); if (!m) return;
+  pendingJoin = m[1];
+  try { history.replaceState(null, "", location.pathname + location.search); } catch(e){}
+}
+function viewJoinCircle(){
+  $("title").textContent = "Join circle";
+  if (!joinPreview){
+    main().innerHTML = `<div class="skel">Opening invite…</div>`;
+    const code = pendingJoin; pendingJoin = null;
+    sb.rpc("circle_preview", { p_code: code }).then(({ data }) => {
+      joinPreview = data && data[0] ? { ...data[0], code } : { bad: true };
+      if (joinPreview.already){ circleId = joinPreview.id; joinPreview = null; crewView = "circles"; tab = "crew"; }
+      render(); });
+    return;
+  }
+  const j = joinPreview;
+  if (j.bad){ main().innerHTML = `<div class="view"><div class="card"><b>This invite link doesn't work any more.</b><p class="note">Ask for a new link.</p>
+      <button class="cta ghost" id="j-ok" style="margin-top:10px;font-size:18px">OK</button></div></div>`;
+    $("j-ok").onclick = () => { joinPreview = null; render(); }; return; }
+  main().innerHTML = `<div class="view"><div class="card hero circlehero"><span class="label">You're invited</span><span class="cc-emoji big">${esc(j.emoji)}</span>
+      <div class="work sign">${esc(j.name)}</div><p class="sub">${j.members} member${j.members===1?"":"s"}</p>
+      <p class="note">Members see each other's streak, week and split, and can nudge each other once a day.</p>
+      <div class="row2" style="margin-top:12px"><button class="cta ghost" id="j-no" style="font-size:18px">Not now</button><button class="cta" id="j-yes" style="font-size:18px">Join</button></div></div></div>`;
+  $("j-no").onclick = () => { joinPreview = null; render(); };
+  $("j-yes").onclick = async () => {
+    $("j-yes").disabled = true;
+    const { data, error } = await sb.rpc("join_circle", { p_code: j.code });
+    if (error){ $("j-yes").disabled = false; return showWarn("Couldn't join: " + error.message); }
+    joinPreview = null; circleId = data; tab = "crew"; crewView = "circles"; toast(`Joined ${j.emoji} ${j.name}`); await loadAll(); window.scrollTo(0,0); };
+}
+checkJoinLink();
+window.addEventListener("hashchange", () => { checkJoinLink(); if (pendingJoin) render(); });   // link opened while the app is already open
+document.addEventListener("click", e => {          // open a circle from any card
+  const c = e.target.closest("[data-circle]"); if (!c || !c.closest("#main")) return;
+  circleId = c.dataset.circle; circleMode = "view"; circleAsk = null; if (tab !== "crew"){ tab = "crew"; crewView = "circles"; } render(); window.scrollTo(0,0);
+});
 
 // ================= Buds: actions =================
 function budBtn(o){
@@ -1960,18 +2187,20 @@ function render(){
   if (gate) return viewInstall();            // phones in a browser: get it on the Home Screen first
   // Wait until we KNOW whether you're logged in. Renewing your login can take a few seconds on
   // gym signal; showing the sign-in form during that made it look like you'd been logged out.
-  if (!authKnown){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="splash"><img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72"><span class="label">Loading…</span></div>`; return; }
+  if (!authKnown){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="splash"><img class="iapp" src="${ICON}" alt="" width="72" height="72"><span class="label">Loading…</span></div>`; return; }
   if (!signedIn) return viewAuth();
   if (locked) return viewLock();
   if (!ready){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="skel">Loading the crew…</div>`; return; }
   if (ob){ $("title").textContent = ob.edit ? "Edit" : "Set up"; viewOnboarding(); return; }
   if (wnActive) return viewWhatsNew();
   if (profileId) return viewProfile();
+  if (joinPreview || (pendingJoin && me())) return viewJoinCircle();
+  if (circleId || circleMode === "new") return viewCircleRoute();
   $("title").textContent = TITLES[tab];
   ({today:viewToday,crew:viewCrew,trophies:viewTrophies,you:viewYou})[tab]();
   maybeShowPushSheet();
 }
-function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -2001,7 +2230,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b7";   // bump together with version.json on every release
+const APP_VERSION = "b8";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
