@@ -184,7 +184,8 @@ async function onNudge(r: any){
   if (!found.length) return { skipped: "not found" };
   const [from, to] = await Promise.all([people([r.from_user]), people([r.to_user])]);
   if (!from[0] || !to[0]?.notif_nudge) return { skipped: "off" };
-  if (!await firstTime("nudge", r.to_user, r.from_user, r.day)) return { skipped: "dupe" };
+  // each nudge is its own row now (Buds can nudge every 10 min), so dedupe per nudge, not per day
+  if (!await firstTime("nudge", r.to_user, r.from_user + ":" + (r.id ?? r.created_at), r.day)) return { skipped: "dupe" };
   const me = (await contexts([r.to_user])).get(r.to_user)!;
   return send([r.to_user], nudgeNote(from[0].name, me));
 }
