@@ -1277,8 +1277,10 @@ async function fetchAll(table, cols, filter){
   return out;
 }
 let loading = null;
+let editSeq = 0, reloadAgain = false;   // editSeq goes up every time I tick/untick a day
 async function loadAll(){
-  if (loading) return loading;
+  if (loading){ reloadAgain = true; return loading; }   // a change arrived mid-load: load again afterwards
+  const seq0 = editSeq;
   loading = (async () => {
     try {
       const [profiles, checkins] = await Promise.all([
@@ -1326,9 +1328,12 @@ async function loadAll(){
       body.trainedSince = mine.data?.trained_since || null;
       body.height = mine.data?.height_cm ? Number(mine.data.height_cm) : null;
       body.weights = (await fetchAll("bodyweight", "day,kg", q => q.order("day")).catch(() => [])).map(r => ({ day: r.day, kg: Number(r.kg) }));
+      // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
+      // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
+      if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
       members = next; ready = true; $("warn").hidden = true;
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
-    finally { loading = null; render(); loadMemberCount(); }
+    finally { loading = null; render(); loadMemberCount(); if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
   })();
   return loading;
 }
@@ -1354,7 +1359,7 @@ function subscribe(){
 const busy = new Set();
 async function toggleDay(d){
   const m = me(); if (!m || !db) return;
-  const k = key(d); if (busy.has(k)) return; busy.add(k);
+  const k = key(d); if (busy.has(k)) return; busy.add(k); editSeq++;
   const was = !!(m.days && m.days[k]), before = weekStats(m,startOfWeek(d));
   const days = {...(m.days||{})}; if (was) delete days[k]; else days[k] = 1;
   members.set(myId, {...m, days});
@@ -2266,7 +2271,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b11";   // bump together with version.json on every release
+const APP_VERSION = "b12";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
