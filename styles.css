@@ -164,7 +164,7 @@ button,input{font:inherit;color:inherit}
 .ob h2{margin:0;font-size:40px}
 .field{width:100%;border:1.5px solid var(--line2);background:var(--card);border-radius:12px;padding:14px;font-size:18px;font-weight:600;outline:none}
 .field:focus{border-color:var(--iron)}
-.platepick{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px}
+.platepick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .platepick button{border:1.5px solid var(--line);background:var(--card);border-radius:14px;padding:12px 4px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px}
 .platepick button[aria-pressed="true"]{border-color:var(--iron);box-shadow:0 0 0 2px var(--iron)}
 .platepick small{font:700 11px var(--mono);color:var(--muted);letter-spacing:.04em}
