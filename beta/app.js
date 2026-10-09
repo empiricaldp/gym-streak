@@ -1277,6 +1277,12 @@ async function fetchAll(table, cols, filter){
   return out;
 }
 let loading = null;
+// Tell the database which time zone this phone is in, so "today", reminders and nudges use MY day (not Sydney's)
+const phoneTZ = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch(e){ return null; } };
+function saveTimeZone(saved){
+  const tz = phoneTZ();
+  if (tz && saved !== undefined && saved !== tz) sb.from("profiles").update({ tz }).eq("id", myId).then(() => {}, () => {});
+}
 let editSeq = 0, reloadAgain = false;   // editSeq goes up every time I tick/untick a day
 async function loadAll(){
   if (loading){ reloadAgain = true; return loading; }   // a change arrived mid-load: load again afterwards
@@ -1320,7 +1326,8 @@ async function loadAll(){
       // everyone I've ever nudged (non-buds only get one nudge, ever)
       sentNudgeTo = new Set((await fetchAll("nudges", "to_user", q => q.eq("from_user", myId)).catch(() => [])).map(n => n.to_user));
       // My private stuff: goal, height and weight log (nobody else can read these)
-      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,remind_at").eq("id", myId).maybeSingle();
+      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,remind_at,tz").eq("id", myId).maybeSingle();
+      saveTimeZone(mine.data?.tz);
       if (mine.data && "notif_nudge" in mine.data) notif = { nudge: mine.data.notif_nudge, react: mine.data.notif_react, crew: mine.data.notif_crew,
         remind: mine.data.notif_remind, at: String(mine.data.remind_at || "19:00").slice(0,5) };
       syncPush();
@@ -2271,7 +2278,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b12";   // bump together with version.json on every release
+const APP_VERSION = "b13";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
