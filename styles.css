@@ -413,6 +413,9 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
   font-family:var(--display);font-stretch:62%;font-weight:900;font-size:56px;line-height:1;outline:none;-moz-appearance:textfield;font-variant-numeric:tabular-nums}
 .dnum:focus{border-color:var(--iron)}
 .dnum::-webkit-outer-spin-button,.dnum::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.dunits{margin-top:10px}
+.dunits{margin-top:10px;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:4px;border-radius:14px;background:var(--card2);border:1px solid var(--line)}
+.dunits button{border:0;background:transparent;color:var(--muted);border-radius:10px;padding:10px 4px;font:700 14px var(--body);cursor:pointer}
+.dunits button[aria-pressed="true"]{background:var(--iron);color:var(--on-iron)}
+.dunits button:focus-visible{outline:3px solid var(--iron);outline-offset:2px}
 .dprev{margin-top:12px;font-size:14px;line-height:1.4}
 .dprev b{color:var(--fg)}
