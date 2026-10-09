@@ -532,3 +532,8 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .editrow .note{font-size:13px}
 .chev.r{flex:none;transform:rotate(-45deg);margin:0 2px 0 0}
 .editrow+.editrow{border-top:1px solid var(--line)}.editrow:active{background:var(--card2)}
+.buildown{border-style:dashed;background:transparent}
+.rvbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.path.small{padding:12px 14px;border-color:var(--line)}
+.path.small b{font-size:16px}
+.path.small small{font-size:12px}

@@ -1071,7 +1071,9 @@ function splitStepHtml(ql){
         <small>${esc(x.desc)}</small>${weekStrip(x.days)}</button>`).join("");
     return head("Pick a split") + `<div class="seg levelseg" role="tablist">${LEVELS.map(([id,l]) =>
         `<button type="button" role="tab" data-level="${id}" aria-pressed="${id===lvl}">${l}</button>`).join("")}</div>
-      <div class="splitcards">${cards}</div>`;
+      <div class="splitcards">${cards}
+        <button type="button" class="splitcard buildown" data-path="custom"><span class="sc-top"><b>Build my own</b><span class="sc-days">Custom</span></span>
+          <small>None of these fit? Choose what you train each day.</small></button></div>`;
   }
   if (ob.splitMode === "custom"){
     const a = ob.active ?? -1;
@@ -1088,7 +1090,8 @@ function splitStepHtml(ql){
   const list = DAYS.map((d,i) => { const w = normalizeWorkout(ob.plan[i]);
     return `<div class="rv"><b class="sign">${d}</b><span class="${w?"":"rest"}">${esc(w || "Rest")}</span>${w && ob.opt[i] ? '<span class="label">Optional</span>' : ""}</div>`; }).join("");
   return head("Your week", `${ob.plan.filter((w,i)=>normalizeWorkout(w)&&!ob.opt[i]).length} gym days. Looks right?`) + `<div class="rvlist">${list}</div>
-    <div class="rvlinks"><button type="button" class="linkbtn" data-path="custom">Change a day</button><button type="button" class="linkbtn" data-path="ready">Pick a different split</button></div>`;
+    <div class="rvbtns"><button type="button" class="path small" data-path="custom"><b>Build my own</b><small>Change any day</small></button>
+      <button type="button" class="path small" data-path="ready"><b>Ready-made</b><small>Pick a different split</small></button></div>`;
 }
 function wireSplitStep(){
   main().querySelectorAll("[data-path]").forEach(b => b.onclick = () => { ob.splitMode = b.dataset.path; if (ob.splitMode === "custom" && ob.active === undefined) ob.active = 0; render(); });
@@ -1738,7 +1741,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "35";   // bump together with version.json on every release
+const APP_VERSION = "36";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
