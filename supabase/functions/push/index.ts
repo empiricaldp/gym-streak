@@ -15,7 +15,12 @@
 // to that address. Apple then wakes your phone and our service worker shows the notification.
 
 const SB_URL = (globalThis as any).Deno?.env.get("SUPABASE_URL") ?? "";
-const SB_KEY = (globalThis as any).Deno?.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+// (also handy for checking the setup: POST {"type":"ping"} says whether the server key and VAPID keys were found)
+// The server key: newer projects get "sb_secret_…" keys (SUPABASE_SECRET_KEYS), older ones a JWT service-role key.
+const env = (k: string) => (globalThis as any).Deno?.env.get(k) ?? "";
+const SB_KEY = (() => { try { const s = JSON.parse(env("SUPABASE_SECRET_KEYS") || "{}"); return s.default || Object.values(s)[0] || ""; } catch { return ""; } })()
+  || env("SUPABASE_SERVICE_ROLE_KEY");
+const keyHeaders = (): Record<string, string> => SB_KEY.startsWith("eyJ") ? { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } : { apikey: SB_KEY };
 const APP_URL = "https://empiricaldp.github.io/gym-streak/";
 const TZ = "Australia/Sydney";
 
@@ -61,7 +66,7 @@ export async function encrypt(payload: string, p256dh: string, auth: string){
 // ---------- database (service role: this function can see everything, so it's careful what it sends) ----------
 async function rest(path: string, init: RequestInit = {}){
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, { ...init,
-    headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json", ...(init.headers || {}) } });
+    headers: { ...keyHeaders(), "Content-Type": "application/json", ...(init.headers || {}) } });
   if (!r.ok) throw new Error(`${path.split("?")[0]}: ${r.status} ${await r.text()}`);
   return r.status === 204 ? null : r.json();
 }
@@ -166,6 +171,7 @@ export async function handle(req: Request){
     else if (b.type === "checkins") out = await onCheckin(b.record);
     else if (b.type === "reminders") out = await onReminders();
     else if (b.type === "test") out = await onTest(req);
+    else if (b.type === "ping") out = { key: SB_KEY ? SB_KEY.slice(0, 8) + "…" : "missing", vapid: !!(await keys()).priv };
     else out = { error: "unknown type" };
   } catch (e){ console.log(String(e)); out = { error: String(e) }; }
   return new Response(JSON.stringify(out), { headers: { "Content-Type": "application/json", ...CORS } });
