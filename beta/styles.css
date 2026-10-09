@@ -552,7 +552,7 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .budbtn{flex:none;padding:7px 14px;font-size:13px}
 .budbtn.go{background:var(--iron);color:var(--on-iron);border-color:var(--iron)}
 .budbtn.on{background:transparent;color:var(--muted)}
-.pfback{padding:0 0 4px;font-size:16px;text-decoration:none;font-weight:700}
+.pfback{align-self:flex-start;padding:0 0 4px;font-size:16px;text-decoration:none;font-weight:700}
 .pfweek{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:14px 0 4px}
 .pfday{display:flex;flex-direction:column;align-items:center;gap:4px}
 .pfday i{display:block;width:100%;height:26px;border-radius:7px;background:var(--line)}
@@ -574,3 +574,9 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .wnlist b{font-size:17px}
 .wnlist small{font-size:14px;color:var(--muted);line-height:1.35}
 #wn .cta{margin-top:12px}
+/* You tab = your profile: bud counts */
+.pfcounts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pfcounts>*{display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 6px;border-radius:14px;background:var(--card);border:1px solid var(--line);color:var(--fg);font:inherit}
+.pfcounts button{cursor:pointer}
+.pfcounts b{font-family:var(--display);font-stretch:62%;font-weight:900;font-size:30px;line-height:1}
+.pfcounts span span,.pfcounts button span{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}

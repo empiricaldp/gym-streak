@@ -111,6 +111,7 @@ const roster = () => [...members.entries()].map(([id,m])=>({id,...m})).filter(m=
 const sharesStats = m => !!m && (m.id === myId || (m.visible && !!m.since));
 // ---- Buds (stage 1) ----
 const BETA = !!window.GYM_BETA;
+let youView = "profile";   // You tab: "profile" | "edit" | "settings"
 let crewView = "buds", profileId = null, findQ = "", sentNudgeTo = new Set(), wnActive = false, wnDone = false, wnStep = 1, wnPv = null;
 try { crewView = localStorage.getItem("gs-crewview") || "buds"; } catch(e){}
 const isBud = m => !!m && m.iBud === "accepted";                       // I'm their bud (I can see them if private)
@@ -471,7 +472,8 @@ function viewTrophies(){
 
 function viewYou(){
   const m = me();
-  const link = location.origin + location.pathname;
+  if (m && youView === "profile") return viewProfile(true);
+  const link = location.origin + location.pathname.replace(/beta\/(index\.html)?$/, "");   // invites always go to the main app
   const invite = `<div class="card"><span class="label">Bring a friend in</span>
     <ol style="margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15px">
       <li>Send them this link: <b class="mono" style="font-size:13px;word-break:break-all">${esc(link)}</b></li>
@@ -482,34 +484,33 @@ function viewYou(){
     <button class="cta ghost" id="logout">Log out</button>`;
   if (!m){ main().innerHTML = `<div class="view"><div class="card"><p style="margin:0;font-weight:600">You haven't set up your plan yet.</p><p class="note">Go to Today and tap Get started.</p></div>${invite}${acct}</div>`; }
   else {
-    const plan = m.plan.map((s,i)=>`<div class="li"><b class="sign" style="font-size:20px;width:44px">${DAYS[i]}</b><span class="grow">${s?esc(s.w):'<span class="note">Rest</span>'}</span>${s?.opt?'<span class="label">Optional</span>':""}</div>`).join("");
-    main().innerHTML = `<div class="view">
-      <div class="card hero" style="${pc(m)}"><span class="label">${plateName(m.plate)} plate · since ${fmt(parse(m.since))}</span>
-        <div class="work sign">${esc(m.name)}</div>
-        <p class="sub">Week ${weekNo(m)} · ${dayStreak(m)} day streak · ${Object.keys(m.days||{}).length} sessions logged${body.trainedSince ? ` · lifting since ${parse(body.trainedSince).toLocaleDateString("en-AU",{month:"short",year:"numeric"})}` : ""}</p></div>
-      <div class="sec"><h2 class="sign">Profile</h2></div>
+    const backBtn = `<button type="button" class="linkbtn pfback" id="you-back">‹ Profile</button>`;
+    if (youView === "edit"){
+      $("title").textContent = "Edit profile";
+      main().innerHTML = `<div class="view">${backBtn}
       <div class="list editrows">
         <button type="button" class="li editrow" data-edit="name"><span class="grow"><span class="label">Name</span><b>${esc(m.name)}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
         <button type="button" class="li editrow" data-edit="plate"><span class="grow"><span class="label">Plate colour</span><b style="display:flex;align-items:center;gap:8px">${plateSvg(m.plate, 22)}${plateName(m.plate)}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
         <button type="button" class="li editrow" data-edit="split"><span class="grow"><span class="label">Split</span><b>${esc(splitLabel(m))}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
       </div>
-      <div class="sec"><h2 class="sign">Your split</h2></div>
-      <div class="list">${plan}</div>
-      ${bodyCard()}
-      <div class="sec"><h2 class="sign">Buds</h2><span class="label">${budsCrew().length - 1} buds · ${followersOf().length} budded you</span></div>
-      ${requestsIn().length ? `<div class="list">${requestsIn().map(r => `<div class="li" style="${pc(r)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(r.name)}</span><span class="note">wants to be your bud</span></div>
-        <button type="button" class="chip" data-accept="${esc(r.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(r.id)}">Decline</button></div>`).join("")}</div>` : ""}
-      <div class="row2"><button class="cta ghost" data-goto-find style="font-size:18px">Find people</button><button class="cta ghost" id="my-profile" style="font-size:18px">View my profile</button></div>
-      <div class="sec"><h2 class="sign">Account</h2><span class="label">${privacySummary(m)}</span></div>
+      <p class="note" style="text-align:center">Goals, height and weight are in ⚙️ Settings → Goal &amp; body.</p></div>`;
+      main().querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(true, b.dataset.edit));
+      $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
+      return;
+    }
+    $("title").textContent = "Settings";
+    main().innerHTML = `<div class="view">${backBtn}
+      <div class="sec" style="margin-top:0"><h2 class="sign">Account</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
+      ${bodyCard()}
       ${STEPS_ENABLED ? healthCard(m) : ""}
       ${notifCard()}
       ${lockCard()}
+      <div class="sec"><h2 class="sign">Invite</h2></div>
       ${invite}${acct}</div>`;
+    $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
     wireNotifCard();
     wireHealth();
-    main().querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(true, b.dataset.edit));
-    $("my-profile").onclick = () => openProfile(myId);
     wireBody();
     wireLockCard();
     const p = pvFrom(m);
@@ -1798,7 +1799,7 @@ function openProfile(id){ if (!members.has(id)) return; profileId = id; unbudAsk
 function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); setTimeout(() => $("find-q")?.focus(), 50); }
 // One click handler for the whole app: profiles, bud buttons, requests (works on every screen)
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-bud],[data-unbud],[data-accept],[data-decline],[data-unfollow],[data-pnudge],[data-goto-find],[data-profile],[data-unbud-yes],[data-unbud-no]");
+  const t = e.target.closest("[data-bud],[data-unbud],[data-accept],[data-decline],[data-unfollow],[data-pnudge],[data-goto-find],[data-goto-buds],[data-profile],[data-unbud-yes],[data-unbud-no]");
   if (!t || !t.closest("#main, #wn")) return;
   if (t.hasAttribute("data-profile") && (wnActive || e.target.closest("button, input, label, a"))) return;   // a button inside a row does its own thing
   e.stopPropagation();
@@ -1811,15 +1812,17 @@ document.addEventListener("click", e => {
   else if (t.dataset.unfollow) removeFollower(t.dataset.unfollow);
   else if (t.dataset.pnudge){ t.disabled = true; sendNudge(t.dataset.pnudge); }
   else if (t.hasAttribute("data-goto-find")) goFind();
+  else if (t.hasAttribute("data-goto-buds")){ crewView = "buds"; setTab("crew"); }
   else if (t.dataset.profile) openProfile(t.dataset.profile);
 });
 
 // ================= Profile =================
-function viewProfile(){
-  const o = members.get(profileId); if (!o){ profileId = null; return render(); }
+// inYou = the You tab (your own profile, with Edit profile + Settings); otherwise someone you tapped
+function viewProfile(inYou){
+  const o = members.get(inYou ? myId : profileId); if (!o){ profileId = null; return render(); }
   const self = o.id === myId, t = today(), ws = startOfWeek(t);
-  $("title").textContent = self ? "Your profile" : "Profile";
-  const back = `<button type="button" class="linkbtn pfback" id="pf-back">‹ Back</button>`;
+  $("title").textContent = inYou ? "You" : self ? "Your profile" : "Profile";
+  const back = inYou ? "" : `<button type="button" class="linkbtn pfback" id="pf-back">‹ Back</button>`;
   const badge = o.private ? `${LOCK} Private` : "Public";
   if (!o.visible || !sharesStats(o)){
     main().innerHTML = `<div class="view">${back}<div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate</span>
@@ -1839,8 +1842,15 @@ function viewProfile(){
   const ask = unbudAsk === o.id ? `<div class="card banner"><div class="grow"><b>Unbud ${esc(o.name)}?</b><span class="note">${o.private ? "You'll need to request again to see their profile." : "You can bud them again any time."}</span>
       <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-unbud-yes="${esc(o.id)}">Unbud</button><button type="button" class="linkbtn" data-unbud-no>Keep</button></span></div></div>` : "";
   const split = o.plan ? o.plan.map((s,i)=>`<div class="li"><b class="sign" style="font-size:20px;width:44px">${DAYS[i]}</b><span class="grow">${s ? (s.w ? esc(s.w) : '<span class="note">Gym day</span>') : '<span class="note">Rest</span>'}</span>${s?.opt?'<span class="label">Optional</span>':""}</div>`).join("") : "";
-  main().innerHTML = `<div class="view">${back}${req}${ask}
-    <div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate${self ? " · how others see you" : ""}</span>
+  // Your own profile (You tab): requests, bud counts, Edit profile + Settings
+  const mine = inYou ? `${requestsIn().map(r => `<div class="card banner"><span class="big-emoji">🤝</span><div class="grow"><b>${esc(r.name)} wants to be your bud</b>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(r.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(r.id)}">Decline</button></span></div></div>`).join("")}` : "";
+  const youBar = inYou ? `<div class="pfcounts"><button type="button" data-goto-buds><b>${budsCrew().length - 1}</b><span>buds</span></button>
+      <span><b>${followersOf().length}</b><span>budded you</span></span>
+      <span><b>${Object.keys(o.days||{}).length}</b><span>sessions</span></span></div>
+    <div class="row2"><button class="cta ghost" id="you-edit" style="font-size:18px">Edit profile</button><button class="cta ghost" id="you-settings" style="font-size:18px">⚙️ Settings</button></div>` : "";
+  main().innerHTML = `<div class="view">${back}${mine}${req}${ask}
+    <div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate${self && !inYou ? " · how others see you" : ""}</span>
       <div class="work sign">${esc(o.name)}</div>
       <div class="pfweek">${boxes}</div>
       <p class="sub">This week: ${w.hit} of ${w.target} gym days${w.bonus ? ` · +${w.bonus} bonus` : ""}</p>
@@ -1850,11 +1860,14 @@ function viewProfile(){
       <div class="tile accent"><b class="sign mono-n">${dayStreak(o)}</b><span class="label">Day streak</span></div>
       <div class="tile"><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
       <div class="tile"><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
+    ${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
     <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
     ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}</div>`;
-  $("pf-back").onclick = () => { profileId = null; render(); };
+  if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
   $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
+  if (inYou){ $("you-edit").onclick = () => { youView = "edit"; render(); window.scrollTo(0,0); };
+              $("you-settings").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); }; }
 }
 
 // ================= What's new (shown once to existing members) =================
@@ -1919,7 +1932,7 @@ function render(){
   ({today:viewToday,crew:viewCrew,trophies:viewTrophies,you:viewYou})[tab]();
   maybeShowPushSheet();
 }
-function setTab(t){ tab=t; ob=null; profileId=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -1949,7 +1962,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b1";   // bump together with version.json on every release
+const APP_VERSION = "b2";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
