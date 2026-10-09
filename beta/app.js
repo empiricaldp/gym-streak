@@ -894,11 +894,26 @@ function wirePrivacy(p, onChange){
   const h = $("pv-hide"); if (h) h.onchange = () => { p.hide = h.checked; onChange(); };
 }
 const pvFrom = m => ({ priv: !!m?.private, hide: !!m?.splitHidden });
+// Phone signal drops show up as "TypeError: Load failed" (Safari) / "Failed to fetch" (Chrome): the request may or may not have landed.
+const netErr = e => /load failed|failed to fetch|networkerror|network request failed|network connection was lost/i.test(String(e?.message || e || ""));
+async function retryNet(run){            // for saves that are safe to repeat: try once more after a blip
+  let r = await run();
+  if (r.error && netErr(r.error)){ await new Promise(ok => setTimeout(ok, 900)); r = await run(); }
+  return r;
+}
 // Saves the new settings AND the old ones, so the live (pre-buds) app stays consistent during the beta
 async function savePrivacy(p, extra = {}){
-  const { error } = await sb.from("profiles").update({ account: p.priv ? "private" : "public", hide_split: !!p.hide,
-    is_public: !p.priv, share_attendance: !p.priv, share_split: !p.hide, privacy_chosen: true, ...extra }).eq("id", myId);
-  if (error){ showWarn("Couldn't save privacy: " + error.message); return false; }
+  const row = { account: p.priv ? "private" : "public", hide_split: !!p.hide,
+    is_public: !p.priv, share_attendance: !p.priv, share_split: !p.hide, privacy_chosen: true, ...extra };
+  let { error } = await retryNet(() => sb.from("profiles").update(row).eq("id", myId));
+  if (error && netErr(error)){
+    // the reply got lost: check whether the save actually landed before calling it a failure
+    const chk = await sb.from("profiles").select("account,hide_split,seen_update").eq("id", myId).maybeSingle().catch(() => ({}));
+    const d = chk?.data;
+    if (d && d.account === row.account && d.hide_split === row.hide_split && (extra.seen_update == null || d.seen_update === extra.seen_update)) error = null;
+  }
+  if (error){ showWarn(netErr(error) ? "Connection dropped. Check your signal and tap Continue again." : "Couldn't save privacy: " + error.message); return false; }
+  $("warn").hidden = true;
   await loadAll(); return true;
 }
 const privacySummary = m => (m.private ? "Private" : "Public") + (m.splitHidden ? " · split hidden" : "");
@@ -2230,7 +2245,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b8";   // bump together with version.json on every release
+const APP_VERSION = "b9";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
