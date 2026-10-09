@@ -1224,7 +1224,9 @@ const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\
 const unb64u = s => Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0));
 const rand = n => crypto.getRandomValues(new Uint8Array(n));
 function lockInfo(){ try { const v = JSON.parse(localStorage.getItem(LOCK_KEY) || "null"); return v && v.uid === myId ? v : null; } catch(_) { return null; } }
-const bioName = () => device.ios ? (screen.height >= 812 ? "Face ID" : "Touch ID") : device.android ? "fingerprint or face unlock" : "Touch ID / Windows Hello";
+// iPhones with a notch/island (taller screens) have Face ID; older ones (e.g. iPhone SE) have Touch ID
+const bioName = () => device.ios ? (Math.max(screen.width, screen.height) >= 812 ? "Face ID" : "Touch ID")
+  : device.android ? "your fingerprint" : /Mac/.test(navigator.platform) ? "Touch ID" : /Win/.test(navigator.platform) ? "Windows Hello" : "your fingerprint";
 (async () => {
   try { bioAvailable = !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); }
   catch(_) { bioAvailable = false; }
@@ -1350,7 +1352,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "20";   // bump together with version.json on every release
+const APP_VERSION = "21";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
