@@ -6,17 +6,17 @@ declare
   e uuid := '00000000-0000-0000-0000-0000000000e6';
   out text := ''; cid uuid; code text; n int; ok boolean; pl jsonb; r record;
   td date := (now() at time zone 'Australia/Sydney')::date;
-  plan jsonb := '[{"w":"Push","opt":false},null,null,null,null,null,null]';
+  pplan jsonb := '[{"w":"Push","opt":false},null,null,null,null,null,null]';
   procedure_as text;
 begin
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, created_at, updated_at)
   select x, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', x || '@example.invalid', '', now(), now() from unnest(array[a,b,c,d,e]) x;
   insert into public.profiles (id, name, plate, plan, since, track_start, account, hide_split, is_public, share_attendance) values
-    (a,'Ci A','red',plan,td-9,td-9,'public',false,true,true),
-    (b,'Ci B','red',plan,td-9,td-9,'private',false,false,false),       -- private, split shown
-    (c,'Ci C','red',plan,td-9,td-9,'private',true,false,false),        -- private, split hidden
-    (d,'Ci D','red',plan,td-9,td-9,'public',false,true,true),
-    (e,'Ci E','red',plan,td-9,td-9,'private',false,false,false);       -- outsider
+    (a,'Ci A','red',pplan,td-9,td-9,'public',false,true,true),
+    (b,'Ci B','red',pplan,td-9,td-9,'private',false,false,false),       -- private, split shown
+    (c,'Ci C','red',pplan,td-9,td-9,'private',true,false,false),        -- private, split hidden
+    (d,'Ci D','red',pplan,td-9,td-9,'public',false,true,true),
+    (e,'Ci E','red',pplan,td-9,td-9,'private',false,false,false);       -- outsider
   insert into public.checkins (user_id, day) values (b, td), (e, td);
 
   -- A creates a circle with B and C (straight in)
@@ -27,9 +27,9 @@ begin
   out := out || E'\n1 create: everyone added straight in, creator is admin: ' || case when n = 3 and ok then 'PASS' else 'FAIL' end;
   select count(*) into n from public.checkins where user_id = b;
   out := out || E'\n2 circle-mate sees a private member''s sessions: ' || case when n = 1 then 'PASS' else 'FAIL' end;
-  select plan into pl from public.people where id = b;
+  select people.plan into pl from public.people where id = b;
   out := out || E'\n3 ...and their split: ' || case when pl->0->>'w' = 'Push' then 'PASS' else 'FAIL' end;
-  select plan into pl from public.people where id = c;
+  select people.plan into pl from public.people where id = c;
   out := out || E'\n4 "Hide my split" still hidden from the circle: ' || case when pl->0->>'w' is null and pl->0 is not null then 'PASS' else 'FAIL' end;
   select count(*) into n from public.checkins where user_id = e;
   out := out || E'\n5 outsider (private, not in circle) stays hidden: ' || case when n = 0 then 'PASS' else 'FAIL' end;
