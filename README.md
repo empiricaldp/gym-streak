@@ -60,6 +60,13 @@ You tab). Steps are private unless the person turns on sharing.
 - **Goal, height and weight log are private**: only the owner can read them. BMI is worked out in the app.
 - **Weekly recap** in Trophies, with a 1080×1350 share image drawn on a canvas.
 
+## Staying logged in & Face ID lock
+
+- The app waits for the saved login to be checked (a "Loading…" splash) before deciding to show sign-in.
+  Showing the sign-in form during that check made people think they'd been logged out.
+- Optional **Face ID / fingerprint lock** (You tab → Security): WebAuthn with the phone's built-in biometrics.
+  It's a lock on this device only; it asks on open and after a minute in the background. Nothing biometric leaves the phone.
+
 ## Security in one line
 
 The public key in `config.js` only lets people do what the **Row Level Security** rules in
