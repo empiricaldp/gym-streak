@@ -392,8 +392,8 @@ function viewYou(){
   const invite = `<div class="card"><span class="label">Bring a friend in</span>
     <ol style="margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15px">
       <li>Send them this link: <b class="mono" style="font-size:13px;word-break:break-all">${esc(link)}</b></li>
-      <li>They tap <b>Create account</b> and answer 6 quick questions.</li>
-      <li>On iPhone: Safari → Share → <b>Add to Home Screen</b>.</li></ol>
+      <li>The app shows them how to add it to their Home Screen.</li>
+      <li>They open it from there, tap <b>Create account</b> and answer 6 quick questions.</li></ol>
     <button class="cta ghost" id="copylink" style="margin-top:12px;font-size:18px">Copy link</button></div>`;
   const acct = `<p class="note" style="text-align:center">Signed in as ${esc(session?.user?.email || "")}</p>
     <button class="cta ghost" id="logout">Log out</button>`;
@@ -1048,7 +1048,7 @@ async function loadMemberCount(){
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0;
+  const show = !!session && !ob && memberCount > 0 && !needsInstall();
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined Gym Streak`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
@@ -1114,6 +1114,89 @@ function viewSetup(){
     <p class="note">Add the Supabase URL and anon key to <b>config.js</b>, then reload.</p></div>`;
 }
 
+// ================= Get the app (install screen) =================
+// People open the shared link in a browser. On a phone we want them to add it to the
+// Home Screen FIRST: it opens full-screen, stays logged in, and (on iPhone) the Home Screen
+// app keeps its own login, so signing up in Safari first would mean signing in twice.
+// iPhone: Apple doesn't let websites install themselves, so we show 3 clear steps.
+// Android Chrome: the browser gives us a real one-tap "Install" prompt.
+const UA = navigator.userAgent || "";
+const device = {
+  standalone: (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true,
+  ios: /iPhone|iPad|iPod/.test(UA) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1),
+  iphone: /iPhone|iPod/.test(UA),
+  android: /Android/.test(UA),
+  // apps that open links in their own mini-browser, where "Add to Home Screen" doesn't exist
+  inApp: /Instagram|FBAN|FBAV|FB_IAB|Messenger|WhatsApp|Snapchat|TikTok|musical_ly|LinkedInApp|Line\/|GSA\/|Twitter/i.test(UA),
+};
+device.phone = device.ios || device.android;
+let installPrompt = null, installed = false;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPrompt = e; if (needsInstall()) render(); });
+window.addEventListener("appinstalled", () => { installed = true; installPrompt = null; render(); });
+
+const skipKey = "gs-skip-install";
+const installSkipped = () => { try { return sessionStorage.getItem(skipKey) === "1"; } catch(_) { return false; } };
+const needsInstall = () => device.phone && !device.standalone && !installSkipped();
+
+const ICON_SHARE = '<svg class="gl" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M7 11H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-1"/></svg>';
+const ICON_ADD   = '<svg class="gl" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8.5v7M8.5 12h7"/></svg>';
+const ICON_DOTS  = '<svg class="gl" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18" cy="12" r="1.6"/></svg>';
+const ICON_KEBAB = '<svg class="gl" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="6" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="18" r="1.6"/></svg>';
+
+function viewInstall(){
+  $("title").textContent = "Welcome";
+  const link = location.origin + location.pathname;
+  const head = `<div class="ihead"><img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
+    <div><span class="label">Gym Streak</span><h2 class="sign">Put it on your Home Screen</h2>
+    <p class="note">It takes 10 seconds. Then it opens like a normal app, full screen, and stays logged in.</p></div></div>`;
+  const step = (n, title, sub) => `<li class="istep"><span class="inum mono">${n}</span><div><b>${title}</b>${sub ? `<span class="note">${sub}</span>` : ""}</div></li>`;
+  let body = "", pointer = false;
+
+  if (installed){
+    body = `<ol class="isteps">${step("✓", "Done! It's on your Home Screen", "Close this browser and open <b>Gym Streak</b> from your Home Screen to sign up.")}</ol>`;
+  } else if (device.inApp){
+    body = `<p class="ilead">You opened this inside another app. Open it in your normal browser to add it:</p>
+      <ol class="isteps">
+        ${step(1, "Copy the link", "")}
+        ${step(2, device.ios ? "Open <b>Safari</b> and paste it" : "Open <b>Chrome</b> and paste it", "")}
+      </ol>
+      <button class="cta" id="i-copy">Copy link</button>
+      <p class="note" style="text-align:center">Or tap ${ICON_DOTS} / ${ICON_SHARE} in this app and choose <b>Open in ${device.ios ? "Safari" : "browser"}</b>.</p>`;
+  } else if (device.ios){
+    pointer = device.iphone;   // iPhone Safari's toolbar is at the bottom
+    body = `<ol class="isteps">
+        ${step(1, `Tap the Share button ${ICON_SHARE}`, `${device.iphone ? "It's in the bar at the bottom." : "It's at the top of the screen."} Can't see it? Tap ${ICON_DOTS} first.`)}
+        ${step(2, `Tap <span class="pill">${ICON_ADD} Add to Home Screen</span>`, "You may need to scroll down a little.")}
+        ${step(3, "Tap <b>Add</b>", "Then open Gym Streak from your Home Screen and sign up there.")}
+      </ol>`;
+  } else if (device.android && installPrompt){
+    body = `<button class="cta" id="i-install">Install app</button>
+      <p class="note" style="text-align:center">One tap. It goes on your Home Screen like any other app.</p>`;
+  } else {
+    body = `<ol class="isteps">
+        ${step(1, `Tap the menu ${ICON_KEBAB}`, "Top right of your browser.")}
+        ${step(2, `Tap <b>Install app</b> or <b>Add to Home screen</b>`, "")}
+        ${step(3, "Open Gym Streak from your Home Screen", "Sign up there.")}
+      </ol>`;
+  }
+  main().innerHTML = `<div class="card install">${head}${body}
+    <button class="linkbtn" id="i-skip">Use it in the browser for now</button></div>
+    ${pointer ? `<div class="ipoint" aria-hidden="true"><span>Share is down here</span><svg viewBox="0 0 24 24"><path d="M12 4v15M6 13l6 6 6-6"/></svg></div>` : ""}`;
+
+  const cp = $("i-copy"); if (cp) cp.onclick = async () => {
+    try { await navigator.clipboard.writeText(link); cp.textContent = "Copied ✓"; }
+    catch(_) { cp.textContent = link; }
+  };
+  const ins = $("i-install"); if (ins) ins.onclick = async () => {
+    installPrompt.prompt();
+    const choice = await installPrompt.userChoice.catch(() => null);
+    installPrompt = null;
+    if (choice && choice.outcome === "accepted") installed = true;
+    render();
+  };
+  $("i-skip").onclick = () => { try { sessionStorage.setItem(skipKey, "1"); } catch(_) {} render(); };
+}
+
 // ================= Shell =================
 const TITLES = {today:"Today",crew:"Crew",trophies:"Trophies",you:"You"};
 function render(){
@@ -1121,11 +1204,13 @@ function render(){
   const m = me();
   $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
   const signedIn = !!session;
-  $("tabbar").hidden = !signedIn || !!ob;
+  const gate = !!sb && authMode !== "newpass" && needsInstall();
+  $("tabbar").hidden = !signedIn || !!ob || gate;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
   renderOnline();
   if (!sb) return viewSetup();
   if (authMode==="newpass") return viewAuth();
+  if (gate) return viewInstall();            // phones in a browser: get it on the Home Screen first
   if (!signedIn) return viewAuth();
   if (!ready){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="skel">Loading the crew…</div>`; return; }
   if (ob){ $("title").textContent = ob.edit ? "Edit" : "Set up"; viewOnboarding(); return; }
@@ -1155,7 +1240,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "15";   // bump together with version.json on every release
+const APP_VERSION = "16";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

@@ -354,3 +354,25 @@ button,input{font:inherit;color:inherit}
 .imgbox{background:var(--card);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:10px;max-width:420px;width:100%}
 .imgbox img{width:100%;border-radius:10px}
 @media (max-width:380px){.goals{grid-template-columns:1fr}.bodyrow{grid-template-columns:1fr 1fr}.bodyrow .cta{grid-column:1/-1}}
+
+/* ---------- install screen ---------- */
+.install{display:flex;flex-direction:column;gap:16px;padding:20px 18px}
+.ihead{display:flex;gap:14px;align-items:flex-start}
+.iapp{width:72px;height:72px;border-radius:18px;flex:none;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.ihead h2{margin:2px 0 6px;font-size:34px}
+.ihead .note{margin:0;font-size:14px}
+.ilead{margin:0;font-weight:600}
+.isteps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.istep{display:flex;gap:12px;align-items:flex-start;background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.istep b{font-size:16px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.istep .note{display:block;margin-top:3px;font-size:13px}
+.inum{flex:none;width:28px;height:28px;border-radius:50%;background:var(--iron);color:var(--on-iron);display:grid;place-items:center;font-size:14px;font-weight:700}
+.gl{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-4px;color:#0a84ff}
+.gl circle{fill:currentColor;stroke:none}
+.pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line2);background:var(--card);border-radius:10px;padding:3px 9px;font-weight:700}
+.install .linkbtn{align-self:center}
+.ipoint{position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:2px;
+  color:var(--muted);font:700 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;pointer-events:none;animation:nudge-down 1.6s ease-in-out infinite}
+.ipoint svg{width:28px;height:28px;fill:none;stroke:#0a84ff;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+@keyframes nudge-down{0%,100%{transform:translate(-50%,0)}50%{transform:translate(-50%,6px)}}
+@media (prefers-reduced-motion:reduce){.ipoint{animation:none}}
