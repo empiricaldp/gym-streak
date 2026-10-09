@@ -254,6 +254,10 @@ function viewToday(){
       <span class="note">${isGym(m,t) && !has(m,t) ? `${esc(s.w)} is waiting. Go get it.` : "They're keeping you honest."}</span></div>
       <button type="button" class="chip" id="nudge-ok">Got it</button></div>`;
   }
+  // Names made before the name rules (e.g. emoji): ask them to pick a new one
+  if (nameProblem(m.name)) topHtml += `<div class="card banner"><span class="big-emoji">✏️</span><div class="grow"><b>Pick a new name</b>
+      <span class="note">Names can't have emoji any more, so the crew can find and nudge you.</span></div>
+      <button type="button" class="chip" id="rename-go">Rename</button></div>`;
   const fo = freezeOffer(m);
   if (fo) topHtml += `<div class="card banner freezebanner"><span class="big-emoji">❄️</span><div class="grow"><b>You missed ${DAYS_LONG[dow(fo.day)]}</b>
       <span class="note">Use this month's streak freeze to keep your ${fo.saved}-day streak. One per month.</span></div>
@@ -294,6 +298,7 @@ function viewToday(){
   main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { goalDraft = toggleIn(goalDraft, b.dataset.goal); render(); });
   if ($("goal-save")) $("goal-save").onclick = async () => { $("goal-save").disabled = true; if (await saveGoals(goalDraft)){ goalDraft = []; toast("Goals saved"); } };
   if ($("nudge-ok")) $("nudge-ok").onclick = dismissNudges;
+  if ($("rename-go")) $("rename-go").onclick = () => startOnboarding(true);
   if ($("freeze-go")) $("freeze-go").onclick = () => { $("freeze-go").disabled = true; useFreeze(fo.day); };
   if ($("recap-open")) $("recap-open").onclick = () => { try { localStorage.setItem(recapKey, "1"); } catch(_){} recapWhich = "last"; trophyFor = myId; setTab("trophies"); };
   if ($("steps-setup")) $("steps-setup").onclick =() => { setTab("you"); setTimeout(() => $("health")?.scrollIntoView({behavior:"smooth"}), 50); };
@@ -954,8 +959,9 @@ function viewOnboarding(){
   const dots = `<div class="steps">${Array.from({length:total},(_,i)=>`<i class="${i<=s?"on":""}"></i>`).join("")}</div>`;
   let body = "", canNext = true;
   if (k==="name"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What should the crew call you?</h2>
-      <input class="field" id="f-name" type="text" maxlength="20" placeholder="e.g. DP" value="${esc(ob.name)}" autocomplete="nickname">`;
-    canNext = !!ob.name.trim(); }
+      <input class="field" id="f-name" type="text" maxlength="20" placeholder="e.g. DP" value="${esc(ob.name)}" autocomplete="nickname" autocapitalize="words" spellcheck="false">
+      <p class="note namemsg ${ob.nameState === "taken" || ob.nameState === "bad" ? "bad" : ob.nameState === "ok" ? "ok" : ""}" id="name-msg">${esc(ob.nameMsg || "Letters and numbers only, no emoji. Each name can only be used once.")}</p>`;
+    canNext = ob.nameState === "ok"; }
   if (k==="goal"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">What are your goals?</h2>
       <p class="note">Only you see this. It tunes your motivation messages and your weight trend.</p>${goalPicker(ob.goals)}`;
     canNext = ob.goals.length > 0; }
@@ -1002,8 +1008,29 @@ function viewOnboarding(){
     <div class="row2"><button class="cta ghost" id="ob-back">${s===0?"Cancel":"Back"}</button>
     <button class="cta" id="ob-next" ${canNext?"":"disabled"}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
   const nextBtn = $("ob-next");
-  const refresh = () => { const ok = k==="name" ? !!ob.name.trim() : k==="goal" ? ob.goals.length > 0 : k==="split" ? ob.plan.some((w,i)=>normalizeWorkout(w)&&!ob.opt[i]) : true; nextBtn.disabled = !ok; };
-  if (k==="name"){ const f = $("f-name"); f.oninput = () => { ob.name = f.value; refresh(); }; f.focus(); f.onkeydown = e => { if (e.key==="Enter" && ob.name.trim()) nextBtn.click(); }; }
+  const refresh = () => { const ok = k==="name" ? ob.nameState === "ok" : k==="goal" ? ob.goals.length > 0 : k==="split" ? ob.plan.some((w,i)=>normalizeWorkout(w)&&!ob.opt[i]) : true; nextBtn.disabled = !ok; };
+  if (k==="name"){
+    const f = $("f-name"), msg = $("name-msg");
+    const show = (state, text) => { ob.nameState = state; ob.nameMsg = text; msg.textContent = text;
+      msg.className = "note namemsg " + (state === "taken" || state === "bad" ? "bad" : state === "ok" ? "ok" : ""); refresh(); };
+    const check = () => {
+      clearTimeout(nameCheckT);
+      const n = tidyName(f.value), problem = nameProblem(n);
+      if (problem) return show("bad", problem);
+      if (ob.edit && me() && tidyName(me().name).toLowerCase() === n.toLowerCase() && !nameProblem(me().name)) return show("ok", "That's your current name.");
+      show("checking", "Checking…");
+      const seq = ++nameCheckSeq;
+      nameCheckT = setTimeout(async () => {
+        const taken = await checkNameTaken(n);
+        if (seq !== nameCheckSeq) return;            // they kept typing; an older answer doesn't count
+        if (taken === null) show("ok", "Couldn't check right now. We'll check again when you save.");
+        else show(taken ? "taken" : "ok", taken ? `“${n}” is taken. Try adding an initial, like “${n} K”.` : `“${n}” is free.`);
+      }, 350);
+    };
+    f.oninput = () => { ob.name = f.value; check(); };
+    f.focus(); f.onkeydown = e => { if (e.key==="Enter" && ob.nameState === "ok") nextBtn.click(); };
+    if (!ob.nameState) check();
+  }
   if (k==="goal") main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { ob.goals = toggleIn(ob.goals, b.dataset.goal); render(); });
   if (k==="plate") main().querySelectorAll("[data-plate]").forEach(b => b.onclick = () => { ob.plate = b.dataset.plate; render(); });
   if (k==="split") wireSplitStep(refresh);
@@ -1062,11 +1089,28 @@ function wireSplitStep(refresh){
   select(ob.active);
 }
 
+// ---- Name rules: letters (any language), numbers, spaces and . ' - _ only; no emoji; one of each name in the crew ----
+const tidyName = n => String(n || "").replace(/\s+/g, " ").trim();
+function nameProblem(n){
+  n = tidyName(n);
+  if (!n) return "Type a name.";
+  if (/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}‍️]/u.test(n)) return "No emoji in names, just letters and numbers.";
+  if (!/^[\p{L}\p{M}\p{N} .'\-_]+$/u.test(n)) return "Only letters, numbers, spaces and . ' - _ please.";
+  if (n.length > 20) return "20 characters max.";
+  return "";
+}
+let nameCheckT = null, nameCheckSeq = 0;
+// Asks the database (which can see everyone, including private members) whether someone else already has this name
+async function checkNameTaken(n){
+  const { data, error } = await sb.rpc("name_taken", { p_name: tidyName(n) });
+  return error ? null : !!data;
+}
+
 async function saveOnboarding(){
   const plan = ob.plan.map((w,i)=> { const t = normalizeWorkout(w); return t ? {w:t, opt:!!ob.opt[i]} : null; });
   const old = ob.edit ? me() : null;
   const ws = startOfWeek(today());
-  const row = { id: myId, name: ob.name.trim().slice(0,20), plate: ob.plate, plan, goals: ob.goals, goal: legacyGoal(ob.goals) };
+  const row = { id: myId, name: tidyName(ob.name).slice(0,20), plate: ob.plate, plan, goals: ob.goals, goal: legacyGoal(ob.goals) };
   if (!old){ row.since = key(streakStart(ob.streak)); row.track_start = key(ws);
     // you can't have been consistent for longer than you've been going at all
     const exp = durStart(ob.exp); row.trained_since = key(exp < parse(row.since) ? exp : parse(row.since));
@@ -1079,7 +1123,13 @@ async function saveOnboarding(){
   const { error } = old
     ? await sb.from("profiles").update({ name: row.name, plate: row.plate, plan: row.plan, goals: row.goals, goal: row.goal }).eq("id", myId)
     : await sb.from("profiles").insert(row);
-  if (error){ if (btn) btn.disabled = false; showWarn("Couldn't save: " + error.message); return; }
+  if (error){
+    if (btn) btn.disabled = false;
+    // someone grabbed the name between typing and saving, or it broke a name rule: back to the name question
+    const nameErr = error.code === "23505" ? `“${row.name}” was just taken by someone else. Pick another.` : /NAME_RULES/.test(error.message) ? "No emoji in names, just letters and numbers." : "";
+    if (nameErr){ ob.step = 0; ob.nameState = "bad"; ob.nameMsg = nameErr; render(); return; }   // the name question is step 0
+    showWarn("Couldn't save: " + error.message); return;
+  }
   ob = null; tab = "today";
   await loadAll();
   if (!wasEdit){ toast("Welcome to the crew"); burst(); } else toast("Saved");
@@ -1668,7 +1718,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "32";   // bump together with version.json on every release
+const APP_VERSION = "33";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

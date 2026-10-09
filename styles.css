@@ -477,3 +477,6 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .pns .pn:nth-child(2){opacity:.85}.pns .pn:nth-child(3){opacity:.7}
 .psteps{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:15px}
 .goals [data-goal="friends"]{grid-column:1/-1}
+.namemsg{margin-top:8px;min-height:1.3em}
+.namemsg.ok{color:var(--good)}
+.namemsg.bad{color:var(--bad)}
