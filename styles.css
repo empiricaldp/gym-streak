@@ -164,12 +164,20 @@ button,input{font:inherit;color:inherit}
 .ob h2{margin:0;font-size:40px}
 .field{width:100%;border:1.5px solid var(--line2);background:var(--card);border-radius:12px;padding:14px;font-size:18px;font-weight:600;outline:none}
 .field:focus{border-color:var(--iron)}
-.platepick{display:grid;grid-template-columns:repeat(auto-fit,minmax(64px,1fr));gap:8px}
+.platepick{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px}
 .platepick button{border:1.5px solid var(--line);background:var(--card);border-radius:14px;padding:12px 4px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px}
 .platepick button[aria-pressed="true"]{border-color:var(--iron);box-shadow:0 0 0 2px var(--iron)}
-.platepick .pd{width:40px;height:40px;border-radius:50%;background:var(--c);position:relative;box-shadow:inset 0 0 0 3px color-mix(in srgb,#000 20%,var(--c))}
-.platepick .pd::after{content:"";position:absolute;inset:14px;border-radius:50%;background:var(--card)}
-.platepick small{font:700 11px var(--mono);color:var(--muted)}
+.platepick small{font:700 11px var(--mono);color:var(--muted);letter-spacing:.04em}
+.platepick button[aria-pressed="true"] small{color:var(--fg)}
+/* plate drawing with CREW stamped on the rim */
+.plate-svg{display:block;flex:none;filter:drop-shadow(0 2px 3px rgba(0,0,0,.18))}
+.ps-plate{fill:var(--c)}
+.ps-rim{fill:none;stroke:color-mix(in srgb,#000 18%,var(--c));stroke-width:2.5}
+.ps-hub{fill:color-mix(in srgb,#000 14%,var(--c))}
+.ps-hole{fill:var(--card)}
+.ps-brand{font:900 15px "Archivo",system-ui,sans-serif;font-stretch:75%;letter-spacing:4px;fill:var(--on-c,#fff);opacity:.85}
+.ps-dot{fill:var(--on-c,#fff);opacity:.6}
+.review b .plate-svg{display:inline-block;vertical-align:-5px;filter:none}
 .presets{display:flex;gap:8px;flex-wrap:wrap}
 .dayrow{display:grid;grid-template-columns:44px 1fr auto;gap:8px;align-items:center}
 .dayrow b{font-size:20px}

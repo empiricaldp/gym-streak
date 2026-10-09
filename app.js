@@ -2,8 +2,22 @@
 "use strict";
 // ================= Config =================
 const PLATES = [
-  {id:"red",kg:25},{id:"blue",kg:20},{id:"yellow",kg:15},{id:"green",kg:10},{id:"white",kg:5},{id:"lavender",kg:2.5},{id:"pink",kg:1.25}
+  {id:"red",name:"Red"},{id:"blue",name:"Blue"},{id:"yellow",name:"Butter"},{id:"green",name:"Green"},
+  {id:"white",name:"Silver"},{id:"lavender",name:"Lavender"},{id:"pink",name:"Pink"}
 ];
+const plateName = id => PLATES.find(p => p.id === id)?.name || "Silver";
+// A little bumper plate with CREW stamped around the top of the rim (like a brand on real plates)
+let plateSvgN = 0;
+function plateSvg(id, size = 48){
+  const arc = "crewarc" + (++plateSvgN);
+  return `<svg class="plate-svg" width="${size}" height="${size}" viewBox="0 0 100 100" style="${pc({plate:id})}" aria-hidden="true">
+    <circle cx="50" cy="50" r="48" class="ps-plate"/><circle cx="50" cy="50" r="44" class="ps-rim"/>
+    <circle cx="50" cy="50" r="20" class="ps-hub"/><circle cx="50" cy="50" r="10" class="ps-hole"/>
+    <path id="${arc}" d="M 19 50 A 31 31 0 0 1 81 50" fill="none"/>
+    <text class="ps-brand"><textPath href="#${arc}" startOffset="50%" text-anchor="middle">CREW</textPath></text>
+    <circle cx="50" cy="81" r="2.6" class="ps-dot"/></svg>`;
+}
+
 const MILESTONES = [
   {n:1,name:"Empty Bar"},{n:2,name:"Warm-Up Set"},{n:4,name:"Iron Month"},{n:6,name:"Six Pack"},
   {n:8,name:"Two Plates"},{n:12,name:"Quarter Grind"},{n:16,name:"Locked In"},{n:26,name:"Half Year"},{n:52,name:"Year of Iron"}
@@ -401,7 +415,7 @@ function viewYou(){
   else {
     const plan = m.plan.map((s,i)=>`<div class="li"><b class="sign" style="font-size:20px;width:44px">${DAYS[i]}</b><span class="grow">${s?esc(s.w):'<span class="note">Rest</span>'}</span>${s?.opt?'<span class="label">Optional</span>':""}</div>`).join("");
     main().innerHTML = `<div class="view">
-      <div class="card hero" style="${pc(m)}"><span class="label">${PLATES.find(p=>p.id===m.plate)?.kg||5} kg plate · since ${fmt(parse(m.since))}</span>
+      <div class="card hero" style="${pc(m)}"><span class="label">${plateName(m.plate)} plate · since ${fmt(parse(m.since))}</span>
         <div class="work sign">${esc(m.name)}</div>
         <p class="sub">Week ${weekNo(m)} · ${dayStreak(m)} day streak · ${Object.keys(m.days||{}).length} sessions logged</p></div>
       <div class="sec"><h2 class="sign">Your split</h2></div>
@@ -805,8 +819,8 @@ function viewOnboarding(){
       <p class="note">Only you see this. It tunes your motivation messages and your weight trend.</p>${goalPicker(ob.goal)}`;
     canNext = !!ob.goal; }
   if (k==="plate"){ body = `<span class="label">Question ${qn}</span><h2 class="sign">Pick your plate</h2>
-      <p class="note">Your colour across the app, like competition plates.</p>
-      <div class="platepick">${PLATES.map(p=>`<button data-plate="${p.id}" aria-pressed="${ob.plate===p.id}" style="${pc({plate:p.id})}" aria-label="${p.id} plate"><span class="pd"></span><small>${p.kg} KG</small></button>`).join("")}</div>`; }
+      <p class="note">Your colour across the app. Everyone in the crew gets their own plate.</p>
+      <div class="platepick">${PLATES.map(p=>`<button data-plate="${p.id}" aria-pressed="${ob.plate===p.id}" aria-label="${p.name} plate">${plateSvg(p.id, 52)}<small>${p.name}</small></button>`).join("")}</div>`; }
   if (k==="split"){ ob.active = ob.active ?? ob.plan.findIndex(w=>!w.trim()); if (ob.active < 0) ob.active = 0;
     body = `<span class="label">Question ${qn}</span><h2 class="sign">Your weekly split</h2>
       <p class="note">Pick a ready-made split, or tap a day and build it with the buttons below it. You can also just type: we'll tidy it up.</p>
@@ -832,7 +846,7 @@ function viewOnboarding(){
       <div class="review" style="--c:var(--p-${ob.plate})">
         <div><span>Name</span><b>${esc(ob.name)}</b></div>
         <div><span>Goal</span><b>${esc(goalLabel(ob.goal) || "Not set")}</b></div>
-        <div><span>Plate</span><b style="display:flex;align-items:center;gap:6px"><span class="dot"></span>${PLATES.find(p=>p.id===ob.plate).kg} kg</b></div>
+        <div><span>Plate</span><b style="display:flex;align-items:center;gap:6px">${plateSvg(ob.plate, 22)}${plateName(ob.plate)}</b></div>
         <div><span>Gym days a week</span><b>${gym}</b></div>
         ${ob.edit?"":`<div><span>Starting on</span><b>Week ${ob.weeks+1}</b></div>
           <div><span>Crew sees</span><b>${privacySummary({isPublic:ob.pv.pub, shareAtt:ob.pv.att, shareSplit:ob.pv.split}).replace(/^Private: /,"Private · ")}</b></div>`}
@@ -1240,7 +1254,7 @@ let sb = null, session = null;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "16";   // bump together with version.json on every release
+const APP_VERSION = "17";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
