@@ -1837,8 +1837,9 @@ function viewProfile(inYou){
   if (!o.visible || !sharesStats(o)){
     main().innerHTML = `<div class="view">${back}<div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate</span>
       <div class="work sign">${esc(o.name)}</div>
+      ${countsRow(o, false)}
       <p class="sub">${o.private ? "This account is private. Send a bud request to see their week and streak." : "Hasn't logged anything yet."}</p>
-      <div class="pfacts">${budBtn(o)}</div></div>${countsRow(o, false)}</div>`;
+      <div class="pfacts">${budBtn(o)}</div></div></div>`;
     $("pf-back").onclick = () => { profileId = null; render(); }; return;
   }
   const boxes = Array.from({length:7},(_,k)=>{ const d = addDays(ws,k);
@@ -1860,15 +1861,15 @@ function viewProfile(inYou){
     <div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate${self && !inYou ? " · how others see you" : ""}</span>
       <div class="work sign">${esc(o.name)}</div>
       ${!self && relation(o) ? `<span class="reltag">${({buds:"🤝 Buds", spotting:"You're spotting them", spotter:"Spots you", requested:"Request sent"})[relation(o)]}</span>` : ""}
+      ${countsRow(o, inYou)}
       <div class="pfweek">${boxes}</div>
       <p class="sub">This week: ${w.hit} of ${w.target} gym days${w.bonus ? ` · +${w.bonus} bonus` : ""}</p>
       ${self ? "" : `<div class="pfacts">${budBtn(o)}${nudge}</div>`}
       ${!self && o.theyBud === "accepted" && me()?.private ? `<button type="button" class="linkbtn" data-unfollow="${esc(o.id)}" style="padding-left:0">Remove as spotter</button>` : ""}</div>
-    ${countsRow(o, inYou)}
-    <div class="tiles" style="${pc(o)}">
-      <div class="tile accent"><b class="sign mono-n">${dayStreak(o)}</b><span class="label">Day streak</span></div>
-      <div class="tile"><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
-      <div class="tile"><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
+    <div class="card statstrip" style="${pc(o)}">
+      <div class="accent"><b class="sign">${dayStreak(o)}</b><span class="label">Day streak</span></div>
+      <div><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
+      <div><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
     ${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
     <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
@@ -1884,7 +1885,7 @@ function countsRow(o, mine){
   const self = o.id === myId, c = self ? counts() : { buds: o.nBuds, spotting: o.nSpotting, spotters: o.nSpotters };
   const cell = (k, label) => mine ? `<button type="button" data-list="${k}"><b>${c[k]}</b><span>${label}</span></button>`
                                   : `<span><b>${c[k]}</b><span>${label}</span></span>`;
-  return `<div class="pfcounts">${cell("buds","buds")}${cell("spotting","spotting")}${cell("spotters","spotters")}</div>`;
+  return `<div class="pfcounts">${cell("buds","Buds")}${cell("spotting","Spotting")}${cell("spotters","Spotters")}</div>`;
 }
 const LISTS = { buds: ["Buds", "You bud each other.", o => isMutual(o)],
                 spotting: ["Spotting", "Everyone you bud. 🤝 = they bud you back.", o => o.iBud === "accepted"],
@@ -1992,7 +1993,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b5";   // bump together with version.json on every release
+const APP_VERSION = "b6";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

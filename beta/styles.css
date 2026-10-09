@@ -574,11 +574,17 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .wnlist b{font-size:17px}
 .wnlist small{font-size:14px;color:var(--muted);line-height:1.35}
 #wn .cta{margin-top:12px}
-/* You tab = your profile: bud counts */
-.pfcounts{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.pfcounts>*{display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 6px;border-radius:14px;background:var(--card);border:1px solid var(--line);color:var(--fg);font:inherit}
+/* Profile counts: plain numbers inside the profile card, like Instagram (no boxes) */
+.pfcounts{display:flex;gap:22px;margin:10px 0 4px}
+.pfcounts>*{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:0;border:0;background:none;color:var(--fg);font:inherit;text-align:left}
 .pfcounts button{cursor:pointer}
-.pfcounts b{font-family:var(--display);font-stretch:62%;font-weight:900;font-size:30px;line-height:1}
-.pfcounts span span,.pfcounts button span{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.pfcounts b{font-family:var(--display);font-stretch:62%;font-weight:900;font-size:26px;line-height:1}
+.pfcounts span span,.pfcounts button span{font-size:12px;font-weight:600;color:var(--muted)}
+/* Streak / Week / Best run in one card, split by thin lines */
+.statstrip{display:grid;grid-template-columns:repeat(3,1fr);padding:14px 0}
+.statstrip>div{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.statstrip>div+div{border-left:1px solid var(--line)}
+.statstrip b{font-size:38px;line-height:1}
+.statstrip .accent b{color:var(--ct,var(--c))}
 .pn-ex{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;border-radius:999px;border:1px solid var(--line2)}
 .reltag{display:inline-block;margin-top:6px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:999px;background:color-mix(in srgb,var(--c) 22%,transparent);color:var(--fg)}
