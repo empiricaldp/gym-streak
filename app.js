@@ -1579,18 +1579,18 @@ function maybeShowPushSheet(){
 }
 function showPushSheet(){
   const m = me(); if (!m || document.getElementById("pushsheet")) return;
-  const t = today(), w = slot(m, t)?.w, friend = [...members.values()].find(x => x.id !== myId)?.name || "Your mate";
+  const t = today(), w = slot(m, t)?.w, friend = "Your gym buddy";   // made-up on purpose: a real name here looked like a real nudge
   const denied = pushState() === "denied";
   // same wording as the real notifications (supabase/functions/push), using your own split and streak
   const n = dayStreak(m), day = w ? w + " day" : "Gym day", line = n >= 2 ? `Your ${n}-day streak is on the line.` : "Start a streak today.";
   const pn = (title, body, when) => `<div class="pn"><img src="icons/apple-touch-icon.png" alt="" width="34" height="34">
-    <div class="grow"><span class="pn-top"><b>CREW</b><span>${when}</span></span><b class="pn-t">${esc(title)}</b><span class="pn-b">${esc(body)}</span></div></div>`;
+    <div class="grow"><span class="pn-top"><b>CREW</b><span class="pn-ex">Example</span></span><b class="pn-t">${esc(title)}</b><span class="pn-b">${esc(body)}</span></div></div>`;
   const wrap = document.createElement("div");
   wrap.id = "pushsheet"; wrap.className = "sheetwrap";
   wrap.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ps-title">
     <span class="rec">Recommended</span>
     <h2 class="sign" id="ps-title">Don't miss a nudge</h2>
-    <p class="note">${denied ? "Notifications are blocked for CREW right now. Here's what you're missing:" : "Here's what you'll get. You choose which ones."}</p>
+    <p class="note">${denied ? "Notifications are blocked for CREW right now. Examples of what you're missing:" : "Examples of what you'll get. You choose which ones."}</p>
     <div class="pns">
       ${pn(`👊 ${friend} nudged you`, `${day} and it's not logged yet. ${line}`, "now")}
       ${pn(`⏰ ${day}: not logged yet`, `${line} Train, then tap to log it.`, "7:00 pm")}
@@ -1764,7 +1764,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "37";   // bump together with version.json on every release
+const APP_VERSION = "38";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

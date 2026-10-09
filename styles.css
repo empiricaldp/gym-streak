@@ -541,3 +541,4 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .daytype{width:100%;font-size:16px;margin-bottom:2px}
 .crow-b .tidy{display:block;min-height:1.2em;font:600 13px var(--body);letter-spacing:0;text-transform:none;color:var(--good);margin:4px 2px 8px}
 .orlabel{display:block;margin-bottom:6px}
+.pn-ex{font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:1px 6px;border-radius:999px;border:1px solid var(--line2)}
