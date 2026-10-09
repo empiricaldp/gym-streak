@@ -61,8 +61,8 @@ begin
   out := out || E'\n5 after approval, A sees B''s sessions + profile: ' || case when n = 1 and v then 'PASS' else 'FAIL' end;
   select people.plan into pl from public.people where id = b;
   out := out || E'\n7 "Hide my split" blanks workout names but keeps gym days: ' || case when pl->0->>'w' is null and pl->0 is not null and pl->2 = 'null'::jsonb then 'PASS' else 'FAIL ' || pl::text end;
-  insert into public.nudges (from_user, to_user) values (a, b);
-  out := out || E'\n10 buds can nudge a private bud: PASS';
+  begin insert into public.nudges (from_user, to_user) values (a, b); out := out || E'\n10 one-way spotting can''t nudge (nudges are for Buds): FAIL';
+  exception when others then out := out || E'\n10 one-way spotting can''t nudge (nudges are for Buds): PASS'; end;
   execute 'reset role';
 
   -- as D: go public → waiting request from A accepted
