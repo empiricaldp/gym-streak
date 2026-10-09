@@ -30,6 +30,9 @@ totals means numbers can never drift out of sync.
 - **Day streak** = gym days in a row you've ticked. Rest days are skipped over.
 - **Week number** = full weeks in a row you hit every gym day, plus the current one.
 - Weeks you'd already trained before joining count as done.
+- Sign-up asks two separate things: **how long you've been going to the gym** (experience, private, `trained_since`)
+  and **how long you've been going consistently** (sets `since`, i.e. your starting streak). Both take a typed number
+  plus days / weeks / months / years.
 
 ## Privacy
 
@@ -41,7 +44,7 @@ checks the rules and undoes itself.
 ## Database changes
 
 Run the files in `supabase/` in order in the SQL Editor: `schema.sql`, `002_privacy.sql`, `003_steps.sql`,
-`004_member_count.sql`, `005_social_body.sql`.
+`004_member_count.sql`, `005_social_body.sql`, `006_more_plates.sql`, `007_goals_experience.sql`.
 Tests in `supabase/tests/` print PASS/FAIL and undo themselves.
 
 ## Apple Health steps (paused)
