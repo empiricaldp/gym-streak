@@ -126,7 +126,16 @@ const counts = () => { const all = [...members.values()].filter(m => m.id !== my
   return { buds: all.filter(isMutual).length, spotting: all.filter(m => m.iBud === "accepted").length, spotters: all.filter(m => m.theyBud === "accepted").length }; };
 const everyone = () => [...members.values()].filter(m => m.name && m.id !== myId).sort((a,b) => a.name.localeCompare(b.name));
 // Nudges: buds once a day; a non-bud can nudge a PUBLIC account once ever; never a private non-bud
-const canNudge = o => !!o && o.id !== myId && (isBud(o) ? !nudgedToday(o.id) : (!o.private && !sentNudgeTo.has(o.id)));
+// Nudges are for Buds only (both bud each other), once every 10 minutes
+const NUDGE_GAP_MIN = 10;
+const nudgeWait = o => {   // minutes until I can nudge them again (0 = now)
+  const last = nudges.filter(n => n.from_user === myId && n.to_user === o.id).map(n => Date.parse(n.created_at || 0)).sort((a,b) => b-a)[0];
+  return last ? Math.max(0, Math.ceil(NUDGE_GAP_MIN - (Date.now() - last) / 60000)) : 0; };
+const canNudge = o => !!o && o.id !== myId && isMutual(o) && nudgeWait(o) === 0;
+// the nudge control for a Bud: a button, or "Nudged · 7m" while waiting; nothing for non-Buds
+const nudgeCtl = (o, attr) => !isMutual(o) || o.id === myId ? "" : canNudge(o)
+  ? `<button type="button" class="${attr === "data-pnudge" ? "chip" : "nudge"}" ${attr}="${esc(o.id)}">👀 Nudge</button>`
+  : `<span class="nudged" data-wait>👀 Nudged · ${nudgeWait(o)}m</span>`;
 const statsCrew = () => roster().filter(sharesStats);
 const quietCrew = () => roster().filter(o => o.id !== myId && !sharesStats(o));
 const workLabel = s => s && s.w ? esc(s.w) : "Gym day";   // split hidden -> just "Gym day"
@@ -246,7 +255,7 @@ function viewToday(){
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · keeps stats private</span></div><span class="status rest">${LOCK}</span></div>`;
         const st = isGym(o,t) ? (has(o,t)?"done":"todo") : (ticked(o,t) ? "done" : "rest");
         const action = st === "done" ? reactBar(o,t)
-          : st === "todo" ? (nudgedToday(o.id) ? `<span class="nudged">👀 Nudged</span>` : `<button type="button" class="nudge" data-nudge="${esc(o.id)}">👀 Nudge</button>`) : "";
+          : st === "todo" ? nudgeCtl(o, "data-nudge") : "";
         return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span>${action ? `<span class="rowact">${action}</span>` : ""}</div>
           <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>`;
@@ -732,7 +741,7 @@ async function toggleReaction(e, to, day){
 const nudgedToday = to => nudges.some(n => n.from_user === myId && n.to_user === to && n.day === key(today()));
 const nudgesForMe = () => nudges.filter(n => n.to_user === myId && !n.seen);
 async function sendNudge(to){
-  const n = { from_user: myId, to_user: to, day: key(today()), seen: false };
+  const n = { from_user: myId, to_user: to, day: key(today()), seen: false, created_at: new Date().toISOString() };
   nudges.push(n); sentNudgeTo.add(to); render();
   const { error } = await sb.from("nudges").insert({ from_user: myId, to_user: to });
   if (error){ nudges = nudges.filter(x => x !== n); sentNudgeTo.delete(to); render(); return showWarn("Couldn't nudge: " + error.message); }
@@ -1280,7 +1289,7 @@ async function loadAll(){
       for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
       // Reactions from the last week, nudges to/from me from the last 2 days
       reactions = await fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8)))).catch(() => []);
-      nudges = await fetchAll("nudges", "from_user,to_user,day,seen", q => q.gte("day", key(addDays(today(), -1)))).catch(() => []);
+      nudges = await fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -1)))).catch(() => []);
       // everyone I've ever nudged (non-buds only get one nudge, ever)
       sentNudgeTo = new Set((await fetchAll("nudges", "to_user", q => q.eq("from_user", myId)).catch(() => [])).map(n => n.to_user));
       // My private stuff: goal, height and weight log (nobody else can read these)
@@ -1846,8 +1855,7 @@ function viewProfile(inYou){
     const c = has(o,d) ? "d" : frozen(o,d) ? "f" : isGym(o,d) ? (d<t ? "m" : "g") : "";
     return `<span class="pfday"><i class="${c}"></i><b>${DAYS[k][0]}</b></span>`; }).join("");
   const w = weekStats(o, ws);
-  const nudge = !self && canNudge(o) && isGym(o,t) && !has(o,t) ? `<button type="button" class="chip" data-pnudge="${esc(o.id)}">👀 Nudge</button>`
-    : !self && nudgedToday(o.id) ? `<span class="nudged">👀 Nudged</span>` : "";
+  const nudge = !self && isGym(o,t) && !has(o,t) ? nudgeCtl(o, "data-pnudge") : "";
   const req = o.theyBud === "pending" ? `<div class="card banner"><span class="big-emoji">🤝</span><div class="grow"><b>${esc(o.name)} wants to be your bud</b>
       <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(o.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(o.id)}">Decline</button></span></div></div>` : "";
   const ask = unbudAsk === o.id ? `<div class="card banner"><div class="grow"><b>${isMutual(o) ? "Unbud" : "Stop spotting"} ${esc(o.name)}?</b><span class="note">${o.private ? "You'll need to send a bud request again to see their profile." : "You can bud them again any time."}</span>
@@ -1993,7 +2001,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b6";   // bump together with version.json on every release
+const APP_VERSION = "b7";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -2010,7 +2018,8 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("cont
 // Phones pause apps in the background: refresh when it comes back, and roll over at midnight.
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ sheetShown = false; checkForUpdate(); if (session) loadAll(); } });
 let lastDay = key(today());
-setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); render(); } }, 60000);
+setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); render(); }
+  else if (document.querySelector("[data-wait]") && !document.activeElement?.matches("input")) render(); }, 30000);   // tick the "Nudged · 7m" countdown
 
 // Offline app shell (makes it installable and load instantly)
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
