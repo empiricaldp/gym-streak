@@ -220,7 +220,7 @@ async function onCheckin(r: any){
     const unmuted = mates.filter((m: any) => !m.muted);
     const wants = unmuted.length ? new Set((await rest(`profiles?select=id&notif_circle=eq.true&id=${inList([...new Set(unmuted.map((m: any) => m.user_id))] as string[])}`)).map((p: any) => p.id)) : new Set();
     for (const m of unmuted) if (wants.has(m.user_id) && !recips.has(m.user_id)){
-      const c = circles.find((c: any) => c.id === m.circle_id); recips.set(m.user_id, c ? `${c.emoji} ${c.name}` : null); }
+      const c = circles.find((c: any) => c.id === m.circle_id); recips.set(m.user_id, c ? `${c.emoji ? c.emoji + " " : ""}${c.name}` : null); }
   }
   const to: string[] = [];
   for (const id of recips.keys()) if (await firstTime("crew", id, r.user_id, r.day)) to.push(id);   // once per person per day, even if they untick + tick
@@ -237,7 +237,7 @@ async function onCircleAdd(r: any){
     rest(`circles?select=name,emoji&id=eq.${r.circle_id}`)]);
   if (!adder || !circle || !to?.notif_circle) return { skipped: "off" };
   if (!await firstTime("circle_add", r.user_id, r.circle_id, sydneyDay())) return { skipped: "dupe" };
-  return send([r.user_id], circleAddNote(adder.name, `${circle.emoji} ${circle.name}`));
+  return send([r.user_id], circleAddNote(adder.name, `${circle.emoji ? circle.emoji + " " : ""}${circle.name}`));
 }
 async function onReminders(){
   const due = await rest("rpc/due_reminders", { method: "POST", body: "{}" });   // also marks them as reminded today

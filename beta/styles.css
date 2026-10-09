@@ -628,3 +628,8 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .joinrow .field{font-size:16px;padding:10px 12px}
 .invitecode{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
 .codebox{font-size:22px;letter-spacing:.08em;padding:10px 12px;border-radius:10px;background:var(--card2);align-self:flex-start}
+/* circles without an emoji: first letter in a rounded badge */
+.cc-mono{flex:none;display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:var(--iron);color:var(--on-iron);font-family:var(--display);font-stretch:62%;font-weight:900;font-size:24px;line-height:1}
+.cc-mono.big{width:60px;height:60px;border-radius:16px;font-size:36px}
+.emojis{grid-template-columns:repeat(7,1fr)}
+.emo.none{font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.02em}

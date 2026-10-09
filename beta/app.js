@@ -1808,7 +1808,11 @@ function wireNotifCard(){
 }
 
 // ================= Circles (WhatsApp-style groups) =================
-const CIRCLE_EMOJI = ["🔥","💪","🏋️","⚡","🦍","🌅","🏆","🐺","🚀","🥊","🧠","🍑"];
+const CIRCLE_EMOJI = ["","🔥","💪","🏋️","⚡","🦍","🌅","🏆","🐺","🚀","🥊","🧠","🍑"];   // "" = no emoji
+const circleLabel = c => ((c.emoji ? c.emoji + " " : "") + c.name).trim();
+// the circle's emoji, or (no emoji) the first letter of its name in a rounded badge
+const circleBadge = (c, big) => c.emoji ? `<span class="cc-emoji ${big ? "big" : ""}">${esc(c.emoji)}</span>`
+  : `<span class="cc-mono ${big ? "big" : ""}">${esc((c.name || "?").trim().charAt(0).toUpperCase())}</span>`;
 const circleOf = id => circles.find(c => c.id === id);
 const amAdmin = c => !!c && c.members.some(m => m.user_id === myId && m.role === "admin");
 const myRow = c => c?.members.find(m => m.user_id === myId);
@@ -1818,7 +1822,7 @@ const inviteLink = c => location.origin + location.pathname.replace(/index\.html
 function circleCard(c, small){
   const ppl = circlePeople(c), n = trainedToday(c);
   return `<button type="button" class="circlecard ${small ? "small" : ""}" data-circle="${esc(c.id)}">
-    <span class="cc-emoji">${esc(c.emoji)}</span>
+    ${circleBadge(c)}
     <span class="cc-main"><b>${esc(c.name)}</b><small>${n} of ${ppl.length} trained today</small>
       <span class="cc-dots">${ppl.slice(0, 12).map(o => `<i style="${pc(o)}" class="${sharesStats(o) && has(o, today()) ? "on" : ""}"></i>`).join("")}</span></span>
     ${small ? "" : `<i class="chev r"></i>`}</button>`;
@@ -1858,7 +1862,7 @@ function viewCircleRoute(){
   return viewCircle(c);
 }
 const backTo = (label, fn) => { const b = `<button type="button" class="linkbtn pfback" id="c-back">‹ ${label}</button>`; setTimeout(() => { if ($("c-back")) $("c-back").onclick = fn; }); return b; };
-function emojiPicker(sel){ return `<div class="emojis">${CIRCLE_EMOJI.map(e => `<button type="button" class="emo ${e === sel ? "on" : ""}" data-emoji="${e}">${e}</button>`).join("")}</div>`; }
+function emojiPicker(sel){ return `<div class="emojis">${CIRCLE_EMOJI.map(e => `<button type="button" class="emo ${e === sel ? "on" : ""} ${e ? "" : "none"}" data-emoji="${e}" aria-label="${e || "No emoji"}">${e || "None"}</button>`).join("")}</div>`; }
 function viewCircleNew(){
   $("title").textContent = "New circle";
   const d = circleDraft;
@@ -1877,7 +1881,7 @@ function viewCircleNew(){
     go.disabled = true; go.textContent = "Creating…";
     const { data, error } = await sb.rpc("create_circle", { p_name: d.name.trim(), p_emoji: d.emoji, p_members: [...d.picked] });
     if (error){ go.disabled = false; go.textContent = "Create circle"; return showWarn("Couldn't create the circle: " + error.message); }
-    circleDraft = null; circleMode = "view"; circleId = data; toast(`${d.emoji} ${d.name.trim()} created`);
+    circleDraft = null; circleMode = "view"; circleId = data; toast(`${circleLabel({ emoji: d.emoji, name: d.name })} created`);
     await loadAll(); window.scrollTo(0,0);
   };
 }
@@ -1940,7 +1944,7 @@ function viewCircle(c){
       <button type="button" class="linkbtn danger" data-remove="${esc(m.user_id)}">Remove</button></span>` : "";
     return `<div class="li tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}${isMe ? '<span class="youtag">YOU</span>' : ""}${m.role === "admin" ? '<span class="admintag">Admin</span>' : ""}</span>${tools}</div></div>`; }).join("");
   const top = `${backTo("Circles", () => { circleId = null; circleAsk = null; crewView = "circles"; render(); })}${ask}
-    <div class="card hero circlehero"><span class="cc-emoji big">${esc(c.emoji)}</span><div class="work sign">${esc(c.name)}</div>
+    <div class="card hero circlehero">${circleBadge(c, true)}<div class="work sign">${esc(c.name)}</div>
       <p class="sub">${c.members.length} member${c.members.length===1?"":"s"} · ${trainedToday(c)} trained today</p>
       <div class="pfacts"><button type="button" class="chip" id="c-invite">🔗 Invite</button>
         <button type="button" class="chip" id="c-mute">${mine?.muted ? "🔕 Muted" : "🔔 Notifications on"}</button>
@@ -1953,7 +1957,7 @@ function viewCircle(c){
   crewBoard(list, [], top, { title: "Leaderboard", weekBoard: list.length > 1, bottom });
   $("title").textContent = "Circle";
   $("c-invite").onclick = async () => {
-    const url = inviteLink(c), text = `Join my circle ${c.emoji} ${c.name} on CREW! In the app: Crew → Circles → Join with code: ${c.invite_code}`;
+    const url = inviteLink(c), text = `Join my circle ${circleLabel(c)} on CREW! In the app: Crew → Circles → Join with code: ${c.invite_code}`;
     try { if (navigator.share){ await navigator.share({ title: "CREW", text, url }); return; } } catch(e){ if (e.name === "AbortError") return; }
     try { await navigator.clipboard.writeText(url); toast("Invite link copied"); } catch(e){ toast("Copy failed"); } };
   $("c-mute").onclick = async () => {
@@ -2000,7 +2004,7 @@ function viewJoinCircle(){
   if (j.bad){ main().innerHTML = `<div class="view"><div class="card"><b>This invite link doesn't work any more.</b><p class="note">Ask for a new link.</p>
       <button class="cta ghost" id="j-ok" style="margin-top:10px;font-size:18px">OK</button></div></div>`;
     $("j-ok").onclick = () => { joinPreview = null; render(); }; return; }
-  main().innerHTML = `<div class="view"><div class="card hero circlehero"><span class="label">You're invited</span><span class="cc-emoji big">${esc(j.emoji)}</span>
+  main().innerHTML = `<div class="view"><div class="card hero circlehero"><span class="label">You're invited</span>${circleBadge(j, true)}
       <div class="work sign">${esc(j.name)}</div><p class="sub">${j.members} member${j.members===1?"":"s"}</p>
       <p class="note">Members see each other's streak, week and split, and can nudge each other once a day.</p>
       <div class="row2" style="margin-top:12px"><button class="cta ghost" id="j-no" style="font-size:18px">Not now</button><button class="cta" id="j-yes" style="font-size:18px">Join</button></div></div></div>`;
@@ -2009,7 +2013,7 @@ function viewJoinCircle(){
     $("j-yes").disabled = true;
     const { data, error } = await sb.rpc("join_circle", { p_code: j.code });
     if (error){ $("j-yes").disabled = false; return showWarn("Couldn't join: " + error.message); }
-    joinPreview = null; circleId = data; tab = "crew"; crewView = "circles"; toast(`Joined ${j.emoji} ${j.name}`); await loadAll(); window.scrollTo(0,0); };
+    joinPreview = null; circleId = data; tab = "crew"; crewView = "circles"; toast(`Joined ${circleLabel(j)}`); await loadAll(); window.scrollTo(0,0); };
 }
 checkJoinLink();
 window.addEventListener("hashchange", () => { checkJoinLink(); if (pendingJoin) render(); });   // link opened while the app is already open
@@ -2056,7 +2060,7 @@ async function removeFollower(id){
   toast(`Removed ${nameOf(id)}`); loadAll();
 }
 function openProfile(id){ if (!members.has(id)) return; profileId = id; unbudAsk = null; render(); window.scrollTo(0,0); }
-function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); setTimeout(() => $("find-q")?.focus(), 50); }
+function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); }   // no auto-keyboard: tapping the search box is enough
 // One click handler for the whole app: profiles, bud buttons, requests (works on every screen)
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-bud],[data-unbud],[data-accept],[data-decline],[data-unfollow],[data-pnudge],[data-goto-find],[data-goto-buds],[data-list],[data-profile],[data-unbud-yes],[data-unbud-no]");
@@ -2187,7 +2191,15 @@ function viewWhatsNew(){
 
 // ================= Shell =================
 const TITLES = {today:"Today",crew:"Crew",trophies:"Trophies",you:"You"};
+// iPhone Home Screen apps: if a text box still has the keyboard up when the screen is redrawn, iOS drops the keyboard
+// but leaves the page pushed up, so the bottom bar floats mid-screen. Close the keyboard first, then nudge iOS back.
+function settleKeyboard(){ const ae = document.activeElement; if (ae && ae.matches && ae.matches("input, textarea") && $("main").contains(ae)) ae.blur(); }
+document.addEventListener("focusout", e => { if (e.target.matches && e.target.matches("input, textarea"))
+  setTimeout(() => { if (!document.activeElement || !document.activeElement.matches("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); }, 120); });
+if (window.visualViewport) visualViewport.addEventListener("resize", () => {   // keyboard closed → snap fixed bars back
+  if (visualViewport.height > window.innerHeight * 0.85 && !(document.activeElement || {}).matches?.("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); });
 function render(){
+  settleKeyboard();
   $("date").textContent = today().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
   const m = me();
   $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
@@ -2245,7 +2257,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b9";   // bump together with version.json on every release
+const APP_VERSION = "b10";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
