@@ -237,7 +237,7 @@ button,input{font:inherit;color:inherit}
 .status svg{vertical-align:-2px}
 
 /* steps */
-.steps{display:flex;flex-direction:column;gap:12px}
+.stepscard{display:flex;flex-direction:column;gap:12px}   /* step-counter card (renamed: ".steps" is the sign-up progress bar) */
 .steps-top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px}
 .steps-n{font-size:56px;color:var(--c);display:block;margin-top:2px}
 .steps-side{display:flex;flex-direction:column;align-items:flex-end;gap:2px;text-align:right}
