@@ -685,3 +685,7 @@ html.chat-open, html.chat-open body{overflow:hidden;overscroll-behavior:none}
 .chatwho .cc-emoji,.chatwho .cc-mono{flex:none}
 .chatlog{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;display:flex;flex-direction:column;gap:3px;padding:8px 12px 12px}
 .chatlog > :first-child{margin-top:auto}   /* few messages: they sit at the bottom, next to the text box */
+
+/* iOS keyboard bug: --kbgap = space iOS failed to give back; push bottom-anchored bars onto the real bottom */
+.tabbar{transform:translateY(var(--kbgap,0px))}
+.online{transform:translateY(var(--kbgap,0px))}

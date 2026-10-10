@@ -1534,8 +1534,13 @@ function viewChat(k){
 function fitChat(){
   const el = $("chatscreen"); if (!el) return;
   const vv = window.visualViewport, end = chatAtBottom();
-  el.style.height = (vv ? vv.height : window.innerHeight) + "px";
-  el.style.transform = vv && vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+  if (typing() && vv){                                     // keyboard up: exactly the visible part above it
+    el.style.height = vv.height + "px";
+    el.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+  } else {                                                 // keyboard down: the whole real screen (incl. any iOS gap)
+    el.style.height = (window.innerHeight + (typeof kbGap === "number" ? kbGap : 0)) + "px";
+    el.style.transform = "";
+  }
   if (end) chatToBottom();
 }
 if (window.visualViewport){ visualViewport.addEventListener("resize", fitChat); visualViewport.addEventListener("scroll", fitChat); }
@@ -2476,7 +2481,7 @@ if (window.visualViewport) visualViewport.addEventListener("resize", () => {   /
 // iPhone bug (Home Screen apps, iOS 17–26): after the keyboard has been open once, iOS shrinks the app's
 // screen by ~59pt and never gives it back, so the bottom bar / text box float above a gap. Fix: once the
 // keyboard has closed, hide and re-show the whole page in one go (no paint in between) so iOS re-measures.
-const standalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+const standalone = () => device.iphone && device.standalone;     // iPhone Home Screen app only (Android/desktop are fine)
 let fullH = Math.max(window.innerHeight, standalone() ? (screen.height || 0) : 0);
 window.addEventListener("resize", () => { fullH = Math.max(fullH, window.innerHeight); });
 function typing(){ const a = document.activeElement; return !!(a && a.matches && a.matches("input, textarea, select")); }
@@ -2487,9 +2492,22 @@ function remeasure(){
   window.scrollTo(0, y); if (log) log.scrollTop = ly;
   if (typeof fitChat === "function") fitChat();
 }
-document.addEventListener("focusout", () => { setTimeout(remeasure, 150); setTimeout(remeasure, 450); });
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(remeasure, 200); });
-window.addEventListener("load", () => setTimeout(remeasure, 300));
+// Belt and braces: if iOS still hasn't given the space back, measure the gap ourselves and push everything that
+// belongs at the bottom (tab bar, chat text box) down by exactly that much, onto the real bottom of the screen.
+let kbGap = 0;
+function pinBottom(){
+  let gap = standalone() && !typing() ? Math.max(0, fullH - window.innerHeight) : 0;
+  if (gap > 150) gap = 0;                                   // that big = the keyboard really is open, leave it
+  if (gap !== kbGap){ kbGap = gap; document.documentElement.style.setProperty("--kbgap", gap + "px"); }
+  if (typeof fitChat === "function") fitChat();
+}
+const settle = () => { remeasure(); pinBottom(); };
+document.addEventListener("focusout", () => { setTimeout(settle, 150); setTimeout(settle, 450); setTimeout(settle, 900); });
+document.addEventListener("focusin", () => setTimeout(pinBottom, 50));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(settle, 200); });
+window.addEventListener("load", () => setTimeout(settle, 300));
+window.addEventListener("resize", () => setTimeout(pinBottom, 50));
+if (window.visualViewport) visualViewport.addEventListener("resize", () => setTimeout(pinBottom, 50));
 function render(){
   if (!chatKey || profileId || circleId) document.documentElement.classList.remove("chat-open");
   if (chatKey && !profileId && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
@@ -2521,6 +2539,7 @@ function render(){
   if (circleId || circleMode === "new") return viewCircleRoute();
   $("title").textContent = TITLES[tab];
   ({today:viewToday,crew:viewCrew,chats:viewChats,trophies:viewTrophies,you:viewYou})[tab]();
+  pinBottom();
   maybeShowPushSheet();
 }
 function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
@@ -2553,7 +2572,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b17";   // bump together with version.json on every release
+const APP_VERSION = "b18";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
