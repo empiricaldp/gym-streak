@@ -526,7 +526,7 @@ function viewYou(){
     $("title").textContent = "Settings";
     main().innerHTML = `<div class="view">${backBtn}
       <div class="sec" style="margin-top:0"><h2 class="sign">Account</h2><span class="label">${privacySummary(m)}</span></div>
-      <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
+      <div class="card">${privacyPicker(pvFrom(m))}${spottersNote(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
       ${bodyCard()}
       ${STEPS_ENABLED ? healthCard(m) : ""}
       ${notifCard()}
@@ -883,6 +883,14 @@ async function shareRecap(m){
 
 // ================= Privacy =================
 // p = {pub, att, split}. Sharing is the default and the recommended choice.
+// Private only stops NEW people: anyone already spotting you keeps seeing you until you remove them
+function spottersNote(p, inTour){
+  const n = counts().spotters;
+  if (!p.priv || !n) return "";
+  return `<p class="note spotnote">${n} ${n === 1 ? "person already spots" : "people already spot"} you and can still see your profile. ${inTour
+    ? "You can remove anyone in You → Spotters."
+    : `<button type="button" class="linkbtn" data-list="spotters" style="padding:0">See Spotters</button> to remove anyone.`}</p>`;
+}
 function privacyPicker(p){
   // p = {priv, hide}
   return `<div class="privacy">
@@ -1040,7 +1048,7 @@ function startOnboarding(edit, only){
     plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false],
     exp: { n: 6, unit: "months" },      // how long you've been going to the gym at all
     streak: { n: 0, unit: "weeks" },    // how long you've been going consistently (sets your streak)
-    pv: { priv:false, hide:false }, goals: [...(body.goals || [])] };
+    pv: { priv:true, hide:false }, goals: [...(body.goals || [])] };
   render();
 }
 function viewOnboarding(){
@@ -1333,7 +1341,7 @@ async function loadAll(){
         soft(fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8))))),
         soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
         soft(fetchAll("nudges", "to_user", q => q.eq("from_user", myId))),
-        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,remind_at,tz").eq("id", myId).maybeSingle(),
+        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz").eq("id", myId).maybeSingle(),
         soft(fetchAll("bodyweight", "day,kg", q => q.order("day")))]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
       failed = new Set();
@@ -1357,7 +1365,7 @@ async function loadAll(){
       // My private stuff: goal, height and weight log (nobody else can read these)
       saveTimeZone(mine.data?.tz);
       if (mine.data && "notif_nudge" in mine.data) notif = { nudge: mine.data.notif_nudge, react: mine.data.notif_react, crew: mine.data.notif_crew,
-        remind: mine.data.notif_remind, chat: mine.data.notif_chat !== false, at: String(mine.data.remind_at || "19:00").slice(0,5) };
+        remind: mine.data.notif_remind, chat: mine.data.notif_chat !== false, buds: mine.data.notif_buds !== false, at: String(mine.data.remind_at || "19:00").slice(0,5) };
       syncPush();
       if (mine.data){
         body.goals = mine.data.goals?.length ? mine.data.goals : (mine.data.goal ? [mine.data.goal] : []);
@@ -1963,7 +1971,7 @@ document.addEventListener("visibilitychange", () => {
 // Turning them on asks the phone for a private "push address" at Apple/Google plus two encryption keys.
 // We save that in push_subs; the server's "push" function encrypts each message for this phone and posts it there.
 // On iPhone this only works once the app is on the Home Screen (iOS 16.4 or newer).
-let notif = { nudge: true, react: true, crew: true, remind: true, chat: true, at: "19:00" };
+let notif = { nudge: true, react: true, crew: true, remind: true, chat: true, buds: true, at: "19:00" };
 let pushOn = false, pushBusy = false;
 const PUSH_URL = () => window.GYM_CONFIG.SUPABASE_URL + "/functions/v1/push";
 const pushSupported = () => !BETA && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
@@ -2098,7 +2106,7 @@ async function syncPush(){
 }
 async function saveNotif(patch){
   const before = notif; notif = { ...notif, ...patch };
-  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", chat:"notif_chat", at:"remind_at" }[k]] = v;
+  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", chat:"notif_chat", buds:"notif_buds", at:"remind_at" }[k]] = v;
   const { error } = await sb.from("profiles").update(row).eq("id", myId);
   if (error){ notif = before; showWarn("Couldn't save that: " + error.message); render(); return false; }
   return true;
@@ -2117,6 +2125,7 @@ const NOTIF_TYPES = [
   ["crew",   "Crew activity", "When someone you bud logs a session"],
   ["remind", "Gym reminder", "On gym days, if you haven't logged yet"],
   ["chat",   "Messages", "Chats with your Buds and circles"],
+  ["buds",   "Buds", "When someone buds you or accepts your request"],
 ];
 function notifCard(){
   const st = pushState();
@@ -2378,10 +2387,10 @@ function budBtn(o){
 }
 async function budUp(id){
   const o = members.get(id); if (!o) return;
-  o.iBud = o.private ? "pending" : "accepted"; render();
+  o.iBud = o.private && o.theyBud !== "accepted" ? "pending" : "accepted"; render();   // they already bud you = no request needed
   const { error } = await sb.from("buds").insert({ follower: myId, followee: id });
   if (error && error.code !== "23505"){ o.iBud = null; render(); return showWarn("Couldn't bud: " + error.message); }
-  toast(o.private ? `Bud request sent to ${o.name}` : o.theyBud === "accepted" ? `You and ${o.name} are Buds 🤝` : `You're spotting ${o.name}`);
+  toast(o.iBud === "pending" ? `Request sent to ${o.name}` : o.theyBud === "accepted" ? `You and ${o.name} are Buds 🤝` : `Spotting ${o.name}. Bud each other to become Buds`);
   loadAll();
 }
 async function unBud(id, confirmed){
@@ -2534,7 +2543,7 @@ function startTour(){ wnShort = false; wnActive = true; wnStep = 1; wnPv = null;
 if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
-  wnPv = wnPv || { ...pvFrom(m), priv: null };            // the tour asks fresh: nothing pre-picked
+  wnPv = wnPv || { ...pvFrom(m), priv: true };            // Private by default; they can switch to Public
   // One new thing per screen, one short line each, full screen with a little picture. Then privacy, then find your buds.
   const FEATS = [["buds", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
                  ["profiles", "Profiles", "Tap anyone to see their week, streak and trophies."],
@@ -2563,7 +2572,7 @@ function viewWhatsNew(){
   }
   document.documentElement.classList.remove("wn-open");
   if (wnStep === PRIV) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
-      <p class="note">Pick one. You can change it any time in You.</p>${privacyPicker(wnPv)}
+      <p class="note">Private is on by default. Switch to Public if you like, any time in You.</p>${privacyPicker(wnPv)}${spottersNote(wnPv, true)}
       <button class="cta" id="wn-next" ${wnPv.priv === null ? "disabled" : ""}>Continue</button>`;
   if (wnStep === FIND) body = `<span class="label">Last step</span><h2 class="sign">Find your buds</h2>
       <p class="note">Bud the people you train with. You can always do this later in Crew.</p>
@@ -2717,7 +2726,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b31";   // bump together with version.json on every release
+const APP_VERSION = "b32";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
