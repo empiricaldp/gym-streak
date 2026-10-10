@@ -754,3 +754,5 @@ html.wn-open header.top{display:none}
 @media (prefers-reduced-motion: reduce){ .wnstage,.wa-hello .wdisc,.wa-bub{animation:none} }
 @media (max-height:620px){ .wnart{min-height:170px;transform:scale(.8)} .wnbig{font-size:64px} .wnstage{gap:16px} }
 .wnbig{display:block;width:100%;overflow:hidden}
+.wnsmall{margin:12px 0 0;font-size:13px;line-height:1.4;color:var(--muted);max-width:30ch}
+.wnsmall b{color:var(--fg);font-weight:700}

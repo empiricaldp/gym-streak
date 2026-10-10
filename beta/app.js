@@ -886,12 +886,12 @@ async function shareRecap(m){
 function privacyPicker(p){
   // p = {priv, hide}
   return `<div class="privacy">
-    <button type="button" class="popt ${!p.priv?"on":""}" data-pv="pub" aria-pressed="${!p.priv}">
-      <span class="pt">🔓 Public <span class="rec">Recommended</span></span>
-      <span class="pd">Anyone can see your profile and bud you straight away.</span></button>
     <button type="button" class="popt ${p.priv?"on":""}" data-pv="priv" aria-pressed="${p.priv}">
       <span class="pt">${LOCK} Private</span>
       <span class="pd">People send a bud request. Only buds you approve see your profile and streak.</span></button>
+    <button type="button" class="popt ${!p.priv?"on":""}" data-pv="pub" aria-pressed="${!p.priv}">
+      <span class="pt">🔓 Public</span>
+      <span class="pd">Anyone can see your profile and bud you straight away.</span></button>
     <div class="toggles"><label class="tg" for="pv-hide"><span><b>Hide my split</b><small>Show that you trained, not what you trained</small></span>
       <input type="checkbox" class="sw" id="pv-hide" ${p.hide?"checked":""}></label></div>
   </div>`;
@@ -2507,7 +2507,8 @@ function viewWhatsNew(){
     const art = wnArt(wnStep === 1 ? "hello" : FEATS[wnStep - 2][0], m);
     const text = wnStep === 1
       ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`
-      : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>`;
+      : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>
+         ${FEATS[wnStep - 2][0] === "buds" ? `<p class="wnsmall">Like Instagram, but for the gym. <b>Spotting</b> = people you bud. <b>Spotters</b> = people who bud you.</p>` : ""}`;
     main().innerHTML = `<div class="wnfull" id="wn" style="${pc(m)}">
       <div class="wntop">${dots}${wnStep > 1 ? `<button type="button" class="linkbtn wnskip" id="wn-skip">Skip</button>` : ""}</div>
       <div class="wnstage" key="${wnStep}"><div class="wnart">${art}</div><div class="wntext">${text}</div></div>
@@ -2674,7 +2675,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b24";   // bump together with version.json on every release
+const APP_VERSION = "b25";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
