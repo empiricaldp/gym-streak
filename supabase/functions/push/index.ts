@@ -145,7 +145,7 @@ const dayWord = (d: string, tz?: string) => d === dayIn(tz) ? "today" : d === ad
   : "on " + new Date(d + "T12:00:00Z").toLocaleDateString("en-AU", { weekday: "long", timeZone: "UTC" });
 
 const people = async (ids: string[]) =>
-  ids.length ? await rest(`profiles?select=id,name,tz,plan,is_public,share_attendance,share_split,account,hide_split,notif_nudge,notif_react,notif_crew,notif_circle&id=${inList(ids)}`) : [];
+  ids.length ? await rest(`profiles?select=id,name,tz,plan,is_public,share_attendance,share_split,account,hide_split,notif_nudge,notif_react,notif_crew,notif_circle,notif_chat&id=${inList(ids)}`) : [];
 const EMOJI: Record<string, string> = { fire: "🔥", muscle: "💪", clap: "👏" };
 
 // ---------- the wording ----------
@@ -190,6 +190,12 @@ export function reminderNote(me: Ctx, now = new Date()): Note {
 }
 export const circleAddNote = (adder: string, circle: string, tally?: string | null): Note => ({ title: `YOU'RE IN ${U(circle)}`,
   body: join(`Added by ${adder}`, tally && `${tally} trained today`), tag: "circle" });
+// A chat message: "MEHA" / "you coming tonight?"   or   "MEHA · 🔥 UNI GYM BOYS" / "gym at 6"
+export function messageNote(fromName: string, body: string, chatKey: string, circle?: string | null): Note {
+  const text = body.replace(/\s+/g, " ").trim();
+  return { title: circle ? `${U(fromName)} · ${U(circle)}` : U(fromName),
+    body: text.length > 140 ? text.slice(0, 139) + "…" : text, tag: "chat-" + chatKey };
+}
 export const testNote = (): Note => ({ title: "NOTIFICATIONS ON",
   body: "Nudges, reactions, crew sessions and reminders land here.", tag: "test" });
 
@@ -268,6 +274,28 @@ async function onCircleAdd(r: any){
   if (!await firstTime("circle_add", r.user_id, r.circle_id, sydneyDay())) return { skipped: "dupe" };
   return send([r.user_id], circleAddNote(adder.name, `${circle.emoji ? circle.emoji + " " : ""}${circle.name}`, await circleTally(r.circle_id).catch(() => null)));
 }
+async function onMessage(r: any){
+  const found = await rest(`messages?select=body,from_user,to_user,circle_id&id=eq.${r.id}`);   // still there (not deleted)?
+  if (!found.length) return { skipped: "not found" };
+  const m = found[0], [from] = await people([m.from_user]);
+  if (!from) return { skipped: "no sender" };
+  let to: string[] = [], circle: string | null = null, key: string;
+  if (m.to_user){
+    to = [m.to_user]; key = "d:" + m.from_user;                       // the reader's key for this chat is the sender's id
+  } else {
+    const [mates, cs] = await Promise.all([
+      rest(`circle_members?select=user_id,muted&circle_id=eq.${m.circle_id}&user_id=neq.${m.from_user}`),
+      rest(`circles?select=name,emoji&id=eq.${m.circle_id}`)]);
+    if (!cs.length) return { skipped: "no circle" };
+    to = mates.filter((x: any) => !x.muted).map((x: any) => x.user_id);  // a muted circle stays quiet
+    circle = `${cs[0].emoji ? cs[0].emoji + " " : ""}${cs[0].name}`; key = "c:" + m.circle_id;
+  }
+  if (!to.length) return { to: 0 };
+  const wants = (await people(to)).filter((p: any) => p.notif_chat !== false).map((p: any) => p.id);
+  const fresh: string[] = [];
+  for (const id of wants) if (await firstTime("chat", id, String(r.id), sydneyDay())) fresh.push(id);
+  return send(fresh, messageNote(from.name, m.body, key, circle));
+}
 async function onReminders(){
   const due = await rest("rpc/due_reminders", { method: "POST", body: "{}" });   // also marks them as reminded today
   const ctx = await contexts(due.map((d: any) => d.uid));
@@ -292,6 +320,7 @@ export async function handle(req: Request){
     else if (b.type === "reactions") out = await onReaction(b.record);
     else if (b.type === "checkins") out = await onCheckin(b.record);
     else if (b.type === "circle_members") out = await onCircleAdd(b.record);
+    else if (b.type === "messages") out = await onMessage(b.record);
     else if (b.type === "reminders") out = await onReminders();
     else if (b.type === "test") out = await onTest(req);
     else if (b.type === "ping") out = { key: SB_KEY ? SB_KEY.slice(0, 8) + "…" : "missing", vapid: !!(await keys()).priv };
