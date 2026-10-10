@@ -18,6 +18,9 @@ begin
     (d,'Ci D','red',pplan,td-9,td-9,'public',false,true,true),
     (e,'Ci E','red',pplan,td-9,td-9,'private',false,false,false);       -- outsider
   insert into public.checkins (user_id, day) values (b, td), (e, td);
+  -- (017) private people can only be added by their Buds, so A is Buds with B and C
+  insert into public.buds (follower, followee) values (a,b),(b,a),(a,c),(c,a);
+  update public.buds set status = 'accepted' where follower in (a,b,c);
 
   -- A creates a circle with B and C (straight in)
   perform set_config('request.jwt.claims', json_build_object('sub', a, 'role', 'authenticated')::text, true); execute 'set local role authenticated';
