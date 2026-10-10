@@ -214,8 +214,8 @@ button,input{font:inherit;color:inherit}
 .tab svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .tab[aria-selected="true"]{color:var(--fg)}
 
-.toast{position:fixed;left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translate(-50%,-150%);background:var(--iron);color:var(--on-iron);padding:12px 20px;border-radius:12px;z-index:20;transition:transform .4s cubic-bezier(.3,1.4,.5,1);white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis;font-size:22px}
-.toast.show{transform:translate(-50%,0)}
+.toast{position:fixed;left:50%;top:calc(12px + env(safe-area-inset-top,0px));transform:translate(-50%,calc(-100% - 24px - env(safe-area-inset-top,0px)));visibility:hidden;background:var(--iron);color:var(--on-iron);padding:12px 20px;border-radius:12px;z-index:20;transition:transform .4s cubic-bezier(.3,1.4,.5,1),visibility 0s .4s;white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis;font-size:22px}
+.toast.show{transform:translate(-50%,0);visibility:visible;transition:transform .4s cubic-bezier(.3,1.4,.5,1),visibility 0s}
 #fx{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:15}
 .skel{height:120px;border-radius:16px;background:var(--card);border:1px solid var(--line);display:grid;place-items:center;color:var(--muted)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -637,8 +637,8 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 /* In-app banner: slides down when something happens while the app is open (same words as the phone notifications) */
 .ibanner{position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top,0px));z-index:30;max-width:520px;margin:0 auto;
   display:flex;gap:12px;align-items:center;padding:14px 14px 14px 16px;border-radius:18px;background:var(--card);border:1px solid var(--line2);
-  box-shadow:0 12px 32px rgba(0,0,0,.45);transform:translateY(calc(-100% - 40px));transition:transform .45s cubic-bezier(.3,1.3,.5,1);cursor:pointer}
-.ibanner.show{transform:none}
+  box-shadow:0 12px 32px rgba(0,0,0,.45);transform:translateY(calc(-100% - 40px - env(safe-area-inset-top,0px)));visibility:hidden;transition:transform .45s cubic-bezier(.3,1.3,.5,1),visibility 0s .45s;cursor:pointer}
+.ibanner.show{transform:none;visibility:visible;transition:transform .45s cubic-bezier(.3,1.3,.5,1),visibility 0s}
 .ibanner .dot{width:12px;height:12px;border-radius:50%;background:var(--c,var(--muted));flex-shrink:0}
 .ibanner .grow{flex:1;min-width:0}
 .ibanner .t{font-family:var(--display);font-stretch:62%;font-weight:900;font-size:30px;line-height:.9;text-transform:uppercase;overflow-wrap:anywhere}

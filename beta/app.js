@@ -2473,6 +2473,23 @@ document.addEventListener("focusout", e => { if (e.target.matches && e.target.ma
   setTimeout(() => { if (!document.activeElement || !document.activeElement.matches("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); }, 120); });
 if (window.visualViewport) visualViewport.addEventListener("resize", () => {   // keyboard closed → snap fixed bars back
   if (visualViewport.height > window.innerHeight * 0.85 && !(document.activeElement || {}).matches?.("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); });
+// iPhone bug (Home Screen apps, iOS 17–26): after the keyboard has been open once, iOS shrinks the app's
+// screen by ~59pt and never gives it back, so the bottom bar / text box float above a gap. Fix: once the
+// keyboard has closed, hide and re-show the whole page in one go (no paint in between) so iOS re-measures.
+const standalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+let fullH = Math.max(window.innerHeight, standalone() ? (screen.height || 0) : 0);
+window.addEventListener("resize", () => { fullH = Math.max(fullH, window.innerHeight); });
+function typing(){ const a = document.activeElement; return !!(a && a.matches && a.matches("input, textarea, select")); }
+function remeasure(){
+  if (!standalone() || typing() || fullH - window.innerHeight <= 4) return;          // only when actually stuck
+  const y = window.scrollY, log = $("chatlog"), ly = log ? log.scrollTop : 0;
+  document.body.style.display = "none"; void document.body.offsetHeight; document.body.style.display = "";
+  window.scrollTo(0, y); if (log) log.scrollTop = ly;
+  if (typeof fitChat === "function") fitChat();
+}
+document.addEventListener("focusout", () => { setTimeout(remeasure, 150); setTimeout(remeasure, 450); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(remeasure, 200); });
+window.addEventListener("load", () => setTimeout(remeasure, 300));
 function render(){
   if (!chatKey || profileId || circleId) document.documentElement.classList.remove("chat-open");
   if (chatKey && !profileId && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
@@ -2536,7 +2553,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b16";   // bump together with version.json on every release
+const APP_VERSION = "b17";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
