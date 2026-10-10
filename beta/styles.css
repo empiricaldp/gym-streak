@@ -689,3 +689,5 @@ html.chat-open, html.chat-open body{overflow:hidden;overscroll-behavior:none}
 /* iOS keyboard bug: --kbgap = space iOS failed to give back; push bottom-anchored bars onto the real bottom */
 .tabbar{transform:translateY(var(--kbgap,0px))}
 .online{transform:translateY(var(--kbgap,0px))}
+html{min-height:var(--fullh,100%)}
+body{min-height:var(--fullh,100dvh);box-sizing:border-box}

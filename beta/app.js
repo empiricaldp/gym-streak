@@ -2499,6 +2499,9 @@ function pinBottom(){
   let gap = standalone() && !typing() ? Math.max(0, fullH - window.innerHeight) : 0;
   if (gap > 150) gap = 0;                                   // that big = the keyboard really is open, leave it
   if (gap !== kbGap){ kbGap = gap; document.documentElement.style.setProperty("--kbgap", gap + "px"); }
+  // and make every page at least the REAL screen height: on a short page (e.g. Chats) iOS only paints down to
+  // its wrong, shrunk height, which cut off the bottom of the tab bar
+  document.documentElement.style.setProperty("--fullh", (standalone() ? fullH : window.innerHeight) + "px");
   if (typeof fitChat === "function") fitChat();
 }
 const settle = () => { remeasure(); pinBottom(); };
@@ -2572,7 +2575,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b18";   // bump together with version.json on every release
+const APP_VERSION = "b19";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
