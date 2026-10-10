@@ -2519,8 +2519,13 @@ function wnArt(kind, m){
 // Tour version: bump when the tour gets new screens, so everyone sees it once more.
 // 1 = beta tour (Buds/Profiles/Find people), 2 = launch tour (+ Circles, Chats)
 const TOUR_V = 2; let wnShort = false;
+// ...and each app (main / beta) remembers on its own phone that it showed the tour, so someone who saw it in the
+// beta still gets it the first time they open the main app.
+const tourKey = () => "gs-tour-" + (BETA ? "beta" : "main") + "-" + TOUR_V + "-" + myId;
+const tourSeenHere = () => { try { return !!localStorage.getItem(tourKey()); } catch(e){ return true; } };
+const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch(e){} };
 async function finishShortTour(){
-  wnActive = false; wnDone = true; wnShort = false; document.documentElement.classList.remove("wn-open"); tab = "today";
+  markTourHere(); wnActive = false; wnDone = true; wnShort = false; document.documentElement.classList.remove("wn-open"); tab = "today";
   const m = me(); if (m) m.seenUpdate = TOUR_V;
   render(); window.scrollTo(0,0);
   await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
@@ -2571,7 +2576,7 @@ function viewWhatsNew(){
   if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
     if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: TOUR_V })){ $("wn-next").disabled = false; return; } }
-    if (wnStep === FIND){ document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
+    if (wnStep === FIND){ markTourHere(); document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
 }
@@ -2650,7 +2655,7 @@ function render(){
   $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
-  if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && (me().seenUpdate || 0) < TOUR_V){
+  if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && ((me().seenUpdate || 0) < TOUR_V || !tourSeenHere())){
     wnActive = true; wnShort = (me().seenUpdate || 0) >= 1;     // saw the old (beta) tour: just show what's new, don't re-ask privacy
   }
   $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
@@ -2712,7 +2717,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "44";   // bump together with version.json on every release
+const APP_VERSION = "45";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
