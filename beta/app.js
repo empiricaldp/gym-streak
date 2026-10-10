@@ -1516,10 +1516,12 @@ function chatLogHtml(k){
   return out;
 }
 // Redraw just the messages (not the text box), so typing isn't interrupted
+let patchT = null;
 const chatAtBottom = () => { const l = $("chatlog"); return !l || l.scrollTop + l.clientHeight >= l.scrollHeight - 120; };
 const chatToBottom = () => { const l = $("chatlog"); if (l) l.scrollTop = l.scrollHeight; };
-function patchChat(){
+function patchChat(now){
   const log = $("chatlog"); if (!log || !chatKey) return;
+  if (!now && handsOn()){ clearTimeout(patchT); patchT = setTimeout(patchChat, 300); return; }   // mid-swipe: add new messages once you stop   // mid-swipe: add the new message once you stop
   const nearBottom = chatAtBottom();
   log.innerHTML = chatLogHtml(chatKey);
   if (nearBottom) chatToBottom();
@@ -1576,19 +1578,19 @@ async function sendMsg(k, text){
   const row = k.startsWith("c:") ? { from_user: myId, circle_id: k.slice(2), body } : { from_user: myId, to_user: k.slice(2), body };
   const sentAt = new Date(Date.now() - 5000).toISOString();
   const tmp = { ...row, id: "tmp" + (++tmpId), created_at: new Date().toISOString(), pending: true };
-  messages.push(tmp); patchChat(); chatToBottom();
+  messages.push(tmp); patchChat(true); chatToBottom();
   let res = await sb.from("messages").insert(row).select("id,created_at");
   if (res.error && /load failed|failed to fetch|network/i.test(res.error.message || "")){ await new Promise(r => setTimeout(r, 1200));
     // it may have landed anyway: only resend if it isn't there
     const chk = await sb.from("messages").select("id,created_at").eq("from_user", myId).eq("body", body)
       .eq(row.circle_id ? "circle_id" : "to_user", row.circle_id || row.to_user).gte("created_at", sentAt);
     res = !chk.error && chk.data?.length ? { data: chk.data.slice(-1), error: null } : await sb.from("messages").insert(row).select("id,created_at"); }
-  if (res.error){ tmp.pending = false; tmp.failed = true; patchChat(); return; }
+  if (res.error){ tmp.pending = false; tmp.failed = true; patchChat(true); return; }
   const real = (res.data || [])[0];
   if (real && messages.some(m => m !== tmp && m.id === real.id)) messages = messages.filter(m => m !== tmp);   // the live update got here first
   else if (real){ tmp.id = real.id; tmp.created_at = real.created_at; tmp.pending = false; }
   else tmp.pending = false;
-  patchChat();
+  patchChat(true);
 }
 // Live: a new message (or a deleted one) arrives without reloading everything
 function onMessageLive(p){
@@ -1606,7 +1608,7 @@ function onMessageLive(p){
     if ((k.startsWith("c:") ? t.circle : t.person) && o && !(t.circle && myRow(t.circle)?.muted))
       showBanner({ style: o ? pc(o) : "", title: t.circle ? `${UP(nameOf(m.from_user))} · ${UP(t.circle.name)}` : UP(nameOf(m.from_user)),
         sub: m.body, subClass: "smsg", action: { label: "REPLY", run: () => openChat(k) } });
-    if (tab === "chats" && !chatKey && !(document.activeElement || {}).matches?.("input, textarea")) render();
+    if (tab === "chats" && !chatKey && !(document.activeElement || {}).matches?.("input, textarea")) renderSoft();
   }
   updateChatBadge();
 }
@@ -2550,7 +2552,19 @@ if (window.visualViewport) visualViewport.addEventListener("resize", () => setTi
 // A background refresh shouldn't redraw the screen while you're typing (it closed the keyboard and wiped
 // half-typed text in search boxes, the join code, weight/height...). Redraw as soon as you're done instead.
 let renderPending = false;
+// iPhone: if the screen is rebuilt while your finger is on it (or the page is still gliding after a swipe),
+// iOS loses the scroll and the page freezes. So background redraws wait until you've stopped touching/scrolling.
+let touching = false, lastMove = 0;
+addEventListener("touchstart", () => { touching = true; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchmove", () => { lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchend", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchcancel", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("scroll", () => { lastMove = Date.now(); }, { passive: true, capture: true });   // capture: also inner scrollers (chat)
+const handsOn = () => touching || Date.now() - lastMove < 900;
+let waitT = null;
+function whenStill(fn){ clearTimeout(waitT); if (!handsOn()) return fn(); waitT = setTimeout(() => whenStill(fn), 300); }
 function renderSoft(){
+  if (handsOn()){ whenStill(renderSoft); updateChatBadge(); return; }
   const a = document.activeElement;
   if (a && a.matches && a.matches("input:not([type=checkbox]):not([type=radio]), textarea") && a.id !== "chat-input" && $("main").contains(a)){ renderPending = true; updateChatBadge(); return; }
   render();
@@ -2626,7 +2640,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b20";   // bump together with version.json on every release
+const APP_VERSION = "b21";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

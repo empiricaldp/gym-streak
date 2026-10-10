@@ -1251,10 +1251,21 @@ async function loadAll(){
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
       members = next; ready = true; $("warn").hidden = true;
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
-    finally { loading = null; render(); loadMemberCount(); if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
+    finally { loading = null; whenStill(render); loadMemberCount(); if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
   })();
   return loading;
 }
+// iPhone: if the screen is rebuilt while your finger is on it (or the page is still gliding after a swipe),
+// iOS loses the scroll and the page freezes. So background redraws wait until you've stopped touching/scrolling.
+let touching = false, lastMove = 0;
+addEventListener("touchstart", () => { touching = true; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchmove", () => { lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchend", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchcancel", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("scroll", () => { lastMove = Date.now(); }, { passive: true, capture: true });   // capture: also inner scrollers (chat)
+const handsOn = () => touching || Date.now() - lastMove < 900;
+let waitT = null;
+function whenStill(fn){ clearTimeout(waitT); if (!handsOn()) return fn(); waitT = setTimeout(() => whenStill(fn), 300); }
 let reloadT;
 const reloadSoon = () => { clearTimeout(reloadT); reloadT = setTimeout(loadAll, 300); };
 let channel = null;
@@ -1785,7 +1796,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "41";   // bump together with version.json on every release
+const APP_VERSION = "42";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
