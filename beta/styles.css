@@ -633,3 +633,15 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .cc-mono.big{width:60px;height:60px;border-radius:16px;font-size:36px}
 .emojis{grid-template-columns:repeat(7,1fr)}
 .emo.none{font-size:12px;font-weight:800;color:var(--muted);letter-spacing:.02em}
+
+/* In-app banner: slides down when something happens while the app is open (same words as the phone notifications) */
+.ibanner{position:fixed;left:12px;right:12px;top:calc(10px + env(safe-area-inset-top,0px));z-index:30;max-width:520px;margin:0 auto;
+  display:flex;gap:12px;align-items:center;padding:14px 14px 14px 16px;border-radius:18px;background:var(--card);border:1px solid var(--line2);
+  box-shadow:0 12px 32px rgba(0,0,0,.45);transform:translateY(calc(-100% - 40px));transition:transform .45s cubic-bezier(.3,1.3,.5,1);cursor:pointer}
+.ibanner.show{transform:none}
+.ibanner .dot{width:12px;height:12px;border-radius:50%;background:var(--c,var(--muted));flex-shrink:0}
+.ibanner .grow{flex:1;min-width:0}
+.ibanner .t{font-family:var(--display);font-stretch:62%;font-weight:900;font-size:30px;line-height:.9;text-transform:uppercase;overflow-wrap:anywhere}
+.ibanner .s{font-family:var(--mono);font-size:11px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;margin-top:5px}
+.ibanner .cta{flex-shrink:0;min-height:44px}
+@media (prefers-reduced-motion: reduce){ .ibanner{transition:none} }

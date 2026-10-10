@@ -1287,6 +1287,7 @@ let editSeq = 0, reloadAgain = false;   // editSeq goes up every time I tick/unt
 async function loadAll(){
   if (loading){ reloadAgain = true; return loading; }   // a change arrived mid-load: load again afterwards
   const seq0 = editSeq;
+  const before = ready && myId ? { members, reactions, nudges, circles } : null;   // what we had, to spot what's new
   loading = (async () => {
     try {
       const [profiles, checkins] = await Promise.all([
@@ -1339,6 +1340,7 @@ async function loadAll(){
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
       members = next; ready = true; $("warn").hidden = true;
+      if (before) try { announce(before); } catch(e){ console.warn("banner", e); }
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
     finally { loading = null; render(); loadMemberCount(); if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
   })();
@@ -1394,6 +1396,76 @@ async function toggleDay(d){
     const chk = await sb.from("checkins").select("day").eq("user_id", myId).eq("day", k);
     if (!chk.error && (chk.data.length > 0) === !was) return;   // it did save: keep it, no warning
     members.set(myId, m); render(); showWarn("Couldn't save that — check your internet and try again.");
+  }
+}
+
+// ================= In-app banners =================
+// When something happens while the app is open (a nudge, a reaction, a crewmate trains, you're added to a circle)
+// a banner slides down: tall condensed heading + one mono line, same words as the phone notifications.
+let bannerQ = [], bannerT = null, bannerOn = false;
+const UP = x => String(x || "").toLocaleUpperCase("en");
+function showBanner(b){
+  if (bannerQ.length >= 3) return;                     // don't pile up more than a few
+  bannerQ.push(b); if (!bannerOn) nextBanner();
+}
+function nextBanner(){
+  const el = $("ibanner"), b = bannerQ.shift();
+  if (!b){ bannerOn = false; el.classList.remove("show"); return; }
+  bannerOn = true;
+  el.style.cssText = b.style || "";
+  el.innerHTML = `<span class="dot" aria-hidden="true"></span><div class="grow"><div class="t">${esc(b.title)}</div><div class="s">${esc(b.sub)}</div></div>
+    ${b.action ? `<button type="button" class="cta" id="ib-go" style="font-size:16px;padding:10px 14px">${esc(b.action.label)}</button>` : ""}`;
+  requestAnimationFrame(() => el.classList.add("show"));
+  try { navigator.vibrate && navigator.vibrate(10); } catch(e){}
+  clearTimeout(bannerT); bannerT = setTimeout(hideBanner, 6000);
+  const go = $("ib-go"); if (go) go.onclick = ev => { ev.stopPropagation(); b.action.run(); hideBanner(); };
+}
+document.addEventListener("click", e => { if (e.target.closest && e.target.closest("#ibanner") && !e.target.closest("#ib-go")) hideBanner(); });
+function hideBanner(){
+  const el = $("ibanner"); clearTimeout(bannerT); el.classList.remove("show");
+  setTimeout(nextBanner, 450);
+}
+// Compare what we had before a reload with what we have now, and announce anything new
+function announce(before){
+  const m = me(); if (!m) return;
+  const t = today(), tk = key(t), n = dayStreak(m), mySlot = slot(m, t);
+  const myState = () => ticked(m, t) ? "done" : isGym(m, t) ? "up" : "rest";
+  // nudges sent to me
+  const oldN = new Set(before.nudges.map(x => x.from_user + "|" + x.created_at));
+  const newN = nudges.filter(x => x.to_user === myId && !x.seen && !oldN.has(x.from_user + "|" + x.created_at));
+  for (const from of new Set(newN.map(x => x.from_user))){
+    const o = members.get(from), st = myState();
+    showBanner({ style: o ? pc(o) : "", title: `${UP(nameOf(from))} NUDGED YOU`,
+      sub: st === "done" ? "Already trained today" : st === "up" ? `${mySlot?.w || "Session"} not logged · ${n >= 2 ? n + "-day streak" : "start a streak"}` : "Rest day · bonus session?",
+      action: st === "up" ? { label: "LOG IT", run: () => { tab = "today"; if (!ticked(me(), today())) toggleDay(today()); else render(); } } : null });
+  }
+  // reactions to my sessions
+  const rk = r => r.from_user + "|" + r.to_user + "|" + r.day + "|" + r.emoji;
+  const oldR = new Set(before.reactions.map(rk));
+  for (const r of reactions.filter(r => r.to_user === myId && r.from_user !== myId && !oldR.has(rk(r)))){
+    const o = members.get(r.from_user), d = parse(r.day), w = slot(m, d)?.w;
+    showBanner({ style: o ? pc(o) : "", title: `${UP(nameOf(r.from_user))} ${EMOJI[r.emoji] || "👏"} YOUR SESSION`,
+      sub: `${w || "Session"} · ${r.day === tk ? (n >= 2 ? "day " + n : "today") : DAYS_LONG[dow(d)]}` });
+  }
+  // people I follow (Buds, Spotting) or share a circle with, who just logged today's session
+  const near = [key(addDays(t, -1)), tk, key(addDays(t, 1))];   // their "today" may differ from mine by a day
+  for (const [id, o] of members){
+    if (id === myId || !(isBud(o) || circleMate(o))) continue;
+    const was = before.members.get(id); if (!was) continue;
+    const fresh = near.find(k => o.days?.[k] && !was.days?.[k]); if (!fresh) continue;
+    const st = myState(), w = slot(o, parse(fresh))?.w, os = dayStreak(o);
+    showBanner({ style: pc(o), title: st === "done" ? `${UP(o.name)} TRAINED TOO` : st === "up" ? `${UP(o.name)}'S DONE. YOU'RE UP.` : `${UP(o.name)} JUST TRAINED`,
+      sub: `${w || "Session"} ✓${os >= 2 ? " · " + os + "-day streak" : ""}` });
+  }
+  // circles someone else just added me to
+  const oldC = new Set(before.circles.map(c => c.id));
+  for (const c of circles.filter(c => !oldC.has(c.id))){
+    const mine = c.members.find(x => x.user_id === myId);
+    if (!mine || !mine.added_by || mine.added_by === myId) continue;
+    const done = c.members.filter(x => { const p = members.get(x.user_id); return p && has(p, t); }).length;
+    const adder = members.get(mine.added_by);
+    showBanner({ style: adder ? pc(adder) : "", title: `YOU'RE IN ${UP(c.name)}`,
+      sub: `Added by ${nameOf(mine.added_by)} · ${done} of ${c.members.length} trained today` });
   }
 }
 
@@ -2278,7 +2350,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b13";   // bump together with version.json on every release
+const APP_VERSION = "b14";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
