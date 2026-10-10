@@ -1242,7 +1242,7 @@ async function saveOnboarding(){
   if (!old){ row.since = key(streakStart(ob.streak)); row.track_start = key(ws);
     // you can't have been consistent for longer than you've been going at all
     const exp = durStart(ob.exp); row.trained_since = key(exp < parse(row.since) ? exp : parse(row.since));
-    Object.assign(row, { account: ob.pv.priv ? "private" : "public", hide_split: !!ob.pv.hide, seen_update: 1,
+    Object.assign(row, { account: ob.pv.priv ? "private" : "public", hide_split: !!ob.pv.hide, seen_update: TOUR_V,
       is_public: !ob.pv.priv, share_attendance: !ob.pv.priv, share_split: !ob.pv.hide, share_steps: false, privacy_chosen: true }); }
   const wasEdit = ob.edit;
   const btn = $("ob-next"); if (btn) btn.disabled = true;
@@ -2516,7 +2516,16 @@ function wnArt(kind, m){
   if (kind === "circles") return `<div class="wa-ring">${[me, bud, b2, b3, b4].map((st, i) => `<span class="wdisc sm" style="${st};--i:${i}"></span>`).join("")}<span class="wa-mid sign">Crew</span></div>`;
   return `<div class="wa-chat"><span class="wa-bub them">gym at 6?</span><span class="wa-bub me" style="${pc(m)}">yesss 💪 see you there</span><span class="wa-bub them">bring straps</span></div>`;
 }
-function startTour(){ wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
+// Tour version: bump when the tour gets new screens, so everyone sees it once more.
+// 1 = beta tour (Buds/Profiles/Find people), 2 = launch tour (+ Circles, Chats)
+const TOUR_V = 2; let wnShort = false;
+async function finishShortTour(){
+  wnActive = false; wnDone = true; wnShort = false; document.documentElement.classList.remove("wn-open"); tab = "today";
+  const m = me(); if (m) m.seenUpdate = TOUR_V;
+  render(); window.scrollTo(0,0);
+  await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
+}
+function startTour(){ wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
 if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
@@ -2527,7 +2536,7 @@ function viewWhatsNew(){
                  ["circles", "Circles", "Private groups for your crew, like a WhatsApp group."],
                  ["chats", "Chats", "Message your Buds and your circles."]];
   const PRIV = 2 + FEATS.length, FIND = PRIV + 1;            // step numbers: 1 hello, 2–5 features, 6 privacy, 7 find buds
-  const dots = `<div class="steps">${Array.from({ length: FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
+  const dots = `<div class="steps">${Array.from({ length: wnShort ? PRIV - 1 : FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
   let body = "";
   if (wnStep < PRIV){                                         // the full-screen story part
     document.documentElement.classList.add("wn-open");
@@ -2543,8 +2552,8 @@ function viewWhatsNew(){
     const fit = () => { const h = $("wn")?.querySelector(".wnbig"); if (!h) return; h.style.fontSize = "";
       let fs = parseFloat(getComputedStyle(h).fontSize); while (h.scrollWidth > h.clientWidth + 1 && fs > 34){ fs -= 3; h.style.fontSize = fs + "px"; } };
     fit(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
-    $("wn-next").onclick = () => { wnStep++; render(); window.scrollTo(0,0); };
-    if ($("wn-skip")) $("wn-skip").onclick = () => { wnStep = PRIV; render(); window.scrollTo(0,0); };
+    $("wn-next").onclick = () => { if (wnShort && wnStep === PRIV - 1) return finishShortTour(); wnStep++; render(); window.scrollTo(0,0); };
+    if ($("wn-skip")) $("wn-skip").onclick = () => { if (wnShort) return finishShortTour(); wnStep = PRIV; render(); window.scrollTo(0,0); };
     return;
   }
   document.documentElement.classList.remove("wn-open");
@@ -2561,7 +2570,7 @@ function viewWhatsNew(){
   if (wnStep === PRIV) wirePrivacy(wnPv, render);
   if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
-    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
+    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: TOUR_V })){ $("wn-next").disabled = false; return; } }
     if (wnStep === FIND){ document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
@@ -2641,7 +2650,9 @@ function render(){
   $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
-  if (ready && session && !ob && !locked && !wnDone && me() && (me().seenUpdate || 0) < 1) wnActive = true;
+  if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && (me().seenUpdate || 0) < TOUR_V){
+    wnActive = true; wnShort = (me().seenUpdate || 0) >= 1;     // saw the old (beta) tour: just show what's new, don't re-ask privacy
+  }
   $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
   renderOnline();
@@ -2701,7 +2712,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "43";   // bump together with version.json on every release
+const APP_VERSION = "44";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
