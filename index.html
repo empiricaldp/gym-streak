@@ -18,11 +18,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="styles.css?v=42">
+<link rel="stylesheet" href="styles.css?v=43">
 </head>
 <body>
 <canvas id="fx" aria-hidden="true"></canvas>
 <div class="toast sign" id="toast" role="status" aria-live="polite"></div>
+<div class="ibanner" id="ibanner" role="status" aria-live="polite"></div>
 
 <div class="wrap">
   <header class="top">
@@ -39,14 +40,15 @@
 <div class="tabbar" id="tabbar"><nav role="tablist">
   <button class="tab" role="tab" id="t-today" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M2 12h3M19 12h3M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/></svg>Today</button>
   <button class="tab" role="tab" id="t-crew" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14c2.6 0 4.4 1.4 5 4"/></svg>Crew</button>
+  <button class="tab" role="tab" id="t-chats" aria-selected="false"><span class="tico"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9.5h8M8 12.5h5"/></svg><span class="tbadge" id="chat-badge" hidden></span></span>Chats</button>
   <button class="tab" role="tab" id="t-trophies" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="1.6"/></svg>Trophies</button>
   <button class="tab" role="tab" id="t-you" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>You</button>
 </nav></div>
 
 <!-- Supabase's official browser library, then our settings, then the app -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=42"></script>
-<script src="split.js?v=42"></script>
-<script src="app.js?v=42"></script>
+<script src="config.js?v=43"></script>
+<script src="split.js?v=43"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>

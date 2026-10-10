@@ -1980,13 +1980,15 @@ const setAskedPush = (days = 1) => { try { localStorage.setItem(SNOOZE_KEY, Stri
 // ----- The big "turn notifications on" popup, shown when the app opens -----
 let sheetShown = false;
 // One-time tip after the update: what Spotting and Spotters mean (shown once, on Today, when nothing else is up)
-const TIP_KEY = "gs-tip-spot";
+const TIP_KEY = "gs-tip-spot"; let tipPending = false;
 function maybeShowSpotTip(){
   try { if (localStorage.getItem(TIP_KEY + "-" + myId)) return; } catch(e){ return; }
   if (!me() || ob || locked || wnActive || tab !== "today" || document.querySelector(".sheetwrap")) return;
-  try { localStorage.setItem(TIP_KEY + "-" + myId, "1"); } catch(e){}
+  if (tipPending) return; tipPending = true;
   setTimeout(() => {
-    if (document.querySelector(".sheetwrap") || wnActive || tab !== "today") return;
+    tipPending = false;
+    if (document.querySelector(".sheetwrap") || wnActive || tab !== "today" || ob || locked) return;   // something else is up: try again next time
+    try { localStorage.setItem(TIP_KEY + "-" + myId, "1"); } catch(e){}                           // only counts as seen once it's actually shown
     const m = me(), wrap = document.createElement("div");
     wrap.id = "spottip"; wrap.className = "sheetwrap";
     wrap.innerHTML = `<div class="sheet tipsheet" role="dialog" aria-modal="true" aria-labelledby="tip-title">
@@ -2011,7 +2013,7 @@ function maybeShowPushSheet(){
   if (!(st === "off" && Notification.permission === "default") && st !== "denied") return;
   if (snoozedPush() || !me() || ob || locked || tab !== "today") return;
   sheetShown = true;
-  setTimeout(showPushSheet, 600);   // let the Today screen land first
+  setTimeout(() => { if (document.querySelector(".sheetwrap")){ sheetShown = false; return; } showPushSheet(); }, 1200);   // let the Today screen (and any tip) land first
 }
 function showPushSheet(){
   const m = me(); if (!m || document.getElementById("pushsheet")) return;
@@ -2112,7 +2114,7 @@ async function sendTestPush(){
 const NOTIF_TYPES = [
   ["nudge",  "Nudges", "When a friend nudges you to train"],
   ["react",  "Reactions", "When someone reacts to your session"],
-  ["crew",   "Crew activity", "When a friend logs today's session"],
+  ["crew",   "Crew activity", "When someone you bud logs a session"],
   ["remind", "Gym reminder", "On gym days, if you haven't logged yet"],
   ["chat",   "Messages", "Chats with your Buds and circles"],
 ];
@@ -2699,7 +2701,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b27";   // bump together with version.json on every release
+const APP_VERSION = "b28";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

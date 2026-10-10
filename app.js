@@ -68,7 +68,11 @@ function dayStreakAt(m, end){
   }
   return n;
 }
-const dayStreak = m => dayStreakAt(m, today());
+// Streaks are worked out by walking back day by day; leaderboards ask for them many times per screen,
+// so remember each person's answer until their data (a new object) or the date changes.
+const streakMemo = new WeakMap();
+const dayStreak = m => { const k = key(today()), c = streakMemo.get(m); if (c && c.k === k) return c.v;
+  const v = dayStreakAt(m, today()); streakMemo.set(m, { k, v }); return v; };
 function bestStreak(m){
   let run=0,best=0; const t = today();
   for (let d = parse(m.since); d <= t; d = addDays(d,1)){
@@ -108,7 +112,36 @@ const me = () => myId ? members.get(myId) : null;
 const roster = () => [...members.entries()].map(([id,m])=>({id,...m})).filter(m=>m.name && m.plan)
   .sort((a,b)=> (a.id===myId?-1:b.id===myId?1:0) || String(a.joined||"").localeCompare(String(b.joined||"")));
 // Can I see this person's attendance, streaks and trophies? (Always yes for yourself.)
-const sharesStats = m => !!m && (m.id === myId || (m.isPublic && m.shareAtt && !!m.since));
+const sharesStats = m => !!m && (m.id === myId || (m.visible && !!m.since));
+// ---- Buds (stage 1) ----
+const BETA = !!window.GYM_BETA;
+const ICON = (window.GYM_BETA ? "../" : "") + "icons/apple-touch-icon.png";
+let youView = "profile";   // You tab: "profile" | "edit" | "settings"
+let crewView = "buds", profileId = null, findQ = "", sentNudgeTo = new Set(), wnActive = false, wnDone = false, wnStep = 1, wnPv = null;
+try { crewView = localStorage.getItem("gs-crewview") || "buds"; } catch(e){}
+const isBud = m => !!m && m.iBud === "accepted";                       // I'm their bud (I can see them if private)
+const budsCrew = () => statsCrew().filter(o => o.id === myId || isBud(o));
+const requestsIn = () => [...members.values()].filter(m => m.theyBud === "pending");
+const followersOf = () => [...members.values()].filter(m => m.theyBud === "accepted");
+// Terminology: both budded each other = "Buds"; only you → you're "Spotting" them; only them → they're your "Spotter"
+const isMutual = m => !!m && m.iBud === "accepted" && m.theyBud === "accepted";
+const relation = m => isMutual(m) ? "buds" : m?.iBud === "accepted" ? "spotting" : m?.theyBud === "accepted" ? "spotter" : m?.iBud === "pending" ? "requested" : "";
+const counts = () => { const all = [...members.values()].filter(m => m.id !== myId);
+  // like Instagram: a Bud also counts in Spotting and in Spotters
+  return { buds: all.filter(isMutual).length, spotting: all.filter(m => m.iBud === "accepted").length, spotters: all.filter(m => m.theyBud === "accepted").length }; };
+const everyone = () => [...members.values()].filter(m => m.name && m.id !== myId).sort((a,b) => a.name.localeCompare(b.name));
+// Nudges: Buds (both bud each other) every 10 minutes; circle-mates once a day; nobody else
+const NUDGE_GAP_MIN = 10;
+const nudgeWait = o => {   // minutes until I can nudge them again (0 = now)
+  const last = nudges.filter(n => n.from_user === myId && n.to_user === o.id).map(n => Date.parse(n.created_at || 0)).sort((a,b) => b-a)[0];
+  return last ? Math.max(0, Math.ceil(NUDGE_GAP_MIN - (Date.now() - last) / 60000)) : 0; };
+let circles = [], circleId = null, circleMode = "view", circleDraft = null, pendingJoin = null, joinPreview = null;
+const circleMate = o => !!o && circles.some(c => c.members.some(m => m.user_id === o.id));
+const canNudge = o => !!o && o.id !== myId && (isMutual(o) ? nudgeWait(o) === 0 : circleMate(o) && !nudgedToday(o.id));
+// the nudge control: a button, or "Nudged · 7m" (Buds) / "Nudged today" (circle-mates) while waiting; nothing for anyone else
+const nudgeCtl = (o, attr) => o.id === myId || !(isMutual(o) || circleMate(o)) ? "" : canNudge(o)
+  ? `<button type="button" class="${attr === "data-pnudge" ? "chip" : "nudge"}" ${attr}="${esc(o.id)}">👀 Nudge</button>`
+  : isMutual(o) ? `<span class="nudged" data-wait>👀 Nudged · ${nudgeWait(o)}m</span>` : `<span class="nudged">👀 Nudged today</span>`;
 const statsCrew = () => roster().filter(sharesStats);
 const quietCrew = () => roster().filter(o => o.id !== myId && !sharesStats(o));
 const workLabel = s => s && s.w ? esc(s.w) : "Gym day";   // split hidden -> just "Gym day"
@@ -219,29 +252,35 @@ function viewToday(){
     <div class="tile"><b class="sign">${weekNo(m)}</b><span class="label">Week</span></div>
     <div class="tile"><b class="sign">${bestStreak(m)}</b><span class="label">Best run</span></div></div>`;
   const q = `<div class="card quote"><span class="bolt">${BOLT}</span><div class="q">${qa}<small>${qb}</small></div></div>`;
-  const crew = roster().filter(o=>o.id!==myId);
+  const crew = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o));   // just your buds
   let crewHtml = "";
   if (crew.length){
-    crewHtml = `<div class="sec"><h2 class="sign">Crew today</h2><span class="label">${crew.length} member${crew.length===1?"":"s"}</span></div><div class="list">` +
+    crewHtml = `<div class="sec"><h2 class="sign">Your crew today</h2><span class="label">${crew.length} ${crew.length===1?"person":"people"}</span></div><div class="list">` +
       crew.map(o=>{
         if (!sharesStats(o)) return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · keeps stats private</span></div><span class="status rest">${LOCK}</span></div>`;
         const st = isGym(o,t) ? (has(o,t)?"done":"todo") : (ticked(o,t) ? "done" : "rest");
         const action = st === "done" ? reactBar(o,t)
-          : st === "todo" ? (nudgedToday(o.id) ? `<span class="nudged">👀 Nudged</span>` : `<button type="button" class="nudge" data-nudge="${esc(o.id)}">👀 Nudge</button>`) : "";
-        return `<div class="li crewrow" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
+          : st === "todo" ? nudgeCtl(o, "data-nudge") : "";
+        return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span>${action ? `<span class="rowact">${action}</span>` : ""}</div>
           <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>`;
-  } else crewHtml = `<div class="card"><span class="label">Crew</span><p style="margin:6px 0 0;font-weight:600">You're the first one here.</p><p class="note">Open the You tab to see how to bring your friends in.</p></div>`;
+  } else crewHtml = `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">Your buds' sessions show up here.</p>
+      <p class="note">Bud your gym mates to see who's trained today and nudge them. Bud each other and you're Buds.</p>
+      <button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find your buds</button></div>`;
 
   // Existing members get asked once; anyone hidden gets a gentle nudge to share.
   let pvHtml = "";
-  if (!m.privacyChosen){
+  // Bud requests waiting for me
+  for (const r of requestsIn().slice(0,3)) pvHtml += `<div class="card banner"><span class="big-emoji">🤝</span><div class="grow"><b>${esc(r.name)} wants to be your bud</b>
+      <span class="note">Accept to let them see your profile and streak.</span>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(r.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(r.id)}">Decline</button></span></div></div>`;
+  if (false){
     pvDraft = pvDraft || pvFrom(m);
     pvHtml = `<div class="card pvcard"><span class="label">New</span><h2 class="sign" style="margin:4px 0 2px;font-size:30px">Choose what your crew sees</h2>
       <p class="note">You can change this any time in the You tab.</p>${privacyPicker(pvDraft)}
       <button class="cta" id="pv-save">Save</button></div>`;
-  } else if (!m.isPublic || !m.shareAtt){
+  } else if (false){
     pvHtml = `<div class="card quote"><span class="bolt">${LOCK}</span><div class="q">You're hidden from the leaderboard.<small>Share your streak so the crew can see you showing up.</small>
       <button class="linkbtn" id="pv-open" style="padding-left:0">Privacy settings</button></div></div>`;
   }
@@ -291,8 +330,9 @@ function viewToday(){
       <div class="q">Track your steps here<small>Connect Apple Health with a 2-minute Shortcut.</small>
       <button class="linkbtn" id="steps-setup" style="padding-left:0">Set it up</button></div></div>`;
   }
-  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${tiles}${stepsHtml}${q}${crewHtml}</div>`;
-  $("logbtn").onclick = () => toggleDay(t);
+  const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
+  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${tiles}${stepsHtml}${q}${crewHtml}${circleRow}</div>`;
+  $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
   main().querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => { b.disabled = true; sendNudge(b.dataset.nudge); });
   main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { goalDraft = toggleIn(goalDraft, b.dataset.goal); render(); });
@@ -329,7 +369,7 @@ function cellBtn(o,d){
   const s = slot(o,d), t = today(), done = has(o,d), cred = credited(o,d);
   const fz = !done && frozen(o,d);
   const st = !s ? (done?"done":"rest") : done ? "done" : fz ? "froze" : (!s.opt && d<t) ? "missed" : "open";
-  const mine = o.id===myId && d<=t && !cred && db;
+  const mine = o.id===myId && d<=t && d >= addDays(t, -31) && !cred && db;
   const label = !s ? (done?"Bonus":"Rest") : workLabel(s);
   const small = fz ? "❄️ Freeze" : s?.opt ? "Optional" : "";
   return `<button class="cell ${st} ${mine?"mine":""}" ${mine?`data-day="${key(d)}"`:"disabled"} style="${pc(o)}" aria-label="${esc(o.name)} ${DAYS_LONG[dow(d)]}: ${label}, ${done?"done":"not done"}">
@@ -337,15 +377,47 @@ function cellBtn(o,d){
 }
 
 function viewCrew(){
-  const t = today(), ws = startOfWeek(t), list = statsCrew(), quiet = quietCrew();
-  if (!list.length){ main().innerHTML = `<div class="card"><p style="margin:0;font-weight:600">No one's joined yet.</p><p class="note">Join from the Today tab and you'll show up here.</p></div>`; return; }
+  const seg = `<div class="seg levelseg crewseg" role="tablist">${[["buds","My crew"],["circles","Circles"],["everyone","Everyone"]].map(([id,l]) =>
+    `<button type="button" role="tab" data-crewview="${id}" aria-pressed="${crewView===id}">${l}</button>`).join("")}</div>`;
+  if (crewView === "circles"){ viewCirclesTab(seg); }
+  else if (crewView === "everyone"){
+    const top = seg + `<input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="list peoplelist" id="people">${everyone().map(personRow).join("")}</div>
+      <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
+    crewBoard(statsCrew().filter(o => o.id === myId || !o.private), [], top, { title: "Public leaderboard", weekBoard: false });
+    wireFind();
+  } else {
+    const list = budsCrew();
+    const empty = list.length <= 1 ? `<div class="card"><p style="margin:0;font-weight:600">No one here yet.</p><p class="note">Bud your gym mates to see their weeks and streaks here.</p>
+      <button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find your buds</button></div>` : "";
+    crewBoard(list, [], seg + empty, { title: "My crew", weekBoard: list.length > 1 });
+  }
+  main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
+}
+// One row in "Find people": plate, name, streak (or Private), bud button
+function personRow(o){
+  const rel = relation(o) === "spotter" ? " · Spots you" : relation(o) === "buds" ? " · 🤝 Buds" : "";
+  const sub = (o.visible && sharesStats(o) ? `${dayStreak(o)} day streak · Week ${weekNo(o)}` : o.private ? `${LOCK} Private` : "Just joined") + rel;
+  return `<div class="li prow tappable" data-profile="${esc(o.id)}" data-name="${esc(tidyName(o.name).toLowerCase())}" style="${pc(o)}"><span class="dot"></span>
+    <div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${sub}</span></div>${budBtn(o)}</div>`;
+}
+function wireFind(){
+  const q = $("find-q"); if (!q) return;
+  const apply = () => { findQ = q.value; const n = tidyName(q.value).toLowerCase(); let shown = 0;
+    main().querySelectorAll("#people [data-name]").forEach(r => { const hit = !n || r.dataset.name.includes(n); r.hidden = !hit; if (hit) shown++; });
+    $("find-none").hidden = shown > 0; };
+  q.oninput = apply; apply();
+}
+function crewBoard(list, quiet, top, opts){
+  const t = today(), ws = startOfWeek(t);
+  if (!list.length){ main().innerHTML = `<div class="view">${top}${opts.bottom || ""}</div>`; return; }
   const quietHtml = quiet.length ? `<div class="sec"><h2 class="sign">Keeping it private</h2><span class="label">${quiet.length}</span></div>
     <div class="list">${quiet.map(o=>`<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
       <span class="note">Not sharing attendance</span></div><span class="status rest">${LOCK}</span></div>`).join("")}</div>` : "";
   const ranked = [...list].sort((a,b)=> dayStreak(b)-dayStreak(a) || weeksDone(b)-weeksDone(a));
   const board = `<div class="list">${ranked.map((o,i)=>{
       const days = Array.from({length:7},(_,k)=>{ const d=addDays(ws,k); return `<i class="${has(o,d)?"d":frozen(o,d)?"f":isGym(o,d)?(d<t?"m":"g"):""}"></i>`; }).join("");
-      return `<div class="li" style="${pc(o)}"><span class="rank">${i+1}</span><span class="dot"></span>
+      return `<div class="li tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="rank">${i+1}</span><span class="dot"></span>
         <div class="grow"><span class="nm">${esc(o.name)}${o.id===myId?'<span class="youtag">YOU</span>':""}</span>
         <span class="week7" aria-label="This week">${days}</span><span class="note">Week ${weekNo(o)} · best ${bestStreak(o)}</span></div>
         <div class="big-n sign">${dayStreak(o)}<small>DAY STREAK</small></div></div>`; }).join("")}</div>`;
@@ -361,7 +433,7 @@ function viewCrew(){
     const tag = (w.over||!w.left) ? (w.hit>=w.target?["done","Target hit"]:["todo","Missed "+(w.target-w.hit)]) : w.missed?["todo","Missed "+w.missed]:["todo",w.left+" to go"];
     return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${w.hit} of ${w.target} gym days${w.bonus?` · +${w.bonus} bonus`:""}</span></div><span class="status ${tag[0]}">${tag[1]}</span></div>`; }).join("");
   main().innerHTML = `<div class="view">
-    <div class="sec" style="margin-top:0"><h2 class="sign">Leaderboard</h2><span class="label">By day streak</span></div>
+    ${top}<div class="sec"><h2 class="sign">${opts.title}</h2><span class="label">By day streak</span></div>
     <div class="crewkey" aria-hidden="true"><span><span class="week7"><i class="d"></i></span>Trained</span><span><span class="week7"><i class="m"></i></span>Missed</span><span><span class="week7"><i class="f"></i></span>Freeze</span><span><span class="week7"><i class="g"></i></span>To come</span></div>${board}
     ${(() => { if (!STEPS_ENABLED) return "";
       const sharers = roster().filter(seesSteps);
@@ -381,21 +453,21 @@ function viewCrew(){
       return `<div class="sec"><h2 class="sign">Steps</h2><span class="label">${sub}</span></div>${toggle}<div class="list">${sp.map((x,i) =>
         `<div class="li" style="${pc(x.o)}"><span class="rank">${i+1}</span><span class="dot"></span><div class="grow"><span class="nm">${esc(x.o.name)}${x.o.id===myId?'<span class="youtag">YOU</span>':""}</span>
           <span class="stepmeter"><i style="width:${Math.round(x.tot/top*100)}%"></i></span></div><div class="big-n sign" style="font-size:28px">${num(x.tot)}<small>STEPS</small></div></div>`).join("")}</div>`; })()}
-    <div class="sec"><h2 class="sign">Week board</h2></div>
+    ${opts.weekBoard === false ? "" : `<div class="sec"><h2 class="sign">Week board</h2></div>
     <div class="weeknav"><button class="navbtn" id="prev" aria-label="Previous week">‹</button>
       <div class="mid"><b class="sign">${weekOffset===0?"This week":weekOffset===-1?"Last week":"Week of "+fmt(start)}</b><span class="label">${fmt(start)} – ${fmt(addDays(start,6))}</span></div>
       <button class="navbtn" id="next" aria-label="Next week" ${weekOffset>=0?"disabled":""}>›</button></div>
     <div class="scrollx">${grid}</div>
     <p class="note">Tap your own column to tick a day you forgot, or to undo one.</p>
-    <div class="list">${sums}</div>${quietHtml}</div>`;
+    <div class="list">${sums}</div>`}${quietHtml}${opts.bottom || ""}</div>`;
   main().querySelectorAll("[data-sm]").forEach(b => b.onclick = () => { stepsMode = b.dataset.sm; try{localStorage.setItem("gs-steps",stepsMode);}catch(e){} render(); });
-  $("prev").onclick = () => { weekOffset--; render(); };
-  $("next").onclick = () => { if (weekOffset<0){ weekOffset++; render(); } };
+  if ($("prev")) $("prev").onclick = () => { weekOffset--; render(); };
+  if ($("next")) $("next").onclick = () => { if (weekOffset<0){ weekOffset++; render(); } };
   main().querySelectorAll("[data-day]").forEach(b => b.onclick = () => toggleDay(parse(b.dataset.day)));
 }
 
 function viewTrophies(){
-  const list = statsCrew();
+  const list = statsCrew().filter(o => o.id === myId || isBud(o) || o.id === trophyFor);
   if (!list.length){ main().innerHTML = `<div class="card"><p style="margin:0;font-weight:600">Trophies show up once you join.</p></div>`; return; }
   if (!trophyFor || !list.some(o=>o.id===trophyFor)) trophyFor = myId && members.has(myId) ? myId : list[0].id;
   const m = list.find(o=>o.id===trophyFor);
@@ -424,7 +496,9 @@ function viewTrophies(){
 
 function viewYou(){
   const m = me();
-  const link = location.origin + location.pathname;
+  if (m && youView === "profile") return viewProfile(true);
+  if (m && youView.startsWith("list:")) return viewPeopleList(youView.slice(5));
+  const link = location.origin + location.pathname.replace(/beta\/(index\.html)?$/, "");   // invites always go to the main app
   const invite = `<div class="card"><span class="label">Bring a friend in</span>
     <ol style="margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15px">
       <li>Send them this link: <b class="mono" style="font-size:13px;word-break:break-all">${esc(link)}</b></li>
@@ -435,29 +509,36 @@ function viewYou(){
     <button class="cta ghost" id="logout">Log out</button>`;
   if (!m){ main().innerHTML = `<div class="view"><div class="card"><p style="margin:0;font-weight:600">You haven't set up your plan yet.</p><p class="note">Go to Today and tap Get started.</p></div>${invite}${acct}</div>`; }
   else {
-    const plan = m.plan.map((s,i)=>`<div class="li"><b class="sign" style="font-size:20px;width:44px">${DAYS[i]}</b><span class="grow">${s?esc(s.w):'<span class="note">Rest</span>'}</span>${s?.opt?'<span class="label">Optional</span>':""}</div>`).join("");
-    main().innerHTML = `<div class="view">
-      <div class="card hero" style="${pc(m)}"><span class="label">${plateName(m.plate)} plate · since ${fmt(parse(m.since))}</span>
-        <div class="work sign">${esc(m.name)}</div>
-        <p class="sub">Week ${weekNo(m)} · ${dayStreak(m)} day streak · ${Object.keys(m.days||{}).length} sessions logged${body.trainedSince ? ` · lifting since ${parse(body.trainedSince).toLocaleDateString("en-AU",{month:"short",year:"numeric"})}` : ""}</p></div>
-      <div class="sec"><h2 class="sign">Profile</h2></div>
+    const backBtn = `<button type="button" class="linkbtn pfback" id="you-back">‹ Profile</button>`;
+    if (youView === "edit"){
+      $("title").textContent = "Edit profile";
+      main().innerHTML = `<div class="view">${backBtn}
       <div class="list editrows">
         <button type="button" class="li editrow" data-edit="name"><span class="grow"><span class="label">Name</span><b>${esc(m.name)}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
         <button type="button" class="li editrow" data-edit="plate"><span class="grow"><span class="label">Plate colour</span><b style="display:flex;align-items:center;gap:8px">${plateSvg(m.plate, 22)}${plateName(m.plate)}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
         <button type="button" class="li editrow" data-edit="split"><span class="grow"><span class="label">Split</span><b>${esc(splitLabel(m))}</b></span><span class="note">Edit</span><i class="chev r"></i></button>
       </div>
-      <div class="sec"><h2 class="sign">Your split</h2></div>
-      <div class="list">${plan}</div>
-      ${bodyCard()}
-      <div class="sec"><h2 class="sign">Privacy</h2><span class="label">${privacySummary(m)}</span></div>
+      <p class="note" style="text-align:center">Goals, height and weight are in ⚙️ Settings → Goal &amp; body.</p></div>`;
+      main().querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(true, b.dataset.edit));
+      $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
+      return;
+    }
+    $("title").textContent = "Settings";
+    main().innerHTML = `<div class="view">${backBtn}
+      <div class="sec" style="margin-top:0"><h2 class="sign">Account</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
+      ${bodyCard()}
       ${STEPS_ENABLED ? healthCard(m) : ""}
       ${notifCard()}
       ${lockCard()}
+      <div class="sec"><h2 class="sign">What's new</h2></div>
+      <div class="card"><p class="note" style="margin:0 0 10px">See the quick tour of Buds, Profiles, Circles and Chats again.</p><button class="cta ghost" id="wn-replay" style="font-size:18px">Replay the tour</button></div>
+      <div class="sec"><h2 class="sign">Invite</h2></div>
       ${invite}${acct}</div>`;
+    $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
+    $("wn-replay").onclick = startTour;
     wireNotifCard();
     wireHealth();
-    main().querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(true, b.dataset.edit));
     wireBody();
     wireLockCard();
     const p = pvFrom(m);
@@ -671,10 +752,10 @@ async function toggleReaction(e, to, day){
 const nudgedToday = to => nudges.some(n => n.from_user === myId && n.to_user === to && n.day === key(today()));
 const nudgesForMe = () => nudges.filter(n => n.to_user === myId && !n.seen);
 async function sendNudge(to){
-  const n = { from_user: myId, to_user: to, day: key(today()), seen: false };
-  nudges.push(n); render();
+  const n = { from_user: myId, to_user: to, day: key(today()), seen: false, created_at: new Date().toISOString() };
+  nudges.push(n); sentNudgeTo.add(to); render();
   const { error } = await sb.from("nudges").insert({ from_user: myId, to_user: to });
-  if (error){ nudges = nudges.filter(x => x !== n); render(); return showWarn("Couldn't nudge: " + error.message); }
+  if (error){ nudges = nudges.filter(x => x !== n); sentNudgeTo.delete(to); render(); return showWarn("Couldn't nudge: " + error.message); }
   toast(`Nudged ${nameOf(to)} 👀`);
 }
 async function dismissNudges(){
@@ -803,42 +884,46 @@ async function shareRecap(m){
 // ================= Privacy =================
 // p = {pub, att, split}. Sharing is the default and the recommended choice.
 function privacyPicker(p){
+  // p = {priv, hide}
   return `<div class="privacy">
-    <button type="button" class="popt ${p.pub?"on":""}" data-pv="pub" aria-pressed="${p.pub}">
-      <span class="pt">Share with the crew <span class="rec">Recommended</span></span>
-      <span class="pd">Your crew keeps you honest. They see if you went, you show up on the leaderboard, and they can hype you up.</span></button>
-    ${p.pub ? `<div class="toggles">
-      <label class="tg" for="pv-att"><span><b>Attendance &amp; streaks</b><small>Whether you went each day, your streak, week number and trophies</small></span>
-        <input type="checkbox" class="sw" id="pv-att" ${p.att?"checked":""}></label>
-      <label class="tg" for="pv-split"><span><b>My split</b><small>What you train each day (e.g. Push, Legs)</small></span>
-        <input type="checkbox" class="sw" id="pv-split" ${p.split?"checked":""}></label>
-      ${STEPS_ENABLED ? `<label class="tg" for="pv-steps"><span><b>Steps</b><small>Daily steps from Apple Health, if you connect it</small></span>
-        <input type="checkbox" class="sw" id="pv-steps" ${p.steps?"checked":""}></label>` : ""}
-      ${p.att ? "" : `<p class="nudge">Heads up: with attendance off you're not on the leaderboard, and nobody can tell if you went. Streaks hit different when people are watching.</p>`}
-    </div>` : ""}
-    <button type="button" class="popt ${!p.pub?"on":""}" data-pv="priv" aria-pressed="${!p.pub}">
-      <span class="pt">${LOCK} Keep it private</span>
-      <span class="pd">Only you see your sessions. You won't appear in the crew at all.</span></button>
+    <button type="button" class="popt ${p.priv === true ? "on" : ""}" data-pv="priv" aria-pressed="${p.priv === true}">
+      <span class="pt">${LOCK} Private</span>
+      <span class="pd">People send a bud request. Only buds you approve see your profile and streak.</span></button>
+    <button type="button" class="popt ${p.priv === false ? "on" : ""}" data-pv="pub" aria-pressed="${p.priv === false}">
+      <span class="pt">🔓 Public</span>
+      <span class="pd">Anyone can see your profile and bud you straight away.</span></button>
+    <div class="toggles"><label class="tg" for="pv-hide"><span><b>Hide my split</b><small>Show that you trained, not what you trained</small></span>
+      <input type="checkbox" class="sw" id="pv-hide" ${p.hide?"checked":""}></label></div>
   </div>`;
 }
 function wirePrivacy(p, onChange){
-  main().querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { p.pub = b.dataset.pv === "pub"; if (p.pub && !p.att && !p.split){ p.att = true; } onChange(); });
-  const a = $("pv-att"), s = $("pv-split");
-  if (a) a.onchange = () => { p.att = a.checked; onChange(); };
-  if (s) s.onchange = () => { p.split = s.checked; onChange(); };
-  const st = $("pv-steps");
-  if (st) st.onchange = () => { p.steps = st.checked; onChange(); };
+  main().querySelectorAll("[data-pv]").forEach(b => b.onclick = () => { p.priv = b.dataset.pv === "priv"; onChange(); });
+  const h = $("pv-hide"); if (h) h.onchange = () => { p.hide = h.checked; onChange(); };
 }
-const pvFrom = m => ({ pub: m?.isPublic ?? true, att: m?.shareAtt ?? true, split: m?.shareSplit ?? true, steps: m?.shareSteps ?? false });
-async function savePrivacy(p){
-  const { error } = await sb.from("profiles").update({ is_public:p.pub, share_attendance:p.att, share_split:p.split, share_steps:!!p.steps, privacy_chosen:true }).eq("id", myId);
-  if (error){ showWarn("Couldn't save privacy: " + error.message); return false; }
+const pvFrom = m => ({ priv: !!m?.private, hide: !!m?.splitHidden });
+// Phone signal drops show up as "TypeError: Load failed" (Safari) / "Failed to fetch" (Chrome): the request may or may not have landed.
+const netErr = e => /load failed|failed to fetch|networkerror|network request failed|network connection was lost/i.test(String(e?.message || e || ""));
+async function retryNet(run){            // for saves that are safe to repeat: try once more after a blip
+  let r = await run();
+  if (r.error && netErr(r.error)){ await new Promise(ok => setTimeout(ok, 900)); r = await run(); }
+  return r;
+}
+// Saves the new settings AND the old ones, so the live (pre-buds) app stays consistent during the beta
+async function savePrivacy(p, extra = {}){
+  const row = { account: p.priv ? "private" : "public", hide_split: !!p.hide,
+    is_public: !p.priv, share_attendance: !p.priv, share_split: !p.hide, privacy_chosen: true, ...extra };
+  let { error } = await retryNet(() => sb.from("profiles").update(row).eq("id", myId));
+  if (error && netErr(error)){
+    // the reply got lost: check whether the save actually landed before calling it a failure
+    const chk = await sb.from("profiles").select("account,hide_split,seen_update").eq("id", myId).maybeSingle().catch(() => ({}));
+    const d = chk?.data;
+    if (d && d.account === row.account && d.hide_split === row.hide_split && (extra.seen_update == null || d.seen_update === extra.seen_update)) error = null;
+  }
+  if (error){ showWarn(netErr(error) ? "Connection dropped. Check your signal and tap Continue again." : "Couldn't save privacy: " + error.message); return false; }
+  $("warn").hidden = true;
   await loadAll(); return true;
 }
-const privacySummary = m => !m.isPublic ? "Private: only you see your sessions"
-  : m.shareAtt && m.shareSplit ? "Sharing attendance, streaks and split"
-  : m.shareAtt ? "Sharing attendance and streaks · split hidden"
-  : m.shareSplit ? "Sharing split only · attendance hidden" : "Visible by name only";
+const privacySummary = m => (m.private ? "Private" : "Public") + (m.splitHidden ? " · split hidden" : "");
 
 // ================= Apple Health setup =================
 // The iPhone Shortcut reads today's steps from Health and POSTs them to log_steps with your secret key.
@@ -955,7 +1040,7 @@ function startOnboarding(edit, only){
     plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false],
     exp: { n: 6, unit: "months" },      // how long you've been going to the gym at all
     streak: { n: 0, unit: "weeks" },    // how long you've been going consistently (sets your streak)
-    pv: { pub:true, att:true, split:true, steps:false }, goals: [...(body.goals || [])] };
+    pv: { priv:false, hide:false }, goals: [...(body.goals || [])] };
   render();
 }
 function viewOnboarding(){
@@ -984,7 +1069,7 @@ function viewOnboarding(){
       <p class="note">Without missing your planned gym days. This sets your starting streak, so be honest. 0 is fine.</p>
       ${durPicker("stk", ob.streak, ["days","weeks","months","years"])}
       <p class="note dprev" id="stk-prev">${streakPreview()}</p>`; }
-  if (k==="privacy"){ body = `<span class="label">${ql}</span><h2 class="sign">What can the crew see?</h2>
+  if (k==="privacy"){ body = `<span class="label">${ql}</span><h2 class="sign">Public or private?</h2>
       <p class="note">You can change this any time in the You tab.</p>${privacyPicker(ob.pv)}`; }
   const isReview = k === "review", last = isReview || !!ob.only;
   if (isReview){ const gym = ob.plan.filter((w,i)=>normalizeWorkout(w)&&!ob.opt[i]).length;
@@ -996,7 +1081,7 @@ function viewOnboarding(){
         <div><span>Gym days a week</span><b>${gym}</b></div>
         ${ob.edit?"":`<div><span>Gym experience</span><b>${esc(durText(ob.exp))}</b></div>
           <div><span>Starting on</span><b>Week ${weekNo(previewMember())}</b></div>
-          <div><span>Crew sees</span><b>${privacySummary({isPublic:ob.pv.pub, shareAtt:ob.pv.att, shareSplit:ob.pv.split}).replace(/^Private: /,"Private · ")}</b></div>`}
+          <div><span>Crew sees</span><b>${privacySummary({private:ob.pv.priv, splitHidden:ob.pv.hide})}</b></div>`}
         ${DAYS.map((d,i)=>{ const w = normalizeWorkout(ob.plan[i]); return `<div><span>${d}</span><b>${w?esc(w)+(ob.opt[i]?" (optional)":""):"Rest"}</b></div>`; }).join("")}
       </div>`; }
   main().innerHTML = `<div class="card ob">${dots}${body}
@@ -1157,7 +1242,8 @@ async function saveOnboarding(){
   if (!old){ row.since = key(streakStart(ob.streak)); row.track_start = key(ws);
     // you can't have been consistent for longer than you've been going at all
     const exp = durStart(ob.exp); row.trained_since = key(exp < parse(row.since) ? exp : parse(row.since));
-    Object.assign(row, { is_public:ob.pv.pub, share_attendance:ob.pv.att, share_split:ob.pv.split, share_steps:!!ob.pv.steps, privacy_chosen:true }); }
+    Object.assign(row, { account: ob.pv.priv ? "private" : "public", hide_split: !!ob.pv.hide, seen_update: 1,
+      is_public: !ob.pv.priv, share_attendance: !ob.pv.priv, share_split: !ob.pv.hide, share_steps: false, privacy_chosen: true }); }
   const wasEdit = ob.edit;
   const btn = $("ob-next"); if (btn) btn.disabled = true;
   // Editing: UPDATE only the changed fields. (An upsert is checked like a brand-new row,
@@ -1204,15 +1290,17 @@ function saveTimeZone(saved){
   const tz = phoneTZ();
   if (tz && saved !== undefined && saved !== tz) sb.from("profiles").update({ tz }).eq("id", myId).then(() => {}, () => {});
 }
-let editSeq = 0, reloadAgain = false;   // editSeq goes up every time I tick/untick a day
+let editSeq = 0, reloadAgain = false, loadGen = 0, failed = new Set();   // loadGen: bumped on sign-out so old loads are thrown away   // editSeq goes up every time I tick/untick a day
 async function loadAll(){
   if (loading){ reloadAgain = true; return loading; }   // a change arrived mid-load: load again afterwards
-  const seq0 = editSeq;
+  const seq0 = editSeq, gen = loadGen;
+  const before = ready && myId ? { members, reactions, nudges, circles } : null;   // what we had, to spot what's new
   loading = (async () => {
     try {
       const [profiles, checkins] = await Promise.all([
         // "crew" is a database view that already strips out whatever each person keeps private
-        fetchAll("crew", "id,name,plate,plan,since,track_start,created_at,is_public,share_attendance,share_split,privacy_chosen,share_steps"),
+        // "people" (database view) = everyone, with only what I'm allowed to see about each person
+        fetchAll("people", "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters"),
         fetchAll("checkins", "user_id,day")
       ]);
       // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
@@ -1226,46 +1314,68 @@ async function loadAll(){
       // tidy older, hand-typed split names on the way in ("back bicep" -> "Back + Biceps")
       const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
       for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
-        isPublic:p.is_public, shareAtt:p.share_attendance, shareSplit:p.share_split, privacyChosen:p.privacy_chosen, shareSteps:p.share_steps,
+        isPublic:!p.private, shareAtt:p.visible, shareSplit:!p.split_hidden, privacyChosen:true, shareSteps:false,
+        private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0,
         days:{}, steps:{}, stepsAt:null });
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       // Streak freezes (the database only returns your own + people who share attendance)
-      const freezeRows = await fetchAll("freezes", "user_id,day").catch(() => []);
-      for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
+      // Everything else in ONE parallel batch (was ~8 trips one after another). If a part fails (flaky signal),
+      // keep what we had instead of treating it as "empty" (that kicked people out of circles and caused false banners).
+      const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
+      const soft = p => p.then(v => v, () => null);           // null = this part failed
+      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows] = await Promise.all([
+        soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
+        soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
+        soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
+        soft(fetchAll("chat_reads", "chat,read_at")),
+        soft(fetchAll("freezes", "user_id,day")),
+        soft(fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8))))),
+        soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
+        soft(fetchAll("nudges", "to_user", q => q.eq("from_user", myId))),
+        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,remind_at,tz").eq("id", myId).maybeSingle(),
+        soft(fetchAll("bodyweight", "day,kg", q => q.order("day")))]);
+      if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
+      failed = new Set();
+      // Circles I'm in (the database only returns those) and their members
+      if (cRows && cmRows) circles = cRows.map(c => ({ ...c, members: cmRows.filter(m => m.circle_id === c.id).sort((a,b) => String(a.joined_at).localeCompare(String(b.joined_at))) }))
+        .sort((a,b) => String(a.created_at).localeCompare(String(b.created_at)));
+      else failed.add("circles");
+      // Chats: the last 90 days of messages I can see, and where I've read up to.
+      // Keep anything that arrived live while this was loading (and my unsent ones), so nothing flickers away.
+      if (msgRows){ const got = new Set(msgRows.map(m => m.id));
+        messages = [...msgRows, ...messages.filter(m => !got.has(m.id) && (m.pending || m.failed || m.created_at > fetchedAt))]; }
+      for (const r of readRows || []) if (!chatReads[r.chat] || r.read_at > chatReads[r.chat]) chatReads[r.chat] = r.read_at;
+      if (freezeRows) for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
+      else for (const [id, m] of next){ const old = members.get(id); if (old?.frozen) m.frozen = old.frozen; }
       // Reactions from the last week, nudges to/from me from the last 2 days
-      reactions = await fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8)))).catch(() => []);
-      nudges = await fetchAll("nudges", "from_user,to_user,day,seen", q => q.gte("day", key(addDays(today(), -1)))).catch(() => []);
+      if (rRows) reactions = rRows; else failed.add("reactions");
+      if (nRows) nudges = [...nRows, ...nudges.filter(n => n.from_user === myId && !nRows.some(x => x.from_user === n.from_user && x.to_user === n.to_user && x.created_at === n.created_at) && Date.now() - Date.parse(n.created_at) < 60000)];
+      else failed.add("nudges");
+      // everyone I've ever nudged (non-buds only get one nudge, ever)
+      if (sentRows) sentNudgeTo = new Set(sentRows.map(n => n.to_user));
       // My private stuff: goal, height and weight log (nobody else can read these)
-      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,remind_at,tz").eq("id", myId).maybeSingle();
       saveTimeZone(mine.data?.tz);
       if (mine.data && "notif_nudge" in mine.data) notif = { nudge: mine.data.notif_nudge, react: mine.data.notif_react, crew: mine.data.notif_crew,
-        remind: mine.data.notif_remind, at: String(mine.data.remind_at || "19:00").slice(0,5) };
+        remind: mine.data.notif_remind, chat: mine.data.notif_chat !== false, at: String(mine.data.remind_at || "19:00").slice(0,5) };
       syncPush();
-      body.goals = mine.data?.goals?.length ? mine.data.goals : (mine.data?.goal ? [mine.data.goal] : []);
-      body.trainedSince = mine.data?.trained_since || null;
-      body.height = mine.data?.height_cm ? Number(mine.data.height_cm) : null;
-      body.weights = (await fetchAll("bodyweight", "day,kg", q => q.order("day")).catch(() => [])).map(r => ({ day: r.day, kg: Number(r.kg) }));
+      if (mine.data){
+        body.goals = mine.data.goals?.length ? mine.data.goals : (mine.data.goal ? [mine.data.goal] : []);
+        body.trainedSince = mine.data.trained_since || null;
+        body.height = mine.data.height_cm ? Number(mine.data.height_cm) : null;
+      }
+      if (wRows) body.weights = wRows.map(r => ({ day: r.day, kg: Number(r.kg) }));
       // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
+      if (gen !== loadGen) return;
       members = next; ready = true; $("warn").hidden = true;
+      if (before) try { announce(before, failed); } catch(e){ console.warn("banner", e); }
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
-    finally { loading = null; whenStill(render); loadMemberCount(); if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
+    finally { loading = null; if (gen === loadGen){ renderSoft(); loadMemberCount(); } if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
   })();
   return loading;
 }
-// iPhone: if the screen is rebuilt while your finger is on it (or the page is still gliding after a swipe),
-// iOS loses the scroll and the page freezes. So background redraws wait until you've stopped touching/scrolling.
-let touching = false, lastMove = 0;
-addEventListener("touchstart", () => { touching = true; lastMove = Date.now(); }, { passive: true, capture: true });
-addEventListener("touchmove", () => { lastMove = Date.now(); }, { passive: true, capture: true });
-addEventListener("touchend", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
-addEventListener("touchcancel", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
-addEventListener("scroll", () => { lastMove = Date.now(); }, { passive: true, capture: true });   // capture: also inner scrollers (chat)
-const handsOn = () => touching || Date.now() - lastMove < 900;
-let waitT = null;
-function whenStill(fn){ clearTimeout(waitT); if (!handsOn()) return fn(); waitT = setTimeout(() => whenStill(fn), 300); }
 let reloadT;
 const reloadSoon = () => { clearTimeout(reloadT); reloadT = setTimeout(loadAll, 300); };
 let channel = null;
@@ -1278,6 +1388,10 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"reactions" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"nudges" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"freezes" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"buds" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"circles" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"circle_members" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"messages" }, onMessageLive)
     .subscribe();
 }
 
@@ -1312,7 +1426,266 @@ async function toggleDay(d){
     // Before undoing on screen, ask the server what's really saved (the save may have landed anyway)
     const chk = await sb.from("checkins").select("day").eq("user_id", myId).eq("day", k);
     if (!chk.error && (chk.data.length > 0) === !was) return;   // it did save: keep it, no warning
-    members.set(myId, m); render(); showWarn("Couldn't save that — check your internet and try again.");
+    const cur = me(); if (cur){ const days = { ...(cur.days || {}) }; if (was) days[k] = 1; else delete days[k]; members.set(myId, { ...cur, days }); }
+    render(); showWarn("Couldn't save that — check your internet and try again.");
+  }
+}
+
+// ================= Chats =================
+// Buds (both ways) can message 1-on-1; every circle has one group chat. Text + emoji.
+// A chat's key from MY side: "d:<their id>" for a 1-on-1, "c:<circle id>" for a circle (same keys as chat_reads).
+let messages = [], chatReads = {}, chatKey = null, chatDrafts = {}, tmpId = 0;
+const keyOfMsg = m => m.circle_id ? "c:" + m.circle_id : "d:" + (m.from_user === myId ? m.to_user : m.from_user);
+const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+const unreadIn = k => { const r = chatReads[k] || ""; return messages.filter(m => m.from_user !== myId && !m.pending && keyOfMsg(m) === k && m.created_at > r).length; };
+const chatTarget = k => k.startsWith("c:") ? { circle: circleOf(k.slice(2)) } : { person: members.get(k.slice(2)) };
+const chatName = k => { const t = chatTarget(k); return t.circle ? circleLabel(t.circle) : (t.person?.name || "Chat"); };
+const canSend = k => { const t = chatTarget(k); return t.circle ? !!t.circle : isMutual(t.person); };
+// Every chat I can see: all my circles, every Bud, plus old 1-on-1s (e.g. someone who isn't a Bud any more)
+function chatList(){
+  const keys = new Set([...circles.map(c => "c:" + c.id), ...[...members.values()].filter(o => o.id !== myId && isMutual(o)).map(o => "d:" + o.id)]);
+  // one pass over all messages (was: a filter + sort per chat, on every redraw)
+  const sum = new Map();
+  for (const m of messages){
+    const k = keyOfMsg(m); keys.add(k);
+    const e = sum.get(k) || { last: null, unread: 0 }; sum.set(k, e);
+    if (!e.last || m.created_at > e.last.created_at) e.last = m;
+    if (m.from_user !== myId && !m.pending && m.created_at > (chatReads[k] || "")) e.unread++;
+  }
+  return [...keys].filter(k => k.startsWith("c:") ? circleOf(k.slice(2)) : members.get(k.slice(2))).map(k => {
+    const e = sum.get(k) || { last: null, unread: 0 };
+    return { k, last: e.last, unread: e.unread }; })
+    .sort((a, b) => (b.last?.created_at || "").localeCompare(a.last?.created_at || "") || chatName(a.k).localeCompare(chatName(b.k)));
+}
+const totalUnread = () => chatList().reduce((n, c) => n + c.unread, 0);
+function updateChatBadge(){
+  const n = ready ? totalUnread() : 0, b = $("chat-badge"); if (!b) return;
+  b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n);
+}
+const whenShort = iso => { const d = new Date(iso), t = today(), dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((t - dd) / 864e5);
+  return diff === 0 ? d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) : diff === 1 ? "Yesterday" : diff < 7 ? DAYS_LONG[dow(dd)].slice(0, 3) : fmt(dd); };
+const dayLabel = iso => { const d = new Date(iso), dd = new Date(d.getFullYear(), d.getMonth(), d.getDate()), diff = Math.round((today() - dd) / 864e5);
+  return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : DAYS_LONG[dow(dd)] + " " + fmt(dd); };
+async function markRead(k){
+  const last = chatMsgs(k).filter(m => !m.pending).pop(); if (!last) return;
+  if ((chatReads[k] || "") >= last.created_at) return;
+  chatReads[k] = last.created_at; updateChatBadge();
+  await sb.from("chat_reads").upsert({ user_id: myId, chat: k, read_at: last.created_at }, { onConflict: "user_id,chat" }).then(() => {}, () => {});
+}
+function openChat(k){
+  chatKey = k; profileId = null; circleId = null; circleMode = "view"; tab = "chats";
+  try { localStorage.setItem("gs-tab", "chats"); } catch(e){}
+  render();
+}
+document.addEventListener("click", e => {
+  const el = e.target.closest && e.target.closest("[data-openchat]"); if (!el) return;
+  e.preventDefault(); e.stopPropagation(); openChat(el.dataset.openchat);
+}, true);
+
+function viewChats(){
+  $("title").textContent = "Chats";
+  const list = chatList();
+  if (!list.length){
+    main().innerHTML = `<div class="view"><div class="card"><b>No chats yet</b><p class="note" style="margin:6px 0 0">You can message your Buds (people you bud who bud you back) and chat in your circles. Find people in Crew → Everyone, or start a circle.</p></div></div>`;
+    return;
+  }
+  const rows = list.map(({ k, last, unread }) => {
+    const t = chatTarget(k), o = t.person;
+    const av = t.circle ? circleBadge(t.circle) : `<span class="dot" style="${pc(o)}"></span>`;
+    const who = last ? (last.from_user === myId ? "You: " : t.circle ? nameOf(last.from_user) + ": " : "") : "";
+    const prev = last ? who + last.body : (canSend(k) ? (t.circle ? "Say something to the circle" : "Say hi 👋") : "");
+    return `<button type="button" class="li chatrow" data-openchat="${esc(k)}"><span class="av">${av}</span>
+      <span class="grow" style="min-width:0"><span class="nm">${esc(t.circle ? t.circle.name : chatName(k))}</span><span class="prev ${unread ? "unread" : ""}">${esc(prev)}</span></span>
+      <span class="when">${last ? esc(whenShort(last.created_at)) : ""}${unread ? `<span class="ucount">${unread}</span>` : ""}</span></button>`; }).join("");
+  main().innerHTML = `<div class="view"><div class="list">${rows}</div></div>`;
+}
+
+function chatLogHtml(k){
+  const ms = chatMsgs(k), isCircle = k.startsWith("c:"), m0 = me();
+  if (!ms.length) return `<p class="chatnote">${isCircle ? "No messages yet. Start the chat." : `This is the start of your chat with ${esc(chatName(k))}.`}</p>`;
+  let out = "", lastDay = "", lastFrom = "";
+  ms.forEach((m, i) => {
+    const day = dayLabel(m.created_at); if (day !== lastDay){ out += `<div class="chatday">${esc(day)}</div>`; lastDay = day; lastFrom = ""; }
+    const mine = m.from_user === myId, o = members.get(m.from_user);
+    if (isCircle && !mine && m.from_user !== lastFrom) out += `<div class="msgwho" style="${o ? pc(o) : ""}"><span class="dot"></span>${esc(nameOf(m.from_user))}</div>`;
+    out += `<div class="msg ${mine ? "me" : ""} ${m.pending ? "pending" : ""} ${m.failed ? "failed" : ""}" style="${mine && m0 ? pc(m0) : ""}" ${m.failed ? `data-retry="${esc(m.id)}"` : ""}>${esc(m.body)}</div>`;
+    const next = ms[i + 1];
+    if (m.failed) out += `<div class="msgtime me">Didn't send · tap to retry</div>`;
+    else if (!next || next.from_user !== m.from_user || dayLabel(next.created_at) !== day)
+      out += `<div class="msgtime ${mine ? "me" : ""}">${m.pending ? "Sending…" : esc(new Date(m.created_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }))}</div>`;
+    lastFrom = m.from_user;
+  });
+  return out;
+}
+// Redraw just the messages (not the text box), so typing isn't interrupted
+let patchT = null;
+const chatAtBottom = () => { const l = $("chatlog"); return !l || l.scrollTop + l.clientHeight >= l.scrollHeight - 120; };
+const chatToBottom = () => { const l = $("chatlog"); if (l) l.scrollTop = l.scrollHeight; };
+function patchChat(now){
+  const log = $("chatlog"); if (!log || !chatKey) return;
+  if (!now && handsOn()){ clearTimeout(patchT); patchT = setTimeout(patchChat, 300); return; }   // mid-swipe: add new messages once you stop   // mid-swipe: add the new message once you stop
+  const nearBottom = chatAtBottom();
+  log.innerHTML = chatLogHtml(chatKey);
+  if (nearBottom) chatToBottom();
+  if (document.visibilityState === "visible") markRead(chatKey);
+}
+// The chat is its own full screen (like WhatsApp): name at the top, messages filling the middle and
+// starting from the bottom, the text box pinned to the bottom (and sitting right on top of the keyboard).
+function viewChat(k){
+  const t = chatTarget(k), o = t.person;
+  if (!(t.circle || o)){ chatKey = null; return render(); }
+  $("title").textContent = "Chat";
+  $("tabbar").hidden = true;
+  document.documentElement.classList.add("chat-open");
+  const who = t.circle
+    ? `<button type="button" class="chatwho" data-circle="${esc(t.circle.id)}">${circleBadge(t.circle)}<span class="grow"><span class="nm">${esc(t.circle.name)}</span><span class="sub">${t.circle.members.length} members · ${trainedToday(t.circle)} trained today</span></span></button>`
+    : `<button type="button" class="chatwho" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="sub">${has(o, today()) ? "Trained today ✓" : isGym(o, today()) ? "Not trained yet" : "Rest day"} · ${dayStreak(o)}-day streak</span></span></button>`;
+  const composer = canSend(k)
+    ? `<form class="composer" id="chat-form"><textarea id="chat-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message" enterkeyhint="send">${esc(chatDrafts[k] || "")}</textarea>
+        <button class="cta" id="chat-send" type="submit" aria-label="Send">Send</button></form>`
+    : `<p class="chatnote composer">${t.circle ? "" : `You can message ${esc(o.name)} again once you're Buds (you both bud each other).`}</p>`;
+  main().innerHTML = `<div class="chatscreen" id="chatscreen"><div class="chatinner">
+    <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}</div>
+    <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div></div>`;
+  $("chat-back").onclick = () => { chatKey = null; document.documentElement.classList.remove("chat-open"); render(); window.scrollTo(0, 0); };
+  const inp = $("chat-input"), form = $("chat-form");
+  if (inp){
+    const grow = () => { const end = chatAtBottom(); inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 140) + "px"; if (end) chatToBottom(); };
+    inp.oninput = () => { chatDrafts[k] = inp.value; grow(); }; grow();
+    inp.onfocus = () => setTimeout(() => { fitChat(); chatToBottom(); }, 60);
+    inp.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !device.phone){ e.preventDefault(); form.requestSubmit(); } };
+    form.onsubmit = e => { e.preventDefault(); sendMsg(k, inp.value); inp.value = ""; chatDrafts[k] = ""; grow(); inp.focus(); };
+  }
+  $("chatlog").onclick = e => { const r = e.target.closest("[data-retry]"); if (r){ const m = messages.find(x => String(x.id) === r.dataset.retry); if (m){ messages = messages.filter(x => x !== m); sendMsg(k, m.body); } } };
+  fitChat(); chatToBottom();
+  markRead(k);
+}
+// Size the chat screen to the part of the screen you can actually see (above the keyboard on iPhone)
+function fitChat(){
+  const el = $("chatscreen"); if (!el) return;
+  const vv = window.visualViewport, end = chatAtBottom();
+  if (typing() && vv){                                     // keyboard up: exactly the visible part above it
+    el.style.height = vv.height + "px";
+    el.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+  } else {                                                 // keyboard down: the whole real screen (incl. any iOS gap)
+    el.style.height = (window.innerHeight + (typeof kbGap === "number" ? kbGap : 0)) + "px";
+    el.style.transform = "";
+  }
+  if (end) chatToBottom();
+}
+if (window.visualViewport){ visualViewport.addEventListener("resize", fitChat); visualViewport.addEventListener("scroll", fitChat); }
+window.addEventListener("resize", fitChat);
+async function sendMsg(k, text){
+  const body = String(text || "").trim(); if (!body) return;
+  const row = k.startsWith("c:") ? { from_user: myId, circle_id: k.slice(2), body } : { from_user: myId, to_user: k.slice(2), body };
+  const sentAt = new Date(Date.now() - 5000).toISOString();
+  const tmp = { ...row, id: "tmp" + (++tmpId), created_at: new Date().toISOString(), pending: true };
+  messages.push(tmp); patchChat(true); chatToBottom();
+  let res = await sb.from("messages").insert(row).select("id,created_at");
+  if (res.error && /load failed|failed to fetch|network/i.test(res.error.message || "")){ await new Promise(r => setTimeout(r, 1200));
+    // it may have landed anyway: only resend if it isn't there
+    const chk = await sb.from("messages").select("id,created_at").eq("from_user", myId).eq("body", body)
+      .eq(row.circle_id ? "circle_id" : "to_user", row.circle_id || row.to_user).gte("created_at", sentAt);
+    res = !chk.error && chk.data?.length ? { data: chk.data.slice(-1), error: null } : await sb.from("messages").insert(row).select("id,created_at"); }
+  if (res.error){ tmp.pending = false; tmp.failed = true; patchChat(true); return; }
+  const real = (res.data || [])[0];
+  if (real && messages.some(m => m !== tmp && m.id === real.id)) messages = messages.filter(m => m !== tmp);   // the live update got here first
+  else if (real){ tmp.id = real.id; tmp.created_at = real.created_at; tmp.pending = false; }
+  else tmp.pending = false;
+  patchChat(true);
+}
+// Live: a new message (or a deleted one) arrives without reloading everything
+function onMessageLive(p){
+  if (p.eventType === "DELETE"){ messages = messages.filter(m => m.id !== p.old?.id); if (chatKey) patchChat(); updateChatBadge(); return; }
+  const m = p.new; if (!m || messages.some(x => x.id === m.id)) return;
+  if (m.from_user === myId){                                     // my own message: replace the "Sending…" copy
+    const tmp = messages.find(x => x.pending && x.body === m.body && keyOfMsg(x) === keyOfMsg(m));
+    if (tmp){ tmp.id = m.id; tmp.created_at = m.created_at; tmp.pending = false; if (chatKey) patchChat(); return; }
+  }
+  messages.push(m);
+  const k = keyOfMsg(m);
+  if (chatKey === k && document.visibilityState === "visible"){ patchChat(); }
+  else if (m.from_user !== myId){
+    const t = chatTarget(k), o = members.get(m.from_user);
+    if ((k.startsWith("c:") ? t.circle : t.person) && o && !(t.circle && myRow(t.circle)?.muted))
+      showBanner({ style: o ? pc(o) : "", title: t.circle ? `${UP(nameOf(m.from_user))} · ${UP(t.circle.name)}` : UP(nameOf(m.from_user)),
+        sub: m.body, subClass: "smsg", action: { label: "REPLY", run: () => openChat(k) } });
+    if (tab === "chats" && !chatKey && !(document.activeElement || {}).matches?.("input, textarea")) renderSoft();
+  }
+  updateChatBadge();
+}
+
+// ================= In-app banners =================
+// When something happens while the app is open (a nudge, a reaction, a crewmate trains, you're added to a circle)
+// a banner slides down: tall condensed heading + one mono line, same words as the phone notifications.
+let bannerQ = [], bannerT = null, bannerOn = false;
+const UP = x => String(x || "").toLocaleUpperCase("en");
+function showBanner(b){
+  if (bannerQ.length >= 3) return;                     // don't pile up more than a few
+  bannerQ.push(b); if (!bannerOn) nextBanner();
+}
+function nextBanner(){
+  const el = $("ibanner"), b = bannerQ.shift();
+  if (!b){ bannerOn = false; el.classList.remove("show"); return; }
+  bannerOn = true;
+  el.style.cssText = b.style || "";
+  el.innerHTML = `<span class="dot" aria-hidden="true"></span><div class="grow"><div class="t">${esc(b.title)}</div><div class="s ${b.subClass || ""}">${esc(b.sub)}</div></div>
+    ${b.action ? `<button type="button" class="cta" id="ib-go" style="font-size:16px;padding:10px 14px">${esc(b.action.label)}</button>` : ""}`;
+  requestAnimationFrame(() => el.classList.add("show"));
+  try { navigator.vibrate && navigator.vibrate(10); } catch(e){}
+  clearTimeout(bannerT); bannerT = setTimeout(hideBanner, 6000);
+  const go = $("ib-go"); if (go) go.onclick = ev => { ev.stopPropagation(); b.action.run(); hideBanner(); };
+}
+document.addEventListener("click", e => { if (e.target.closest && e.target.closest("#ibanner") && !e.target.closest("#ib-go")) hideBanner(); });
+function hideBanner(){
+  const el = $("ibanner"); clearTimeout(bannerT); el.classList.remove("show");
+  setTimeout(nextBanner, 450);
+}
+// Compare what we had before a reload with what we have now, and announce anything new
+function announce(before, failed = new Set()){
+  const m = me(); if (!m) return;
+  const t = today(), tk = key(t), n = dayStreak(m), mySlot = slot(m, t);
+  const myState = () => ticked(m, t) ? "done" : isGym(m, t) ? "up" : "rest";
+  // nudges sent to me
+  const oldN = new Set(before.nudges.map(x => x.from_user + "|" + x.created_at));
+  const newN = failed.has("nudges") ? [] : nudges.filter(x => x.to_user === myId && !x.seen && !oldN.has(x.from_user + "|" + x.created_at));
+  for (const from of new Set(newN.map(x => x.from_user))){
+    const o = members.get(from), st = myState();
+    showBanner({ style: o ? pc(o) : "", title: `${UP(nameOf(from))} NUDGED YOU`,
+      sub: st === "done" ? "Already trained today" : st === "up" ? `${mySlot?.w || "Session"} not logged · ${n >= 2 ? n + "-day streak" : "start a streak"}` : "Rest day · bonus session?",
+      action: st === "up" ? { label: "LOG IT", run: () => { tab = "today"; if (!ticked(me(), today())) toggleDay(today()); else render(); } } : null });
+  }
+  // reactions to my sessions
+  const rk = r => r.from_user + "|" + r.to_user + "|" + r.day + "|" + r.emoji;
+  const oldR = new Set(before.reactions.map(rk));
+  for (const r of failed.has("reactions") ? [] : reactions.filter(r => r.to_user === myId && r.from_user !== myId && !oldR.has(rk(r)))){
+    const o = members.get(r.from_user), d = parse(r.day), w = slot(m, d)?.w;
+    showBanner({ style: o ? pc(o) : "", title: `${UP(nameOf(r.from_user))} ${EMOJI[r.emoji] || "👏"} YOUR SESSION`,
+      sub: `${w || "Session"} · ${r.day === tk ? (n >= 2 ? "day " + n : "today") : DAYS_LONG[dow(d)]}` });
+  }
+  // people I follow (Buds, Spotting) or share a circle with, who just logged today's session
+  const near = [key(addDays(t, -1)), tk, key(addDays(t, 1))];   // their "today" may differ from mine by a day
+  for (const [id, o] of members){
+    if (id === myId || !(isBud(o) || circleMate(o))) continue;
+    const was = before.members.get(id); if (!was || !was.visible) continue;
+    // only people I ALREADY followed / shared a circle with (budding someone new isn't "they just trained")
+    const wasMate = before.circles.some(c => c.members.some(m => m.user_id === id) && c.members.some(m => m.user_id === myId));
+    if (!(isBud(was) || wasMate)) continue;
+    const fresh = near.find(k => o.days?.[k] && !was.days?.[k]); if (!fresh) continue;
+    const st = myState(), w = slot(o, parse(fresh))?.w, os = dayStreak(o);
+    showBanner({ style: pc(o), title: st === "done" ? `${UP(o.name)} TRAINED TOO` : st === "up" ? `${UP(o.name)}'S DONE. YOU'RE UP.` : `${UP(o.name)} JUST TRAINED`,
+      sub: `${w || "Session"} ✓${os >= 2 ? " · " + os + "-day streak" : ""}` });
+  }
+  // circles someone else just added me to
+  const oldC = new Set(before.circles.map(c => c.id));
+  for (const c of failed.has("circles") ? [] : circles.filter(c => !oldC.has(c.id))){
+    const mine = c.members.find(x => x.user_id === myId);
+    if (!mine || !mine.added_by || mine.added_by === myId) continue;
+    const done = c.members.filter(x => { const p = members.get(x.user_id); return p && has(p, t); }).length;
+    const adder = members.get(mine.added_by);
+    showBanner({ style: adder ? pc(adder) : "", title: `YOU'RE IN ${UP(c.name)}`,
+      sub: `Added by ${nameOf(mine.added_by)} · ${done} of ${c.members.length} trained today` });
   }
 }
 
@@ -1347,7 +1720,7 @@ async function loadMemberCount(){
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown;
+  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId);
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
@@ -1445,11 +1818,14 @@ const ICON_KEBAB = '<svg class="gl" viewBox="0 0 24 24" aria-hidden="true"><circ
 function viewInstall(){
   $("title").textContent = "Welcome";
   const link = location.origin + location.pathname;
-  const head = `<div class="ihead"><img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
+  const head = `<div class="ihead"><img class="iapp" src="${ICON}" alt="" width="72" height="72">
     <div><span class="label">CREW</span><h2 class="sign">Put it on your Home Screen</h2>
     <p class="note">It takes 10 seconds. Then it opens like a normal app, full screen, and stays logged in.</p></div></div>`;
   const step = (n, title, sub) => `<li class="istep"><span class="inum mono">${n}</span><div><b>${title}</b>${sub ? `<span class="note">${sub}</span>` : ""}</div></li>`;
   let body = "", pointer = false;
+  const inv = pendingJoin ? `<div class="card invitecode"><b>🎉 You've been invited to a circle</b>
+      <span class="note">Copy this code. After you open CREW from your Home Screen, go to <b>Crew → Circles → Join with code</b>.</span>
+      <span class="codebox mono">${esc(pendingJoin)}</span><button type="button" class="chip" id="inv-copy">Copy code</button></div>` : "";
 
   if (installed){
     body = `<ol class="isteps">${step("✓", "Done! It's on your Home Screen", "Close this browser and open <b>CREW</b> from your Home Screen to sign up.")}</ol>`;
@@ -1478,10 +1854,11 @@ function viewInstall(){
         ${step(3, "Open CREW from your Home Screen", "Sign up there.")}
       </ol>`;
   }
-  main().innerHTML = `<div class="card install">${head}${body}
+  main().innerHTML = `${inv}<div class="card install">${head}${body}
     <button class="linkbtn" id="i-skip">Use it in the browser for now</button></div>
     ${pointer ? `<div class="ipoint" aria-hidden="true"><span>Share is down here</span><svg viewBox="0 0 24 24"><path d="M12 4v15M6 13l6 6 6-6"/></svg></div>` : ""}`;
 
+  const ic = $("inv-copy"); if (ic) ic.onclick = async () => { try { await navigator.clipboard.writeText(pendingJoin); ic.textContent = "Copied ✓"; } catch(_) {} };
   const cp = $("i-copy"); if (cp) cp.onclick = async () => {
     try { await navigator.clipboard.writeText(link); cp.textContent = "Copied ✓"; }
     catch(_) { cp.textContent = link; }
@@ -1511,6 +1888,7 @@ function lockInfo(){ try { const v = JSON.parse(localStorage.getItem(LOCK_KEY) |
 const bioName = () => device.ios ? (Math.max(screen.width, screen.height) >= 812 ? "Face ID" : "Touch ID")
   : device.android ? "your fingerprint" : /Mac/.test(navigator.platform) ? "Touch ID" : /Win/.test(navigator.platform) ? "Windows Hello" : "your fingerprint";
 (async () => {
+  await null;                                              // let the rest of the script load first
   try { bioAvailable = !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); }
   catch(_) { bioAvailable = false; }
   if (tab === "you" && session) render();
@@ -1554,7 +1932,7 @@ function viewLock(){
   $("title").textContent = "Locked";
   const m = me();
   main().innerHTML = `<div class="card lockcard">
-    <img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72">
+    <img class="iapp" src="${ICON}" alt="" width="72" height="72">
     <h2 class="sign">CREW</h2>
     <p class="note">${m ? esc(m.name) + ", unlock" : "Unlock"} with ${bioName()} to open the app.</p>
     <button class="cta" id="lk-go">Unlock</button>
@@ -1585,10 +1963,10 @@ document.addEventListener("visibilitychange", () => {
 // Turning them on asks the phone for a private "push address" at Apple/Google plus two encryption keys.
 // We save that in push_subs; the server's "push" function encrypts each message for this phone and posts it there.
 // On iPhone this only works once the app is on the Home Screen (iOS 16.4 or newer).
-let notif = { nudge: true, react: true, crew: true, remind: true, at: "19:00" };
+let notif = { nudge: true, react: true, crew: true, remind: true, chat: true, at: "19:00" };
 let pushOn = false, pushBusy = false;
 const PUSH_URL = () => window.GYM_CONFIG.SUPABASE_URL + "/functions/v1/push";
-const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const pushSupported = () => !BETA && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 function pushState(){
   if (!pushSupported()) return device.ios && !device.standalone ? "needs-install" : "unsupported";
   if (Notification.permission === "denied") return "denied";
@@ -1601,13 +1979,41 @@ const setAskedPush = (days = 1) => { try { localStorage.setItem(SNOOZE_KEY, Stri
 
 // ----- The big "turn notifications on" popup, shown when the app opens -----
 let sheetShown = false;
+// One-time tip after the update: what Spotting and Spotters mean (shown once, on Today, when nothing else is up)
+const TIP_KEY = "gs-tip-spot"; let tipPending = false;
+function maybeShowSpotTip(){
+  try { if (localStorage.getItem(TIP_KEY + "-" + myId)) return; } catch(e){ return; }
+  if (!me() || ob || locked || wnActive || tab !== "today" || document.querySelector(".sheetwrap")) return;
+  if (tipPending) return; tipPending = true;
+  setTimeout(() => {
+    tipPending = false;
+    if (document.querySelector(".sheetwrap") || wnActive || tab !== "today" || ob || locked) return;   // something else is up: try again next time
+    try { localStorage.setItem(TIP_KEY + "-" + myId, "1"); } catch(e){}                           // only counts as seen once it's actually shown
+    const m = me(), wrap = document.createElement("div");
+    wrap.id = "spottip"; wrap.className = "sheetwrap";
+    wrap.innerHTML = `<div class="sheet tipsheet" role="dialog" aria-modal="true" aria-labelledby="tip-title">
+      <div class="tipart"><span class="wdisc sm" style="${pc(m)}"></span><span class="tiparrow">→</span><span class="wdisc sm" style="--c:var(--p-blue)"></span></div>
+      <h2 class="sign" id="tip-title">Spotting & Spotters</h2>
+      <p class="tipline"><b>Spotting</b> = people you bud</p>
+      <p class="tipline"><b>Spotters</b> = people who bud you</p>
+      <p class="note">Both ways? You're <b>Buds</b>.</p>
+      <button class="cta" id="tip-ok">Got it</button></div>`;
+    document.body.appendChild(wrap);
+    requestAnimationFrame(() => wrap.classList.add("open"));
+    const close = () => { wrap.classList.remove("open"); setTimeout(() => wrap.remove(), 250); };
+    wrap.onclick = e => { if (e.target === wrap) close(); };
+    $("tip-ok").onclick = close;
+  }, 700);
+}
 function maybeShowPushSheet(){
+  maybeShowSpotTip();
+  if (BETA) return;
   if (sheetShown || document.getElementById("pushsheet")) return;
   const st = pushState();
   if (!(st === "off" && Notification.permission === "default") && st !== "denied") return;
   if (snoozedPush() || !me() || ob || locked || tab !== "today") return;
   sheetShown = true;
-  setTimeout(showPushSheet, 600);   // let the Today screen land first
+  setTimeout(() => { if (document.querySelector(".sheetwrap")){ sheetShown = false; return; } showPushSheet(); }, 1200);   // let the Today screen (and any tip) land first
 }
 function showPushSheet(){
   const m = me(); if (!m || document.getElementById("pushsheet")) return;
@@ -1615,7 +2021,7 @@ function showPushSheet(){
   const denied = pushState() === "denied";
   // same wording as the real notifications (supabase/functions/push), using your own split and streak
   const n = dayStreak(m), day = w ? w + " day" : "Gym day", line = n >= 2 ? `Your ${n}-day streak is on the line.` : "Start a streak today.";
-  const pn = (title, body, when) => `<div class="pn"><img src="icons/apple-touch-icon.png" alt="" width="34" height="34">
+  const pn = (title, body, when) => `<div class="pn"><img src="${ICON}" alt="" width="34" height="34">
     <div class="grow"><span class="pn-top"><b>CREW</b><span class="pn-ex">Example</span></span><b class="pn-t">${esc(title)}</b><span class="pn-b">${esc(body)}</span></div></div>`;
   const wrap = document.createElement("div");
   wrap.id = "pushsheet"; wrap.className = "sheetwrap";
@@ -1692,7 +2098,7 @@ async function syncPush(){
 }
 async function saveNotif(patch){
   const before = notif; notif = { ...notif, ...patch };
-  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", at:"remind_at" }[k]] = v;
+  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", chat:"notif_chat", at:"remind_at" }[k]] = v;
   const { error } = await sb.from("profiles").update(row).eq("id", myId);
   if (error){ notif = before; showWarn("Couldn't save that: " + error.message); render(); return false; }
   return true;
@@ -1708,12 +2114,16 @@ async function sendTestPush(){
 const NOTIF_TYPES = [
   ["nudge",  "Nudges", "When a friend nudges you to train"],
   ["react",  "Reactions", "When someone reacts to your session"],
-  ["crew",   "Crew activity", "When a friend logs today's session"],
+  ["crew",   "Crew activity", "When someone you bud logs a session"],
   ["remind", "Gym reminder", "On gym days, if you haven't logged yet"],
+  ["chat",   "Messages", "Chats with your Buds and circles"],
 ];
 function notifCard(){
   const st = pushState();
   const head = `<div class="sec"><h2 class="sign">Notifications</h2><span class="label">${st === "on" ? "On" : "Off"}</span></div>`;
+  if (BETA) return head.replace(/>(On|Off)</, ">Main app<") + `<div class="card"><p style="margin:0" class="note">During the beta, notifications keep coming from the normal CREW app (tapping one opens that app, so open CREW Beta to reply to messages).</p>
+    <div class="ntypes"><label class="tg" for="nt-chat"><span><b>Messages</b><small>Chats with your Buds and circles</small></span>
+      <input type="checkbox" class="sw" id="nt-chat" data-nt="chat" ${notif.chat ? "checked" : ""}></label></div></div>`;
   if (st === "needs-install") return head + `<div class="card"><p style="margin:0" class="note">On iPhone, notifications only work when CREW is opened from your Home Screen. Add it there, open it from the icon, then come back here.</p></div>`;
   if (st === "unsupported") return head + `<div class="card"><p style="margin:0" class="note">This browser can't show notifications. On iPhone you need iOS 16.4 or newer, with the app on your Home Screen.</p></div>`;
   if (st === "denied") return head + `<div class="card"><p style="margin:0" class="note">Notifications are blocked for this app. ${device.ios
@@ -1732,24 +2142,507 @@ function notifCard(){
   </div>`;
 }
 function wireNotifCard(){
+  document.querySelectorAll("[data-nt]").forEach(c => c.onchange = async () => { if (await saveNotif({ [c.dataset.nt]: c.checked })) render(); });
   const main = $("nt-main"); if (!main) return;
   main.onchange = () => { main.checked ? enablePush() : disablePush(); };
-  document.querySelectorAll("[data-nt]").forEach(c => c.onchange = async () => { if (await saveNotif({ [c.dataset.nt]: c.checked })) render(); });
   const at = $("nt-at");
   if (at) at.onchange = async () => { if (/^\d\d:\d\d$/.test(at.value) && await saveNotif({ at: at.value })) toast("Reminder set for " + at.value); };
   const test = $("nt-test");
   if (test) test.onclick = async () => { test.disabled = true; test.textContent = "Sending…"; await sendTestPush(); test.disabled = false; test.textContent = "Send me a test"; };
 }
 
+// ================= Circles (WhatsApp-style groups) =================
+const CIRCLE_EMOJI = ["","🔥","💪","🏋️","⚡","🦍","🌅","🏆","🐺","🚀","🥊","🧠","🍑"];   // "" = no emoji
+const circleLabel = c => ((c.emoji ? c.emoji + " " : "") + c.name).trim();
+// the circle's emoji, or (no emoji) the first letter of its name in a rounded badge
+const circleBadge = (c, big) => c.emoji ? `<span class="cc-emoji ${big ? "big" : ""}">${esc(c.emoji)}</span>`
+  : `<span class="cc-mono ${big ? "big" : ""}">${esc((c.name || "?").trim().charAt(0).toUpperCase())}</span>`;
+const circleOf = id => circles.find(c => c.id === id);
+const amAdmin = c => !!c && c.members.some(m => m.user_id === myId && m.role === "admin");
+const myRow = c => c?.members.find(m => m.user_id === myId);
+const circlePeople = c => c.members.map(m => members.get(m.user_id)).filter(Boolean);
+const trainedToday = c => circlePeople(c).filter(o => sharesStats(o) && has(o, today())).length;
+const inviteLink = c => location.origin + location.pathname.replace(/index\.html$/, "") + "#join=" + c.invite_code;
+function circleCard(c, small){
+  const ppl = circlePeople(c), n = trainedToday(c);
+  return `<button type="button" class="circlecard ${small ? "small" : ""}" data-circle="${esc(c.id)}">
+    ${circleBadge(c)}
+    <span class="cc-main"><b>${esc(c.name)}</b><small>${n} of ${ppl.length} trained today</small>
+      <span class="cc-dots">${ppl.slice(0, 12).map(o => `<i style="${pc(o)}" class="${sharesStats(o) && has(o, today()) ? "on" : ""}"></i>`).join("")}</span></span>
+    ${small ? "" : `<i class="chev r"></i>`}</button>`;
+}
+function viewCirclesTab(seg){
+  main().innerHTML = `<div class="view">${seg}
+    ${circles.length ? `<div class="circlelist">${circles.map(c => circleCard(c)).join("")}</div>`
+      : `<div class="card"><p style="margin:0;font-weight:600">No circles yet.</p><p class="note">Make a circle for your gym group, like a WhatsApp group: add people, see who's trained today and nudge each other.</p></div>`}
+    <button class="cta" id="circle-new" style="margin-top:4px">＋ New circle</button>
+    <div class="card joincode"><b>Got an invite?</b><span class="note">Paste the link or code.</span>
+      <div class="joinrow"><input class="field" id="join-q" placeholder="Invite code" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="chip" id="join-go">Join</button></div></div></div>`;
+  $("join-go").onclick = () => { const m = $("join-q").value.match(/([a-f0-9]{10})/i);
+    if (!m) return toast("That code doesn't look right"); pendingJoin = m[1].toLowerCase(); render(); };
+  $("circle-new").onclick = () => { circleDraft = { name: "", emoji: "🔥", picked: new Set() }; circleMode = "new"; circleId = null; render(); window.scrollTo(0,0); };
+  main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
+}
+// People picker with search (used to create a circle and to add people). Buds first.
+// Private people can only be added by their Buds (database rule) — everyone else can join with the invite link
+const canAddToCircle = o => !o.private || isMutual(o);
+function pickerHtml(exclude){
+  const list = everyone().filter(o => !exclude.has(o.id)).sort((a,b) => (canAddToCircle(b) - canAddToCircle(a)) || (isMutual(b) - isMutual(a)) || (b.iBud === "accepted") - (a.iBud === "accepted") || a.name.localeCompare(b.name));
+  return `<input class="field findq" id="find-q" type="search" placeholder="Search people" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="list peoplelist" id="people">${list.map(o => `<button type="button" class="li pickrow ${circleDraft.picked.has(o.id) ? "on" : ""}" ${canAddToCircle(o) ? `data-pick="${esc(o.id)}"` : `disabled aria-disabled="true" style="opacity:.55;${pc(o)}"`} data-name="${esc(tidyName(o.name).toLowerCase())}" ${canAddToCircle(o) ? `style="${pc(o)}"` : ""}>
+      <span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${isMutual(o) ? "🤝 Buds" : !canAddToCircle(o) ? `${LOCK} Private · send them the invite link` : o.iBud === "accepted" ? "Spotting" : ""}</span></span><span class="tick">${CHECK}</span></button>`).join("")}</div>
+    <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
+}
+function wirePicker(onChange){
+  wireFind();
+  main().querySelectorAll("[data-pick]").forEach(b => b.onclick = () => {
+    const id = b.dataset.pick; if (circleDraft.picked.has(id)) circleDraft.picked.delete(id); else circleDraft.picked.add(id);
+    b.classList.toggle("on", circleDraft.picked.has(id)); onChange(); });
+}
+function viewCircleRoute(){
+  if (circleMode === "new") return viewCircleNew();
+  const c = circleOf(circleId);
+  if (!c){ circleId = null; circleMode = "view"; return render(); }      // left / removed / deleted
+  if (circleMode === "add") return viewCircleAdd(c);
+  if (circleMode === "edit") return viewCircleEdit(c);
+  return viewCircle(c);
+}
+const backTo = (label, fn) => { const b = `<button type="button" class="linkbtn pfback" id="c-back">‹ ${label}</button>`; setTimeout(() => { if ($("c-back")) $("c-back").onclick = fn; }); return b; };
+function emojiPicker(sel){ return `<div class="emojis">${CIRCLE_EMOJI.map(e => `<button type="button" class="emo ${e === sel ? "on" : ""} ${e ? "" : "none"}" data-emoji="${e}" aria-label="${e || "No emoji"}">${e || "None"}</button>`).join("")}</div>`; }
+function viewCircleNew(){
+  $("title").textContent = "New circle";
+  const d = circleDraft;
+  main().innerHTML = `<div class="view">${backTo("Circles", () => { circleMode = "view"; circleDraft = null; render(); })}
+    <div class="card ob"><span class="label">Name</span>
+      <input class="field" id="c-name" maxlength="30" placeholder="e.g. Uni gym boys" value="${esc(d.name)}" autocapitalize="words">
+      <span class="label" style="margin-top:12px">Emoji</span>${emojiPicker(d.emoji)}</div>
+    <div class="sec"><h2 class="sign">Add people</h2><span class="label" id="c-count">${d.picked.size} added</span></div>
+    ${pickerHtml(new Set())}
+    <button class="cta" id="c-create" ${d.name.trim() ? "" : "disabled"}>Create circle</button></div>`;
+  const name = $("c-name"), go = $("c-create");
+  name.oninput = () => { d.name = name.value; go.disabled = !d.name.trim(); };
+  main().querySelectorAll("[data-emoji]").forEach(b => b.onclick = () => { d.emoji = b.dataset.emoji; main().querySelectorAll("[data-emoji]").forEach(x => x.classList.toggle("on", x === b)); });
+  wirePicker(() => { $("c-count").textContent = `${d.picked.size} added`; });
+  go.onclick = async () => {
+    go.disabled = true; go.textContent = "Creating…";
+    const { data, error } = await sb.rpc("create_circle", { p_name: d.name.trim(), p_emoji: d.emoji, p_members: [...d.picked] });
+    if (error){ go.disabled = false; go.textContent = "Create circle"; return showWarn("Couldn't create the circle: " + error.message); }
+    circleDraft = null; circleMode = "view"; circleId = data; toast(`${circleLabel({ emoji: d.emoji, name: d.name })} created`);
+    await loadAll(); window.scrollTo(0,0);
+  };
+}
+function viewCircleAdd(c){
+  $("title").textContent = "Add people";
+  circleDraft = circleDraft || { picked: new Set() };
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+    <p class="note" style="margin:0">They'll be added straight in, like a WhatsApp group. They can leave any time.</p>
+    ${pickerHtml(new Set(c.members.map(m => m.user_id)))}
+    <button class="cta" id="c-add" disabled>Add</button></div>`;
+  const go = $("c-add");
+  wirePicker(() => { go.disabled = !circleDraft.picked.size; go.textContent = circleDraft.picked.size ? `Add ${circleDraft.picked.size}` : "Add"; });
+  go.onclick = async () => {
+    go.disabled = true;
+    const { error } = await sb.rpc("add_to_circle", { p_circle: c.id, p_members: [...circleDraft.picked] });
+    if (error){ go.disabled = false; return showWarn("Couldn't add: " + error.message); }
+    toast(`Added ${circleDraft.picked.size} to ${c.name}`); circleDraft = null; circleMode = "view"; await loadAll();
+  };
+}
+function viewCircleEdit(c){
+  $("title").textContent = "Edit circle";
+  const d = circleDraft = circleDraft || { name: c.name, emoji: c.emoji };
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+    <div class="card ob"><span class="label">Name</span>
+      <input class="field" id="c-name" maxlength="30" value="${esc(d.name)}" autocapitalize="words">
+      <span class="label" style="margin-top:12px">Emoji</span>${emojiPicker(d.emoji)}
+      <button class="cta" id="c-save" style="margin-top:12px">Save</button></div>
+    <div class="card"><b>Invite link</b><p class="note">Resetting makes the old link stop working.</p>
+      <button class="cta ghost" id="c-reset" style="font-size:18px">Reset invite link</button></div></div>`;
+  const name = $("c-name");
+  name.oninput = () => { d.name = name.value; $("c-save").disabled = !d.name.trim(); };
+  main().querySelectorAll("[data-emoji]").forEach(b => b.onclick = () => { d.emoji = b.dataset.emoji; main().querySelectorAll("[data-emoji]").forEach(x => x.classList.toggle("on", x === b)); });
+  $("c-save").onclick = async () => {
+    const { error } = await sb.rpc("edit_circle", { p_circle: c.id, p_name: d.name.trim(), p_emoji: d.emoji });
+    if (error) return showWarn("Couldn't save: " + error.message);
+    toast("Saved"); circleDraft = null; circleMode = "view"; await loadAll(); };
+  $("c-reset").onclick = async () => {
+    const { error } = await sb.rpc("reset_invite", { p_circle: c.id });
+    if (error) return showWarn("Couldn't reset: " + error.message);
+    toast("New invite link made"); await loadAll(); };
+}
+let circleAsk = null;   // "leave" or a user id to remove, waiting for "are you sure?"
+function viewCircle(c){
+  $("title").textContent = "Circle";
+  const t = today(), admin = amAdmin(c), mine = myRow(c);
+  const ppl = circlePeople(c), list = ppl.filter(sharesStats);
+  const todayRows = ppl.map(o => {
+    const st = !sharesStats(o) ? "rest" : isGym(o,t) ? (has(o,t) ? "done" : "todo") : (ticked(o,t) ? "done" : "rest");
+    const act = st === "todo" ? nudgeCtl(o, "data-pnudge") : "";
+    return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}${o.id===myId?'<span class="youtag">YOU</span>':""}</span>
+      <span class="note">${sharesStats(o) ? `${isGym(o,t) ? workLabel(slot(o,t)) : "Rest day"} · ${dayStreak(o)} day streak` : "Hasn't logged yet"}</span>${act ? `<span class="rowact">${act}</span>` : ""}</div>
+      <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("");
+  const ask = circleAsk === "leave" ? `<div class="card banner"><div class="grow"><b>Leave ${esc(c.name)}?</b><span class="note">${admin && c.members.filter(m => m.role === "admin").length === 1 && c.members.length > 1 ? "You're the only admin, so the longest-standing member becomes admin." : "You can rejoin with the invite link."}</span>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" id="c-leave-yes">Leave</button><button type="button" class="linkbtn" id="c-ask-no">Stay</button></span></div></div>`
+    : circleAsk ? `<div class="card banner"><div class="grow"><b>Remove ${esc(nameOf(circleAsk))}?</b>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" id="c-remove-yes">Remove</button><button type="button" class="linkbtn" id="c-ask-no">Cancel</button></span></div></div>` : "";
+  const memberRows = c.members.map(m => { const o = members.get(m.user_id); if (!o) return "";
+    const isMe = m.user_id === myId;
+    const tools = admin && !isMe ? `<span class="mtools"><button type="button" class="linkbtn" data-role="${esc(m.user_id)}" data-to="${m.role === "admin" ? "member" : "admin"}">${m.role === "admin" ? "Remove admin" : "Make admin"}</button>
+      <button type="button" class="linkbtn danger" data-remove="${esc(m.user_id)}">Remove</button></span>` : "";
+    return `<div class="li tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}${isMe ? '<span class="youtag">YOU</span>' : ""}${m.role === "admin" ? '<span class="admintag">Admin</span>' : ""}</span>${tools}</div></div>`; }).join("");
+  const top = `${backTo("Circles", () => { circleId = null; circleAsk = null; crewView = "circles"; render(); })}${ask}
+    <div class="card hero circlehero">${circleBadge(c, true)}<div class="work sign">${esc(c.name)}</div>
+      <p class="sub">${c.members.length} member${c.members.length===1?"":"s"} · ${trainedToday(c)} trained today</p>
+      <div class="pfacts"><button type="button" class="chip" data-openchat="c:${esc(c.id)}">💬 Chat${unreadIn("c:" + c.id) ? ` · ${unreadIn("c:" + c.id)}` : ""}</button><button type="button" class="chip" id="c-invite">🔗 Invite</button>
+        <button type="button" class="chip" id="c-mute">${mine?.muted ? "🔕 Muted" : "🔔 Notifications on"}</button>
+        ${admin ? `<button type="button" class="chip" id="c-edit">⚙️ Edit</button>` : ""}</div></div>
+    <div class="sec"><h2 class="sign">Today</h2><span class="label">${trainedToday(c)}/${ppl.length} done</span></div><div class="list">${todayRows}</div>`;
+  const bottom = `<div class="sec"><h2 class="sign">Members</h2><span class="label">${c.members.length}</span></div>
+    <div class="list">${memberRows}</div>
+    ${admin ? `<button class="cta ghost" id="c-addppl" style="font-size:18px">＋ Add people</button>` : ""}
+    <button class="cta ghost danger" id="c-leave" style="font-size:18px">Leave circle</button>`;
+  crewBoard(list, [], top, { title: "Leaderboard", weekBoard: list.length > 1, bottom });
+  $("title").textContent = "Circle";
+  $("c-invite").onclick = async () => {
+    const url = inviteLink(c), text = `Join my circle ${circleLabel(c)} on CREW! In the app: Crew → Circles → Join with code: ${c.invite_code}`;
+    try { if (navigator.share){ await navigator.share({ title: "CREW", text, url }); return; } } catch(e){ if (e.name === "AbortError") return; }
+    try { await navigator.clipboard.writeText(url); toast("Invite link copied"); } catch(e){ toast("Copy failed"); } };
+  $("c-mute").onclick = async () => {
+    const to = !mine?.muted; if (mine) mine.muted = to; render();
+    const { error } = await sb.rpc("mute_circle", { p_circle: c.id, p_muted: to });
+    if (error){ if (mine) mine.muted = !to; render(); return showWarn("Couldn't change that: " + error.message); }
+    toast(to ? "Circle muted" : "Circle notifications on"); };
+  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
+  if ($("c-addppl")) $("c-addppl").onclick = () => { circleDraft = { picked: new Set() }; circleMode = "add"; render(); window.scrollTo(0,0); };
+  $("c-leave").onclick = () => { circleAsk = "leave"; render(); window.scrollTo(0,0); };
+  if ($("c-ask-no")) $("c-ask-no").onclick = () => { circleAsk = null; render(); };
+  if ($("c-leave-yes")) $("c-leave-yes").onclick = async () => {
+    const { error } = await sb.rpc("leave_circle", { p_circle: c.id });
+    if (error) return showWarn("Couldn't leave: " + error.message);
+    toast(`Left ${c.name}`); circleAsk = null; circleId = null; crewView = "circles"; await loadAll(); };
+  if ($("c-remove-yes")) $("c-remove-yes").onclick = async () => {
+    const who = circleAsk; const { error } = await sb.rpc("remove_from_circle", { p_circle: c.id, p_user: who });
+    if (error) return showWarn("Couldn't remove: " + error.message);
+    toast(`Removed ${nameOf(who)}`); circleAsk = null; await loadAll(); };
+  main().querySelectorAll("[data-remove]").forEach(b => b.onclick = e => { e.stopPropagation(); circleAsk = b.dataset.remove; render(); window.scrollTo(0,0); });
+  main().querySelectorAll("[data-role]").forEach(b => b.onclick = async e => {
+    e.stopPropagation(); const { error } = await sb.rpc("set_circle_role", { p_circle: c.id, p_user: b.dataset.role, p_role: b.dataset.to });
+    if (error) return showWarn(error.message.includes("at least one admin") ? "A circle needs at least one admin." : "Couldn't change that: " + error.message);
+    toast(b.dataset.to === "admin" ? `${nameOf(b.dataset.role)} is now an admin` : `${nameOf(b.dataset.role)} is no longer an admin`); await loadAll(); });
+}
+// Opening an invite link: "Join 🔥 Uni gym boys? 6 members"
+async function checkJoinLink(){
+  const m = location.hash.match(/join=([a-f0-9]{6,20})/i); if (!m) return;
+  pendingJoin = m[1];
+  try { history.replaceState(null, "", location.pathname + location.search); } catch(e){}
+}
+function viewJoinCircle(){
+  $("title").textContent = "Join circle";
+  if (!joinPreview){
+    main().innerHTML = `<div class="skel">Opening invite…</div>`;
+    const code = pendingJoin; pendingJoin = null;
+    sb.rpc("circle_preview", { p_code: code }).then(({ data, error }) => {
+      if (error){ joinPreview = null; pendingJoin = null; render(); showWarn("Couldn't open that invite (no signal?). Open the link again to retry."); return; }
+      joinPreview = data && data[0] ? { ...data[0], code } : { bad: true };
+      if (joinPreview.already){ circleId = joinPreview.id; joinPreview = null; crewView = "circles"; tab = "crew"; }
+      render(); });
+    return;
+  }
+  const j = joinPreview;
+  if (j.bad){ main().innerHTML = `<div class="view"><div class="card"><b>This invite link doesn't work any more.</b><p class="note">Ask for a new link.</p>
+      <button class="cta ghost" id="j-ok" style="margin-top:10px;font-size:18px">OK</button></div></div>`;
+    $("j-ok").onclick = () => { joinPreview = null; render(); }; return; }
+  main().innerHTML = `<div class="view"><div class="card hero circlehero"><span class="label">You're invited</span>${circleBadge(j, true)}
+      <div class="work sign">${esc(j.name)}</div><p class="sub">${j.members} member${j.members===1?"":"s"}</p>
+      <p class="note">Members see each other's streak, week and split, and can nudge each other once a day.</p>
+      <div class="row2" style="margin-top:12px"><button class="cta ghost" id="j-no" style="font-size:18px">Not now</button><button class="cta" id="j-yes" style="font-size:18px">Join</button></div></div></div>`;
+  $("j-no").onclick = () => { joinPreview = null; render(); };
+  $("j-yes").onclick = async () => {
+    $("j-yes").disabled = true;
+    const { data, error } = await sb.rpc("join_circle", { p_code: j.code });
+    if (error){ $("j-yes").disabled = false; return showWarn("Couldn't join: " + error.message); }
+    joinPreview = null; circleId = data; tab = "crew"; crewView = "circles"; toast(`Joined ${circleLabel(j)}`); await loadAll(); window.scrollTo(0,0); };
+}
+checkJoinLink();
+window.addEventListener("hashchange", () => { checkJoinLink(); if (pendingJoin) render(); });   // link opened while the app is already open
+document.addEventListener("click", e => {          // open a circle from any card
+  const c = e.target.closest("[data-circle]"); if (!c || !c.closest("#main")) return;
+  circleId = c.dataset.circle; circleMode = "view"; circleAsk = null; if (tab !== "crew" && !chatKey){ tab = "crew"; crewView = "circles"; } render(); window.scrollTo(0,0);
+});
+
+// ================= Buds: actions =================
+function budBtn(o){
+  if (!o || o.id === myId) return "";
+  if (o.iBud === "accepted") return `<button type="button" class="chip budbtn on" data-unbud="${esc(o.id)}">${isMutual(o) ? "Buds ✓" : "Spotting ✓"}</button>`;
+  if (o.iBud === "pending")  return `<button type="button" class="chip budbtn" data-unbud="${esc(o.id)}">Requested</button>`;
+  return `<button type="button" class="chip budbtn go" data-bud="${esc(o.id)}">${o.theyBud === "accepted" ? "Bud back" : "Bud"}</button>`;
+}
+async function budUp(id){
+  const o = members.get(id); if (!o) return;
+  o.iBud = o.private ? "pending" : "accepted"; render();
+  const { error } = await sb.from("buds").insert({ follower: myId, followee: id });
+  if (error && error.code !== "23505"){ o.iBud = null; render(); return showWarn("Couldn't bud: " + error.message); }
+  toast(o.private ? `Bud request sent to ${o.name}` : o.theyBud === "accepted" ? `You and ${o.name} are Buds 🤝` : `You're spotting ${o.name}`);
+  loadAll();
+}
+async function unBud(id, confirmed){
+  const o = members.get(id); if (!o) return;
+  if (!confirmed && o.iBud === "accepted"){ unbudAsk = id; render(); return; }      // ask once before unbudding
+  unbudAsk = null; const was = o.iBud; o.iBud = null; render();
+  const { error } = await sb.from("buds").delete().eq("follower", myId).eq("followee", id);
+  if (error){ o.iBud = was; render(); return showWarn("Couldn't undo: " + error.message); }
+  toast(was === "pending" ? "Request cancelled" : `Stopped spotting ${o.name}`); loadAll();
+}
+let unbudAsk = null;
+async function answerRequest(id, accept){
+  const o = members.get(id); if (o) o.theyBud = accept ? "accepted" : null; render();
+  const { error } = accept ? await sb.rpc("accept_bud", { p_follower: id })
+                           : await sb.from("buds").delete().eq("follower", id).eq("followee", myId);
+  if (error) return showWarn("Couldn't save that: " + error.message);
+  const r = members.get(id);
+  toast(!accept ? "Request declined" : r && r.iBud === "accepted" ? `You and ${nameOf(id)} are Buds 🤝` : `${nameOf(id)} is now spotting you`); loadAll();
+}
+async function removeFollower(id){
+  const { error } = await sb.from("buds").delete().eq("follower", id).eq("followee", myId);
+  if (error) return showWarn("Couldn't remove: " + error.message);
+  toast(`Removed ${nameOf(id)}`); loadAll();
+}
+function openProfile(id){ if (!members.has(id)) return; profileId = id; unbudAsk = null; render(); window.scrollTo(0,0); }
+function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); }   // no auto-keyboard: tapping the search box is enough
+// One click handler for the whole app: profiles, bud buttons, requests (works on every screen)
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-bud],[data-unbud],[data-accept],[data-decline],[data-unfollow],[data-pnudge],[data-goto-find],[data-goto-buds],[data-list],[data-profile],[data-unbud-yes],[data-unbud-no]");
+  if (!t || !t.closest("#main, #wn")) return;
+  const inner = e.target.closest("button, input, label, a");
+  if (t.hasAttribute("data-profile") && (wnActive || (inner && inner !== t))) return;   // a button inside a row does its own thing
+  e.stopPropagation();
+  if (t.dataset.bud) budUp(t.dataset.bud);
+  else if (t.dataset.unbud){ if (!profileId && members.get(t.dataset.unbud)?.iBud === "accepted"){ profileId = t.dataset.unbud; unbudAsk = t.dataset.unbud; render(); window.scrollTo(0,0); } else unBud(t.dataset.unbud); }
+  else if (t.dataset.unbudYes) unBud(t.dataset.unbudYes, true);
+  else if (t.hasAttribute("data-unbud-no")){ unbudAsk = null; render(); }
+  else if (t.dataset.accept) answerRequest(t.dataset.accept, true);
+  else if (t.dataset.decline) answerRequest(t.dataset.decline, false);
+  else if (t.dataset.unfollow) removeFollower(t.dataset.unfollow);
+  else if (t.dataset.pnudge){ t.disabled = true; sendNudge(t.dataset.pnudge); }
+  else if (t.hasAttribute("data-goto-find")) goFind();
+  else if (t.hasAttribute("data-goto-buds")){ crewView = "buds"; setTab("crew"); }
+  else if (t.dataset.list){ youView = "list:" + t.dataset.list; render(); window.scrollTo(0,0); }
+  else if (t.dataset.profile) openProfile(t.dataset.profile);
+});
+
+// ================= Profile =================
+// inYou = the You tab (your own profile, with Edit profile + Settings); otherwise someone you tapped
+function viewProfile(inYou){
+  const o = members.get(inYou ? myId : profileId); if (!o){ profileId = null; return render(); }
+  const self = o.id === myId, t = today(), ws = startOfWeek(t);
+  $("title").textContent = inYou ? "You" : self ? "Your profile" : "Profile";
+  const back = inYou ? "" : `<button type="button" class="linkbtn pfback" id="pf-back">‹ Back</button>`;
+  const badge = o.private ? `${LOCK} Private` : "Public";
+  if (!o.visible || !sharesStats(o)){
+    main().innerHTML = `<div class="view">${back}<div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate</span>
+      <div class="work sign">${esc(o.name)}</div>
+      ${countsRow(o, false)}
+      <p class="sub">${o.private ? "This account is private. Send a bud request to see their week and streak." : "Hasn't logged anything yet."}</p>
+      <div class="pfacts">${budBtn(o)}</div></div></div>`;
+    $("pf-back").onclick = () => { profileId = null; render(); }; return;
+  }
+  const boxes = Array.from({length:7},(_,k)=>{ const d = addDays(ws,k);
+    const c = has(o,d) ? "d" : frozen(o,d) ? "f" : isGym(o,d) ? (d<t ? "m" : "g") : "";
+    return `<span class="pfday"><i class="${c}"></i><b>${DAYS[k][0]}</b></span>`; }).join("");
+  const w = weekStats(o, ws);
+  const nudge = !self && isGym(o,t) && !has(o,t) ? nudgeCtl(o, "data-pnudge") : "";
+  const req = o.theyBud === "pending" ? `<div class="card banner"><span class="big-emoji">🤝</span><div class="grow"><b>${esc(o.name)} wants to be your bud</b>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(o.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(o.id)}">Decline</button></span></div></div>` : "";
+  const ask = unbudAsk === o.id ? `<div class="card banner"><div class="grow"><b>${isMutual(o) ? "Unbud" : "Stop spotting"} ${esc(o.name)}?</b><span class="note">${o.private ? "You'll need to send a bud request again to see their profile." : "You can bud them again any time."}</span>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-unbud-yes="${esc(o.id)}">${isMutual(o) ? "Unbud" : "Stop spotting"}</button><button type="button" class="linkbtn" data-unbud-no>Keep</button></span></div></div>` : "";
+  const split = o.plan ? o.plan.map((s,i)=>`<div class="li"><b class="sign" style="font-size:20px;width:44px">${DAYS[i]}</b><span class="grow">${s ? (s.w ? esc(s.w) : '<span class="note">Gym day</span>') : '<span class="note">Rest</span>'}</span>${s?.opt?'<span class="label">Optional</span>':""}</div>`).join("") : "";
+  // Your own profile (You tab): requests, bud counts, Edit profile + Settings
+  const mine = inYou ? `${requestsIn().map(r => `<div class="card banner"><span class="big-emoji">🤝</span><div class="grow"><b>${esc(r.name)} wants to be your bud</b>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(r.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(r.id)}">Decline</button></span></div></div>`).join("")}` : "";
+  const youBar = inYou ? `<div class="row2"><button class="cta ghost" id="you-edit" style="font-size:18px">Edit profile</button><button class="cta ghost" id="you-settings" style="font-size:18px">⚙️ Settings</button></div>` : "";
+  main().innerHTML = `<div class="view">${back}${mine}${req}${ask}
+    <div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate${self && !inYou ? " · how others see you" : ""}</span>
+      <div class="work sign">${esc(o.name)}</div>
+      ${!self && relation(o) ? `<span class="reltag">${({buds:"🤝 Buds", spotting:"You're spotting them", spotter:"Spots you", requested:"Request sent"})[relation(o)]}</span>` : ""}
+      ${countsRow(o, inYou)}
+      <div class="pfweek">${boxes}</div>
+      <p class="sub">This week: ${w.hit} of ${w.target} gym days${w.bonus ? ` · +${w.bonus} bonus` : ""}</p>
+      ${self ? "" : `<div class="pfacts">${budBtn(o)}${nudge}${isMutual(o) ? `<button type="button" class="chip" data-openchat="d:${esc(o.id)}">💬 Message</button>` : ""}</div>`}
+      ${!self && o.theyBud === "accepted" && me()?.private ? `<button type="button" class="linkbtn" data-unfollow="${esc(o.id)}" style="padding-left:0">Remove as spotter</button>` : ""}</div>
+    <div class="card statstrip" style="${pc(o)}">
+      <div class="accent"><b class="sign">${dayStreak(o)}</b><span class="label">Day streak</span></div>
+      <div><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
+      <div><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
+    ${youBar}
+    <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
+    <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
+    ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}</div>`;
+  if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
+  $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
+  if (inYou){ $("you-edit").onclick = () => { youView = "edit"; render(); window.scrollTo(0,0); };
+              $("you-settings").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); }; }
+}
+
+// Buds · Spotting · Spotters, like Instagram's followers/following. On your own profile they open the lists.
+function countsRow(o, mine){
+  const self = o.id === myId, c = self ? counts() : { buds: o.nBuds, spotting: o.nSpotting, spotters: o.nSpotters };
+  const cell = (k, label) => mine ? `<button type="button" data-list="${k}"><b>${c[k]}</b><span>${label}</span></button>`
+                                  : `<span><b>${c[k]}</b><span>${label}</span></span>`;
+  return `<div class="pfcounts">${cell("buds","Buds")}${cell("spotting","Spotting")}${cell("spotters","Spotters")}</div>`;
+}
+const LISTS = { buds: ["Buds", "You bud each other.", o => isMutual(o)],
+                spotting: ["Spotting", "Everyone you bud. 🤝 = they bud you back.", o => o.iBud === "accepted"],
+                spotters: ["Spotters", "Everyone who buds you. Bud them back to become Buds.", o => o.theyBud === "accepted"] };
+function viewPeopleList(kind){
+  const [title, sub, rel] = LISTS[kind];
+  $("title").textContent = title;
+  const list = everyone().filter(rel);
+  main().innerHTML = `<div class="view"><button type="button" class="linkbtn pfback" id="you-back">‹ Profile</button>
+    <p class="note" style="margin:0">${sub}</p>
+    ${list.length ? `<div class="list peoplelist">${list.map(personRow).join("")}</div>`
+      : `<div class="card"><p class="note" style="margin:0">No one here yet.</p><button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find people</button></div>`}</div>`;
+  $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
+}
+
+// ================= What's new (shown once to existing members) =================
+function wnArt(kind, m){
+  const me = `--c:var(--p-${PLATES.some(p => p.id === m.plate) ? m.plate : "red"})`, bud = "--c:var(--p-blue)", b2 = "--c:var(--p-yellow)", b3 = "--c:var(--p-green)", b4 = "--c:var(--p-pink)";
+  const disc = (st, cls = "") => `<span class="wdisc ${cls}" style="${st}"></span>`;
+  if (kind === "hello") return `<div class="wa-hello">${disc(b2, "s1")}${disc(me, "s2")}${disc(bud, "s3")}<span class="wa-bar"></span></div>`;
+  if (kind === "buds") return `<div class="wa-buds">${disc(me)}<span class="wa-link"><span>BUDS</span></span>${disc(bud)}</div>
+      <div class="wa-caps"><span>You</span><span>Your gym mate</span></div>`;
+  if (kind === "profiles") return `<div class="wa-card" style="${bud}"><div class="wa-row"><span class="dot"></span><b>Your mate</b></div>
+      <div class="wa-week">${[1,1,1,0,1,1,0].map(x => `<i class="${x ? "on" : ""}"></i>`).join("")}</div>
+      <div class="wa-stats"><b class="sign">14</b><span>day streak</span></div></div>`;
+  if (kind === "circles") return `<div class="wa-ring">${[me, bud, b2, b3, b4].map((st, i) => `<span class="wdisc sm" style="${st};--i:${i}"></span>`).join("")}<span class="wa-mid sign">Crew</span></div>`;
+  return `<div class="wa-chat"><span class="wa-bub them">gym at 6?</span><span class="wa-bub me" style="${pc(m)}">yesss 💪 see you there</span><span class="wa-bub them">bring straps</span></div>`;
+}
+function startTour(){ wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
+if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
+function viewWhatsNew(){
+  const m = me(); $("title").textContent = "What's new";
+  wnPv = wnPv || { ...pvFrom(m), priv: null };            // the tour asks fresh: nothing pre-picked
+  // One new thing per screen, one short line each, full screen with a little picture. Then privacy, then find your buds.
+  const FEATS = [["buds", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
+                 ["profiles", "Profiles", "Tap anyone to see their week, streak and trophies."],
+                 ["circles", "Circles", "Private groups for your crew, like a WhatsApp group."],
+                 ["chats", "Chats", "Message your Buds and your circles."]];
+  const PRIV = 2 + FEATS.length, FIND = PRIV + 1;            // step numbers: 1 hello, 2–5 features, 6 privacy, 7 find buds
+  const dots = `<div class="steps">${Array.from({ length: FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
+  let body = "";
+  if (wnStep < PRIV){                                         // the full-screen story part
+    document.documentElement.classList.add("wn-open");
+    const art = wnArt(wnStep === 1 ? "hello" : FEATS[wnStep - 2][0], m);
+    const text = wnStep === 1
+      ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`
+      : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>`;
+    main().innerHTML = `<div class="wnfull" id="wn" style="${pc(m)}">
+      <div class="wntop">${dots}${wnStep > 1 ? `<button type="button" class="linkbtn wnskip" id="wn-skip">Skip</button>` : ""}</div>
+      <div class="wnstage" key="${wnStep}"><div class="wnart">${art}</div><div class="wntext">${text}</div></div>
+      <button class="cta wngo" id="wn-next">${wnStep === 1 ? "Show me" : wnStep === PRIV - 1 ? "Got it" : "Next"}</button></div>`;
+    // the big title always fits on one line per word (shrinks if a word is too wide, e.g. before the font loads)
+    const fit = () => { const h = $("wn")?.querySelector(".wnbig"); if (!h) return; h.style.fontSize = "";
+      let fs = parseFloat(getComputedStyle(h).fontSize); while (h.scrollWidth > h.clientWidth + 1 && fs > 34){ fs -= 3; h.style.fontSize = fs + "px"; } };
+    fit(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+    $("wn-next").onclick = () => { wnStep++; render(); window.scrollTo(0,0); };
+    if ($("wn-skip")) $("wn-skip").onclick = () => { wnStep = PRIV; render(); window.scrollTo(0,0); };
+    return;
+  }
+  document.documentElement.classList.remove("wn-open");
+  if (wnStep === PRIV) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
+      <p class="note">Pick one. You can change it any time in You.</p>${privacyPicker(wnPv)}
+      <button class="cta" id="wn-next" ${wnPv.priv === null ? "disabled" : ""}>Continue</button>`;
+  if (wnStep === FIND) body = `<span class="label">Last step</span><h2 class="sign">Find your buds</h2>
+      <p class="note">Bud the people you train with. You can always do this later in Crew.</p>
+      <input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="list peoplelist" id="people">${everyone().map(personRow).join("")}</div>
+      <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>
+      <button class="cta" id="wn-next">Done</button>`;
+  main().innerHTML = `<div class="view" id="wn"><div class="card ob">${dots}${body}</div></div>`;
+  if (wnStep === PRIV) wirePrivacy(wnPv, render);
+  if (wnStep === FIND) wireFind();
+  $("wn-next").onclick = async () => {
+    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
+    if (wnStep === FIND){ document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
+    wnStep++; render(); window.scrollTo(0,0);
+  };
+}
+
 // ================= Shell =================
-const TITLES = {today:"Today",crew:"Crew",trophies:"Trophies",you:"You"};
+const TITLES = {today:"Today",crew:"Crew",chats:"Chats",trophies:"Trophies",you:"You"};
+// iPhone Home Screen apps: if a text box still has the keyboard up when the screen is redrawn, iOS drops the keyboard
+// but leaves the page pushed up, so the bottom bar floats mid-screen. Close the keyboard first, then nudge iOS back.
+function settleKeyboard(){ const ae = document.activeElement; if (ae && ae.matches && ae.matches("input, textarea") && $("main").contains(ae)) ae.blur(); }
+document.addEventListener("focusout", e => { if (e.target.matches && e.target.matches("input, textarea"))
+  setTimeout(() => { if (!document.activeElement || !document.activeElement.matches("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); }, 120); });
+if (window.visualViewport) visualViewport.addEventListener("resize", () => {   // keyboard closed → snap fixed bars back
+  if (visualViewport.height > window.innerHeight * 0.85 && !(document.activeElement || {}).matches?.("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); });
+// iPhone bug (Home Screen apps, iOS 17–26): after the keyboard has been open once, iOS shrinks the app's
+// screen by ~59pt and never gives it back, so the bottom bar / text box float above a gap. Fix: once the
+// keyboard has closed, hide and re-show the whole page in one go (no paint in between) so iOS re-measures.
+const standalone = () => device.iphone && device.standalone;     // iPhone Home Screen app only (Android/desktop are fine)
+let fullH = Math.max(window.innerHeight, standalone() ? (screen.height || 0) : 0);
+window.addEventListener("resize", () => { fullH = Math.max(fullH, window.innerHeight); });
+function typing(){ const a = document.activeElement; return !!(a && a.matches && a.matches("input, textarea, select")); }
+function remeasure(){
+  if (!standalone() || typing() || fullH - window.innerHeight <= 4) return;          // only when actually stuck
+  const y = window.scrollY, log = $("chatlog"), ly = log ? log.scrollTop : 0;
+  document.body.style.display = "none"; void document.body.offsetHeight; document.body.style.display = "";
+  window.scrollTo(0, y); if (log) log.scrollTop = ly;
+  if (typeof fitChat === "function") fitChat();
+}
+// Belt and braces: if iOS still hasn't given the space back, measure the gap ourselves and push everything that
+// belongs at the bottom (tab bar, chat text box) down by exactly that much, onto the real bottom of the screen.
+let kbGap = 0;
+function pinBottom(){
+  let gap = standalone() && !typing() ? Math.max(0, fullH - window.innerHeight) : 0;
+  if (gap > 150) gap = 0;                                   // that big = the keyboard really is open, leave it
+  if (gap !== kbGap){ kbGap = gap; document.documentElement.style.setProperty("--kbgap", gap + "px"); }
+  // and make every page at least the REAL screen height: on a short page (e.g. Chats) iOS only paints down to
+  // its wrong, shrunk height, which cut off the bottom of the tab bar
+  document.documentElement.style.setProperty("--fullh", (standalone() ? fullH : window.innerHeight) + "px");
+  if (typeof fitChat === "function") fitChat();
+}
+const settle = () => { remeasure(); pinBottom(); };
+document.addEventListener("focusout", () => { setTimeout(settle, 150); setTimeout(settle, 450); setTimeout(settle, 900); });
+document.addEventListener("focusin", () => setTimeout(pinBottom, 50));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(settle, 200); });
+window.addEventListener("load", () => setTimeout(settle, 300));
+window.addEventListener("resize", () => setTimeout(pinBottom, 50));
+if (window.visualViewport) visualViewport.addEventListener("resize", () => setTimeout(pinBottom, 50));
+// A background refresh shouldn't redraw the screen while you're typing (it closed the keyboard and wiped
+// half-typed text in search boxes, the join code, weight/height...). Redraw as soon as you're done instead.
+let renderPending = false;
+// iPhone: if the screen is rebuilt while your finger is on it (or the page is still gliding after a swipe),
+// iOS loses the scroll and the page freezes. So background redraws wait until you've stopped touching/scrolling.
+let touching = false, lastMove = 0;
+addEventListener("touchstart", () => { touching = true; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchmove", () => { lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchend", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("touchcancel", () => { touching = false; lastMove = Date.now(); }, { passive: true, capture: true });
+addEventListener("scroll", () => { lastMove = Date.now(); }, { passive: true, capture: true });   // capture: also inner scrollers (chat)
+const handsOn = () => touching || Date.now() - lastMove < 900;
+let waitT = null;
+function whenStill(fn){ clearTimeout(waitT); if (!handsOn()) return fn(); waitT = setTimeout(() => whenStill(fn), 300); }
+function renderSoft(){
+  if (handsOn()){ whenStill(renderSoft); updateChatBadge(); return; }
+  const a = document.activeElement;
+  if (a && a.matches && a.matches("input:not([type=checkbox]):not([type=radio]), textarea") && a.id !== "chat-input" && $("main").contains(a)){ renderPending = true; updateChatBadge(); return; }
+  render();
+}
+document.addEventListener("focusout", () => setTimeout(() => { if (renderPending && !typing()){ renderPending = false; render(); } }, 200));
 function render(){
+  renderPending = false;
+  if (!wnActive) document.documentElement.classList.remove("wn-open");
+  if (!chatKey || profileId || circleId) document.documentElement.classList.remove("chat-open");
+  if (chatKey && !profileId && !circleId && !locked && session && ready && !ob && !wnActive && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
+  settleKeyboard();
   $("date").textContent = today().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
   const m = me();
   $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
-  $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked;
+  if (ready && session && !ob && !locked && !wnDone && me() && (me().seenUpdate || 0) < 1) wnActive = true;
+  $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
   renderOnline();
   if (!sb) return viewSetup();
@@ -1757,16 +2650,23 @@ function render(){
   if (gate) return viewInstall();            // phones in a browser: get it on the Home Screen first
   // Wait until we KNOW whether you're logged in. Renewing your login can take a few seconds on
   // gym signal; showing the sign-in form during that made it look like you'd been logged out.
-  if (!authKnown){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="splash"><img class="iapp" src="icons/apple-touch-icon.png" alt="" width="72" height="72"><span class="label">Loading…</span></div>`; return; }
+  if (!authKnown){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="splash"><img class="iapp" src="${ICON}" alt="" width="72" height="72"><span class="label">Loading…</span></div>`; return; }
   if (!signedIn) return viewAuth();
   if (locked) return viewLock();
   if (!ready){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="skel">Loading the crew…</div>`; return; }
   if (ob){ $("title").textContent = ob.edit ? "Edit" : "Set up"; viewOnboarding(); return; }
+  if (wnActive) return viewWhatsNew();
+  updateChatBadge();
+  if (chatKey && !profileId && !circleId) return viewChat(chatKey);
+  if (profileId) return viewProfile();
+  if (joinPreview || (pendingJoin && me())) return viewJoinCircle();
+  if (circleId || circleMode === "new") return viewCircleRoute();
   $("title").textContent = TITLES[tab];
-  ({today:viewToday,crew:viewCrew,trophies:viewTrophies,you:viewYou})[tab]();
+  ({today:viewToday,crew:viewCrew,chats:viewChats,trophies:viewTrophies,you:viewYou})[tab]();
+  pinBottom();
   maybeShowPushSheet();
 }
-function setTab(t){ tab=t; ob=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -1786,7 +2686,12 @@ let sb = null, session = null, authKnown = false;
     if (event === "INITIAL_SESSION" && myId && lockInfo()) locked = true;   // Face ID lock on app open
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
-    if (myId && myId !== was){ ready = false; loadAll(); subscribe(); }
+    if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
+      loadGen++; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
+      document.documentElement.classList.remove("chat-open");
+    }
+    if (myId && myId !== was){ ready = false; loading = null; loadAll(); subscribe(); }
     if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); }
     render();
   });
@@ -1796,11 +2701,13 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "42";   // bump together with version.json on every release
+const APP_VERSION = "43";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
     const { v } = await r.json();
+    const busyNow = ob || circleDraft || typing() || busy.size || Object.values(chatDrafts).some(Boolean);
+    if (busyNow){ setTimeout(checkForUpdate, 30000); return; }     // finish what you're doing first
     if (v && v !== APP_VERSION && !sessionStorage.getItem("gs-reloaded-" + v)){
       sessionStorage.setItem("gs-reloaded-" + v, "1");   // never loop if something's off
       location.reload();
@@ -1813,7 +2720,8 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("cont
 // Phones pause apps in the background: refresh when it comes back, and roll over at midnight.
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible"){ sheetShown = false; checkForUpdate(); if (session) loadAll(); } });
 let lastDay = key(today());
-setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); render(); } }, 60000);
+setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); render(); }
+  else if (document.querySelector("[data-wait]") && !document.activeElement?.matches("input")) render(); }, 30000);   // tick the "Nudged · 7m" countdown
 
 // Offline app shell (makes it installable and load instantly)
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
