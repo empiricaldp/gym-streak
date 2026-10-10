@@ -2482,11 +2482,15 @@ function viewWhatsNew(){
   if (wnStep === 1) body = `<div class="wnhero"><span class="wnemoji">🎉</span><span class="rec">New</span><h2 class="sign">Big update</h2>
       <p class="note">CREW just got more personal. Your crew, your way.</p></div>
       <button class="cta" id="wn-next">See what's new</button>`;
-  if (wnStep === 2) body = `<span class="label">What's new</span><h2 class="sign">Three things</h2>
+  // Each new thing in three short lines: what it is, how to use it, why it's worth it
+  const feat = (emoji, name, what, how, why) => `<div><span>${emoji}</span><p><b>${name}</b>
+      <small class="wnl"><i>What</i>${what}</small><small class="wnl"><i>How</i>${how}</small><small class="wnl"><i>Why</i>${why}</small></p></div>`;
+  if (wnStep === 2) body = `<span class="label">What's new</span><h2 class="sign">Four things</h2>
       <div class="wnlist">
-        <div><span>👤</span><p><b>Profiles</b><small>Tap anyone to see their week, streak and trophies.</small></p></div>
-        <div><span>🤝</span><p><b>Buds</b><small>Tap Bud on your gym mates. Bud each other and you're Buds. One way, you're spotting them. Today shows just your crew.</small></p></div>
-        <div><span>🔍</span><p><b>Find people</b><small>Search the crew and bud them in one tap.</small></p></div>
+        ${feat("🤝", "Buds", "Follow your gym mates. Bud each other and you're Buds.", "Tap Bud on anyone in Crew or on their profile.", "Today shows just your crew, and Buds can nudge each other.")}
+        ${feat("👤", "Profiles", "Everyone now has a profile.", "Tap any name to see their week, streak and trophies.", "Check on your crew in one tap.")}
+        ${feat("⭕", "Circles", "Private groups, like a WhatsApp group.", "Crew → Circles → New circle, then add people or share the link.", "Your own leaderboard with just your group.")}
+        ${feat("💬", "Chats", "Message your Buds and your circles.", "Open the Chats tab, or tap Message on a Bud.", "Plan sessions and hype each other up, right in CREW.")}
       </div><button class="cta" id="wn-next">Next</button>`;
   if (wnStep === 3) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
       <p class="note">We've picked the one that matches your old settings. Change it any time in You.</p>${privacyPicker(wnPv)}
@@ -2640,7 +2644,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b21";   // bump together with version.json on every release
+const APP_VERSION = "b22";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
