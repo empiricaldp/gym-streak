@@ -159,7 +159,7 @@ const dayWord = (d: string, tz?: string) => d === dayIn(tz) ? "today" : d === ad
   : "on " + new Date(d + "T12:00:00Z").toLocaleDateString("en-AU", { weekday: "long", timeZone: "UTC" });
 
 const people = async (ids: string[]) =>
-  ids.length ? await rest(`profiles?select=id,name,tz,plan,is_public,share_attendance,share_split,account,hide_split,notif_nudge,notif_react,notif_crew,notif_circle,notif_chat&id=${inList(ids)}`) : [];
+  ids.length ? await rest(`profiles?select=id,name,tz,plan,is_public,share_attendance,share_split,account,hide_split,notif_nudge,notif_react,notif_crew,notif_circle,notif_chat,notif_buds&id=${inList(ids)}`) : [];
 const EMOJI: Record<string, string> = { fire: "🔥", muscle: "💪", clap: "👏" };
 
 // ---------- the wording ----------
@@ -209,6 +209,14 @@ export function messageNote(fromName: string, body: string, chatKey: string, cir
   const text = body.replace(/\s+/g, " ").trim();
   return { title: circle ? `${U(fromName)} · ${U(circle)}` : U(fromName),
     body: Array.from(text).length > 140 ? Array.from(text).slice(0, 139).join("") + "…" : text, tag: "chat-" + chatKey };
+}
+// Buds: someone budded you / asked to / accepted your request
+export function budNote(fromName: string, kind: "budded" | "request" | "accepted", mutual: boolean): Note {
+  const n = U(fromName);
+  if (kind === "request") return { title: `${n} WANTS TO BE YOUR BUD`, body: "You're private. Open CREW to accept.", tag: "bud" };
+  if (kind === "accepted") return { title: `${n} ACCEPTED`, body: mutual ? "You're Buds now 🤝" : "You're spotting them now.", tag: "bud" };
+  return mutual ? { title: `${n} BUDDED YOU BACK`, body: "You're Buds now 🤝 Nudge and chat any time.", tag: "bud" }
+                : { title: `${n} BUDDED YOU`, body: "Bud back to become Buds.", tag: "bud" };
 }
 export const testNote = (): Note => ({ title: "NOTIFICATIONS ON",
   body: "Nudges, reactions, crew sessions and reminders land here.", tag: "test" });
@@ -319,6 +327,27 @@ async function onMessage(r: any){
   for (const id of wants) if (await firstTime("chat", id, String(m.id), sydneyDay())) go.push(id);
   return send(go, messageNote(from.name, m.body, key, circle));
 }
+async function budRow(b: any){
+  if (!isUuid(b?.follower) || !isUuid(b?.followee)) return null;
+  const [r] = await rest(`buds?select=follower,followee,status,created_at,accepted_at&follower=eq.${b.follower}&followee=eq.${b.followee}`);
+  if (!r) return null;
+  const [back] = await rest(`buds?select=status&follower=eq.${r.followee}&followee=eq.${r.follower}&status=eq.accepted`);
+  return { ...r, mutual: !!back };
+}
+async function onBud(b: any){                                   // a new bud: tell the person who got budded
+  const r = await budRow(b); if (!r || !fresh(r.created_at)) return { skipped: "not found" };
+  const [[from], [to]] = await Promise.all([people([r.follower]), people([r.followee])]);
+  if (!from || !to?.notif_buds) return { skipped: "off" };
+  if (!await firstTime("bud", r.followee, r.follower, sydneyDay())) return { skipped: "dupe" };   // bud/unbud/bud again: once a day
+  return send([r.followee], budNote(from.name, r.status === "pending" ? "request" : "budded", r.status === "accepted" && r.mutual));
+}
+async function onBudAccept(b: any){                             // a request was accepted: tell the person who asked
+  const r = await budRow(b); if (!r || r.status !== "accepted" || !r.accepted_at || !fresh(r.accepted_at)) return { skipped: "not found" };
+  const [[by], [to]] = await Promise.all([people([r.followee]), people([r.follower])]);
+  if (!by || !to?.notif_buds) return { skipped: "off" };
+  if (!await firstTime("bud_ok", r.follower, r.followee, sydneyDay())) return { skipped: "dupe" };
+  return send([r.follower], budNote(by.name, "accepted", r.mutual));
+}
 async function onReminders(){
   const due = await rest("rpc/due_reminders", { method: "POST", body: "{}" });   // also marks them as reminded today
   const ctx = await contexts(due.map((d: any) => d.uid));
@@ -348,6 +377,8 @@ export async function handle(req: Request){
     else if (b.type === "checkins") out = await onCheckin(b.record);
     else if (b.type === "circle_members") out = await onCircleAdd(b.record);
     else if (b.type === "messages") out = await onMessage(b.record);
+    else if (b.type === "buds") out = await onBud(b.record);
+    else if (b.type === "bud_accept") out = await onBudAccept(b.record);
     else if (b.type === "reminders") out = await onReminders();
     else if (b.type === "test") out = await onTest(req);
     else if (b.type === "ping") out = { ok: true, vapid: !!(await keys()).priv };
