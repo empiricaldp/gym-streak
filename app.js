@@ -2656,7 +2656,7 @@ function render(){
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
   if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && ((me().seenUpdate || 0) < TOUR_V || !tourSeenHere())){
-    wnActive = true; wnShort = (me().seenUpdate || 0) >= 1;     // saw the old (beta) tour: just show what's new, don't re-ask privacy
+    wnActive = true; wnShort = false;                          // everyone gets the full tour, privacy choice included (DP's call)
   }
   $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
@@ -2717,7 +2717,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "45";   // bump together with version.json on every release
+const APP_VERSION = "46";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
