@@ -886,10 +886,10 @@ async function shareRecap(m){
 function privacyPicker(p){
   // p = {priv, hide}
   return `<div class="privacy">
-    <button type="button" class="popt ${p.priv?"on":""}" data-pv="priv" aria-pressed="${p.priv}">
+    <button type="button" class="popt ${p.priv === true ? "on" : ""}" data-pv="priv" aria-pressed="${p.priv === true}">
       <span class="pt">${LOCK} Private</span>
       <span class="pd">People send a bud request. Only buds you approve see your profile and streak.</span></button>
-    <button type="button" class="popt ${!p.priv?"on":""}" data-pv="pub" aria-pressed="${!p.priv}">
+    <button type="button" class="popt ${p.priv === false ? "on" : ""}" data-pv="pub" aria-pressed="${p.priv === false}">
       <span class="pt">🔓 Public</span>
       <span class="pd">Anyone can see your profile and bud you straight away.</span></button>
     <div class="toggles"><label class="tg" for="pv-hide"><span><b>Hide my split</b><small>Show that you trained, not what you trained</small></span>
@@ -2493,7 +2493,7 @@ function startTour(){ wnActive = true; wnStep = 1; wnPv = null; youView = "profi
 if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
-  wnPv = wnPv || pvFrom(m);
+  wnPv = wnPv || { ...pvFrom(m), priv: null };            // the tour asks fresh: nothing pre-picked
   // One new thing per screen, one short line each, full screen with a little picture. Then privacy, then find your buds.
   const FEATS = [["buds", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
                  ["profiles", "Profiles", "Tap anyone to see their week, streak and trophies."],
@@ -2507,8 +2507,7 @@ function viewWhatsNew(){
     const art = wnArt(wnStep === 1 ? "hello" : FEATS[wnStep - 2][0], m);
     const text = wnStep === 1
       ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`
-      : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>
-         ${FEATS[wnStep - 2][0] === "buds" ? `<p class="wnsmall">Like Instagram, but for the gym. <b>Spotting</b> = people you bud. <b>Spotters</b> = people who bud you.</p>` : ""}`;
+      : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>`;
     main().innerHTML = `<div class="wnfull" id="wn" style="${pc(m)}">
       <div class="wntop">${dots}${wnStep > 1 ? `<button type="button" class="linkbtn wnskip" id="wn-skip">Skip</button>` : ""}</div>
       <div class="wnstage" key="${wnStep}"><div class="wnart">${art}</div><div class="wntext">${text}</div></div>
@@ -2523,8 +2522,8 @@ function viewWhatsNew(){
   }
   document.documentElement.classList.remove("wn-open");
   if (wnStep === PRIV) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
-      <p class="note">We've picked the one that matches your old settings. Change it any time in You.</p>${privacyPicker(wnPv)}
-      <button class="cta" id="wn-next">Continue</button>`;
+      <p class="note">Pick one. You can change it any time in You.</p>${privacyPicker(wnPv)}
+      <button class="cta" id="wn-next" ${wnPv.priv === null ? "disabled" : ""}>Continue</button>`;
   if (wnStep === FIND) body = `<span class="label">Last step</span><h2 class="sign">Find your buds</h2>
       <p class="note">Bud the people you train with. You can always do this later in Crew.</p>
       <input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -2535,7 +2534,7 @@ function viewWhatsNew(){
   if (wnStep === PRIV) wirePrivacy(wnPv, render);
   if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
-    if (wnStep === PRIV){ $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
+    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
     if (wnStep === FIND){ document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
@@ -2675,7 +2674,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b25";   // bump together with version.json on every release
+const APP_VERSION = "b26";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
