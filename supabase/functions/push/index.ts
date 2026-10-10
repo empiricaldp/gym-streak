@@ -257,10 +257,11 @@ async function onCheckin(b: any){
   if (!found.length) return { skipped: "not found" };
   // recipient → circle label (null = not via a circle). One notification per person, however they're connected.
   const recips = new Map<string, { label: string; cid: string } | null>();
-  const isPublic = who.account ? who.account === "public" : (who.is_public && who.share_attendance);
-  if (isPublic){                         // crew activity (respects their privacy choice)
-    for (const o of await rest(`profiles?select=id&notif_crew=eq.true&id=neq.${r.user_id}`)) recips.set(o.id, null);
-  }
+  // Who hears about it: their Spotters (everyone who buds them, request accepted) with crew activity on,
+  // plus their circle-mates (below). Not the whole app any more.
+  const spotters = (await rest(`buds?select=follower&followee=eq.${r.user_id}&status=eq.accepted`)).map((x: any) => x.follower);
+  if (spotters.length)
+    for (const o of await rest(`profiles?select=id&notif_crew=eq.true&id=${inList(spotters)}`)) recips.set(o.id, null);
   const mine = await rest(`circle_members?select=circle_id&user_id=eq.${r.user_id}`);   // circle-mates (even if private)
   if (mine.length){
     const ids = mine.map((x: any) => x.circle_id);
