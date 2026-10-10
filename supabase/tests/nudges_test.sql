@@ -21,8 +21,8 @@ begin
   insert into public.nudges (from_user, to_user) values (a, b); out := out || E'\n3 after 10 min, Bud can nudge again: PASS';
   begin insert into public.nudges (from_user, to_user) values (a, c); out := out || E'\n4 spotting only (one-way) can''t nudge: FAIL';
   exception when others then out := out || E'\n4 spotting only (one-way) can''t nudge: PASS'; end;
-  insert into public.nudges (from_user, to_user) values (a, d); out := out || E'\n5 live-app rule (until launch): first nudge PASS';
-  begin insert into public.nudges (from_user, to_user) values (a, d); out := out || E'\n6 live-app rule: second same day blocked: FAIL';
-  exception when others then out := out || E'\n6 live-app rule: second same day blocked: PASS'; end;
+  -- (018, launch) the old "nudge anyone once a day" rule is gone: strangers can't be nudged
+  begin insert into public.nudges (from_user, to_user) values (a, d); out := out || E'\n5 stranger (not Bud, no circle) can''t be nudged: FAIL';
+  exception when others then out := out || E'\n5 stranger (not Bud, no circle) can''t be nudged: PASS'; end;
   execute 'reset role';
   raise exception 'TESTS:%', out; end $$;
