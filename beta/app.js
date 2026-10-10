@@ -68,7 +68,11 @@ function dayStreakAt(m, end){
   }
   return n;
 }
-const dayStreak = m => dayStreakAt(m, today());
+// Streaks are worked out by walking back day by day; leaderboards ask for them many times per screen,
+// so remember each person's answer until their data (a new object) or the date changes.
+const streakMemo = new WeakMap();
+const dayStreak = m => { const k = key(today()), c = streakMemo.get(m); if (c && c.k === k) return c.v;
+  const v = dayStreakAt(m, today()); streakMemo.set(m, { k, v }); return v; };
 function bestStreak(m){
   let run=0,best=0; const t = today();
   for (let d = parse(m.since); d <= t; d = addDays(d,1)){
@@ -328,7 +332,7 @@ function viewToday(){
   }
   const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
   main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${tiles}${stepsHtml}${q}${crewHtml}${circleRow}</div>`;
-  $("logbtn").onclick = () => toggleDay(t);
+  $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
   main().querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => { b.disabled = true; sendNudge(b.dataset.nudge); });
   main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { goalDraft = toggleIn(goalDraft, b.dataset.goal); render(); });
@@ -365,7 +369,7 @@ function cellBtn(o,d){
   const s = slot(o,d), t = today(), done = has(o,d), cred = credited(o,d);
   const fz = !done && frozen(o,d);
   const st = !s ? (done?"done":"rest") : done ? "done" : fz ? "froze" : (!s.opt && d<t) ? "missed" : "open";
-  const mine = o.id===myId && d<=t && !cred && db;
+  const mine = o.id===myId && d<=t && d >= addDays(t, -31) && !cred && db;
   const label = !s ? (done?"Bonus":"Rest") : workLabel(s);
   const small = fz ? "❄️ Freeze" : s?.opt ? "Optional" : "";
   return `<button class="cell ${st} ${mine?"mine":""}" ${mine?`data-day="${key(d)}"`:"disabled"} style="${pc(o)}" aria-label="${esc(o.name)} ${DAYS_LONG[dow(d)]}: ${label}, ${done?"done":"not done"}">
@@ -1283,10 +1287,10 @@ function saveTimeZone(saved){
   const tz = phoneTZ();
   if (tz && saved !== undefined && saved !== tz) sb.from("profiles").update({ tz }).eq("id", myId).then(() => {}, () => {});
 }
-let editSeq = 0, reloadAgain = false;   // editSeq goes up every time I tick/untick a day
+let editSeq = 0, reloadAgain = false, loadGen = 0, failed = new Set();   // loadGen: bumped on sign-out so old loads are thrown away   // editSeq goes up every time I tick/untick a day
 async function loadAll(){
   if (loading){ reloadAgain = true; return loading; }   // a change arrived mid-load: load again afterwards
-  const seq0 = editSeq;
+  const seq0 = editSeq, gen = loadGen;
   const before = ready && myId ? { members, reactions, nudges, circles } : null;   // what we had, to spot what's new
   loading = (async () => {
     try {
@@ -1313,45 +1317,59 @@ async function loadAll(){
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       // Streak freezes (the database only returns your own + people who share attendance)
-      // Circles I'm in (the database only returns those) and their members
-      const [cRows, cmRows] = await Promise.all([
-        fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at").catch(() => []),
-        fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at").catch(() => [])]);
-      circles = cRows.map(c => ({ ...c, members: cmRows.filter(m => m.circle_id === c.id).sort((a,b) => String(a.joined_at).localeCompare(String(b.joined_at))) }))
-        .sort((a,b) => String(a.created_at).localeCompare(String(b.created_at)));
-      // Chats: the last 90 days of messages I can see, and where I've read up to
+      // Everything else in ONE parallel batch (was ~8 trips one after another). If a part fails (flaky signal),
+      // keep what we had instead of treating it as "empty" (that kicked people out of circles and caused false banners).
       const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
-      const [msgRows, readRows] = await Promise.all([
-        fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90)).catch(() => null),
-        fetchAll("chat_reads", "chat,read_at").catch(() => [])]);
-      // keep anything that arrived live while this was loading (and my unsent ones), so nothing flickers away
+      const soft = p => p.then(v => v, () => null);           // null = this part failed
+      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows] = await Promise.all([
+        soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
+        soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
+        soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
+        soft(fetchAll("chat_reads", "chat,read_at")),
+        soft(fetchAll("freezes", "user_id,day")),
+        soft(fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8))))),
+        soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
+        soft(fetchAll("nudges", "to_user", q => q.eq("from_user", myId))),
+        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,remind_at,tz").eq("id", myId).maybeSingle(),
+        soft(fetchAll("bodyweight", "day,kg", q => q.order("day")))]);
+      if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
+      failed = new Set();
+      // Circles I'm in (the database only returns those) and their members
+      if (cRows && cmRows) circles = cRows.map(c => ({ ...c, members: cmRows.filter(m => m.circle_id === c.id).sort((a,b) => String(a.joined_at).localeCompare(String(b.joined_at))) }))
+        .sort((a,b) => String(a.created_at).localeCompare(String(b.created_at)));
+      else failed.add("circles");
+      // Chats: the last 90 days of messages I can see, and where I've read up to.
+      // Keep anything that arrived live while this was loading (and my unsent ones), so nothing flickers away.
       if (msgRows){ const got = new Set(msgRows.map(m => m.id));
         messages = [...msgRows, ...messages.filter(m => !got.has(m.id) && (m.pending || m.failed || m.created_at > fetchedAt))]; }
-      for (const r of readRows) if (!chatReads[r.chat] || r.read_at > chatReads[r.chat]) chatReads[r.chat] = r.read_at;
-      const freezeRows = await fetchAll("freezes", "user_id,day").catch(() => []);
-      for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
+      for (const r of readRows || []) if (!chatReads[r.chat] || r.read_at > chatReads[r.chat]) chatReads[r.chat] = r.read_at;
+      if (freezeRows) for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
+      else for (const [id, m] of next){ const old = members.get(id); if (old?.frozen) m.frozen = old.frozen; }
       // Reactions from the last week, nudges to/from me from the last 2 days
-      reactions = await fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8)))).catch(() => []);
-      nudges = await fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -1)))).catch(() => []);
+      if (rRows) reactions = rRows; else failed.add("reactions");
+      if (nRows) nudges = [...nRows, ...nudges.filter(n => n.from_user === myId && !nRows.some(x => x.from_user === n.from_user && x.to_user === n.to_user && x.created_at === n.created_at) && Date.now() - Date.parse(n.created_at) < 60000)];
+      else failed.add("nudges");
       // everyone I've ever nudged (non-buds only get one nudge, ever)
-      sentNudgeTo = new Set((await fetchAll("nudges", "to_user", q => q.eq("from_user", myId)).catch(() => [])).map(n => n.to_user));
+      if (sentRows) sentNudgeTo = new Set(sentRows.map(n => n.to_user));
       // My private stuff: goal, height and weight log (nobody else can read these)
-      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,remind_at,tz").eq("id", myId).maybeSingle();
       saveTimeZone(mine.data?.tz);
       if (mine.data && "notif_nudge" in mine.data) notif = { nudge: mine.data.notif_nudge, react: mine.data.notif_react, crew: mine.data.notif_crew,
         remind: mine.data.notif_remind, chat: mine.data.notif_chat !== false, at: String(mine.data.remind_at || "19:00").slice(0,5) };
       syncPush();
-      body.goals = mine.data?.goals?.length ? mine.data.goals : (mine.data?.goal ? [mine.data.goal] : []);
-      body.trainedSince = mine.data?.trained_since || null;
-      body.height = mine.data?.height_cm ? Number(mine.data.height_cm) : null;
-      body.weights = (await fetchAll("bodyweight", "day,kg", q => q.order("day")).catch(() => [])).map(r => ({ day: r.day, kg: Number(r.kg) }));
+      if (mine.data){
+        body.goals = mine.data.goals?.length ? mine.data.goals : (mine.data.goal ? [mine.data.goal] : []);
+        body.trainedSince = mine.data.trained_since || null;
+        body.height = mine.data.height_cm ? Number(mine.data.height_cm) : null;
+      }
+      if (wRows) body.weights = wRows.map(r => ({ day: r.day, kg: Number(r.kg) }));
       // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
+      if (gen !== loadGen) return;
       members = next; ready = true; $("warn").hidden = true;
-      if (before) try { announce(before); } catch(e){ console.warn("banner", e); }
+      if (before) try { announce(before, failed); } catch(e){ console.warn("banner", e); }
     } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
-    finally { loading = null; render(); loadMemberCount(); if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
+    finally { loading = null; if (gen === loadGen){ renderSoft(); loadMemberCount(); } if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
   })();
   return loading;
 }
@@ -1405,7 +1423,8 @@ async function toggleDay(d){
     // Before undoing on screen, ask the server what's really saved (the save may have landed anyway)
     const chk = await sb.from("checkins").select("day").eq("user_id", myId).eq("day", k);
     if (!chk.error && (chk.data.length > 0) === !was) return;   // it did save: keep it, no warning
-    members.set(myId, m); render(); showWarn("Couldn't save that — check your internet and try again.");
+    const cur = me(); if (cur){ const days = { ...(cur.days || {}) }; if (was) days[k] = 1; else delete days[k]; members.set(myId, { ...cur, days }); }
+    render(); showWarn("Couldn't save that — check your internet and try again.");
   }
 }
 
@@ -1422,10 +1441,17 @@ const canSend = k => { const t = chatTarget(k); return t.circle ? !!t.circle : i
 // Every chat I can see: all my circles, every Bud, plus old 1-on-1s (e.g. someone who isn't a Bud any more)
 function chatList(){
   const keys = new Set([...circles.map(c => "c:" + c.id), ...[...members.values()].filter(o => o.id !== myId && isMutual(o)).map(o => "d:" + o.id)]);
-  for (const m of messages) keys.add(keyOfMsg(m));
+  // one pass over all messages (was: a filter + sort per chat, on every redraw)
+  const sum = new Map();
+  for (const m of messages){
+    const k = keyOfMsg(m); keys.add(k);
+    const e = sum.get(k) || { last: null, unread: 0 }; sum.set(k, e);
+    if (!e.last || m.created_at > e.last.created_at) e.last = m;
+    if (m.from_user !== myId && !m.pending && m.created_at > (chatReads[k] || "")) e.unread++;
+  }
   return [...keys].filter(k => k.startsWith("c:") ? circleOf(k.slice(2)) : members.get(k.slice(2))).map(k => {
-    const ms = chatMsgs(k), last = ms[ms.length - 1] || null;
-    return { k, last, unread: unreadIn(k) }; })
+    const e = sum.get(k) || { last: null, unread: 0 };
+    return { k, last: e.last, unread: e.unread }; })
     .sort((a, b) => (b.last?.created_at || "").localeCompare(a.last?.created_at || "") || chatName(a.k).localeCompare(chatName(b.k)));
 }
 const totalUnread = () => chatList().reduce((n, c) => n + c.unread, 0);
@@ -1513,7 +1539,7 @@ function viewChat(k){
   const composer = canSend(k)
     ? `<form class="composer" id="chat-form"><textarea id="chat-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message" enterkeyhint="send">${esc(chatDrafts[k] || "")}</textarea>
         <button class="cta" id="chat-send" type="submit" aria-label="Send">Send</button></form>`
-    : `<p class="chatnote composer">${t.circle ? "" : `You and ${esc(o.name)} aren't Buds any more, so you can't send messages.`}</p>`;
+    : `<p class="chatnote composer">${t.circle ? "" : `You can message ${esc(o.name)} again once you're Buds (you both bud each other).`}</p>`;
   main().innerHTML = `<div class="chatscreen" id="chatscreen"><div class="chatinner">
     <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}</div>
     <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div></div>`;
@@ -1548,16 +1574,18 @@ window.addEventListener("resize", fitChat);
 async function sendMsg(k, text){
   const body = String(text || "").trim(); if (!body) return;
   const row = k.startsWith("c:") ? { from_user: myId, circle_id: k.slice(2), body } : { from_user: myId, to_user: k.slice(2), body };
+  const sentAt = new Date(Date.now() - 5000).toISOString();
   const tmp = { ...row, id: "tmp" + (++tmpId), created_at: new Date().toISOString(), pending: true };
   messages.push(tmp); patchChat(); chatToBottom();
   let res = await sb.from("messages").insert(row).select("id,created_at");
   if (res.error && /load failed|failed to fetch|network/i.test(res.error.message || "")){ await new Promise(r => setTimeout(r, 1200));
     // it may have landed anyway: only resend if it isn't there
-    const chk = await sb.from("messages").select("id,created_at").eq("from_user", myId).eq("body", body).gte("created_at", new Date(Date.now() - 120000).toISOString());
+    const chk = await sb.from("messages").select("id,created_at").eq("from_user", myId).eq("body", body)
+      .eq(row.circle_id ? "circle_id" : "to_user", row.circle_id || row.to_user).gte("created_at", sentAt);
     res = !chk.error && chk.data?.length ? { data: chk.data.slice(-1), error: null } : await sb.from("messages").insert(row).select("id,created_at"); }
   if (res.error){ tmp.pending = false; tmp.failed = true; patchChat(); return; }
   const real = (res.data || [])[0];
-  if (real && messages.some(m => m.id === real.id)) messages = messages.filter(m => m !== tmp);   // the live update got here first
+  if (real && messages.some(m => m !== tmp && m.id === real.id)) messages = messages.filter(m => m !== tmp);   // the live update got here first
   else if (real){ tmp.id = real.id; tmp.created_at = real.created_at; tmp.pending = false; }
   else tmp.pending = false;
   patchChat();
@@ -1575,7 +1603,7 @@ function onMessageLive(p){
   if (chatKey === k && document.visibilityState === "visible"){ patchChat(); }
   else if (m.from_user !== myId){
     const t = chatTarget(k), o = members.get(m.from_user);
-    if (!(t.circle && myRow(t.circle)?.muted))
+    if ((k.startsWith("c:") ? t.circle : t.person) && o && !(t.circle && myRow(t.circle)?.muted))
       showBanner({ style: o ? pc(o) : "", title: t.circle ? `${UP(nameOf(m.from_user))} · ${UP(t.circle.name)}` : UP(nameOf(m.from_user)),
         sub: m.body, subClass: "smsg", action: { label: "REPLY", run: () => openChat(k) } });
     if (tab === "chats" && !chatKey && !(document.activeElement || {}).matches?.("input, textarea")) render();
@@ -1610,13 +1638,13 @@ function hideBanner(){
   setTimeout(nextBanner, 450);
 }
 // Compare what we had before a reload with what we have now, and announce anything new
-function announce(before){
+function announce(before, failed = new Set()){
   const m = me(); if (!m) return;
   const t = today(), tk = key(t), n = dayStreak(m), mySlot = slot(m, t);
   const myState = () => ticked(m, t) ? "done" : isGym(m, t) ? "up" : "rest";
   // nudges sent to me
   const oldN = new Set(before.nudges.map(x => x.from_user + "|" + x.created_at));
-  const newN = nudges.filter(x => x.to_user === myId && !x.seen && !oldN.has(x.from_user + "|" + x.created_at));
+  const newN = failed.has("nudges") ? [] : nudges.filter(x => x.to_user === myId && !x.seen && !oldN.has(x.from_user + "|" + x.created_at));
   for (const from of new Set(newN.map(x => x.from_user))){
     const o = members.get(from), st = myState();
     showBanner({ style: o ? pc(o) : "", title: `${UP(nameOf(from))} NUDGED YOU`,
@@ -1626,7 +1654,7 @@ function announce(before){
   // reactions to my sessions
   const rk = r => r.from_user + "|" + r.to_user + "|" + r.day + "|" + r.emoji;
   const oldR = new Set(before.reactions.map(rk));
-  for (const r of reactions.filter(r => r.to_user === myId && r.from_user !== myId && !oldR.has(rk(r)))){
+  for (const r of failed.has("reactions") ? [] : reactions.filter(r => r.to_user === myId && r.from_user !== myId && !oldR.has(rk(r)))){
     const o = members.get(r.from_user), d = parse(r.day), w = slot(m, d)?.w;
     showBanner({ style: o ? pc(o) : "", title: `${UP(nameOf(r.from_user))} ${EMOJI[r.emoji] || "👏"} YOUR SESSION`,
       sub: `${w || "Session"} · ${r.day === tk ? (n >= 2 ? "day " + n : "today") : DAYS_LONG[dow(d)]}` });
@@ -1635,7 +1663,10 @@ function announce(before){
   const near = [key(addDays(t, -1)), tk, key(addDays(t, 1))];   // their "today" may differ from mine by a day
   for (const [id, o] of members){
     if (id === myId || !(isBud(o) || circleMate(o))) continue;
-    const was = before.members.get(id); if (!was) continue;
+    const was = before.members.get(id); if (!was || !was.visible) continue;
+    // only people I ALREADY followed / shared a circle with (budding someone new isn't "they just trained")
+    const wasMate = before.circles.some(c => c.members.some(m => m.user_id === id) && c.members.some(m => m.user_id === myId));
+    if (!(isBud(was) || wasMate)) continue;
     const fresh = near.find(k => o.days?.[k] && !was.days?.[k]); if (!fresh) continue;
     const st = myState(), w = slot(o, parse(fresh))?.w, os = dayStreak(o);
     showBanner({ style: pc(o), title: st === "done" ? `${UP(o.name)} TRAINED TOO` : st === "up" ? `${UP(o.name)}'S DONE. YOU'RE UP.` : `${UP(o.name)} JUST TRAINED`,
@@ -1643,7 +1674,7 @@ function announce(before){
   }
   // circles someone else just added me to
   const oldC = new Set(before.circles.map(c => c.id));
-  for (const c of circles.filter(c => !oldC.has(c.id))){
+  for (const c of failed.has("circles") ? [] : circles.filter(c => !oldC.has(c.id))){
     const mine = c.members.find(x => x.user_id === myId);
     if (!mine || !mine.added_by || mine.added_by === myId) continue;
     const done = c.members.filter(x => { const p = members.get(x.user_id); return p && has(p, t); }).length;
@@ -1684,7 +1715,7 @@ async function loadMemberCount(){
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown;
+  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId);
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
@@ -1852,6 +1883,7 @@ function lockInfo(){ try { const v = JSON.parse(localStorage.getItem(LOCK_KEY) |
 const bioName = () => device.ios ? (Math.max(screen.width, screen.height) >= 812 ? "Face ID" : "Touch ID")
   : device.android ? "your fingerprint" : /Mac/.test(navigator.platform) ? "Touch ID" : /Win/.test(navigator.platform) ? "Windows Hello" : "your fingerprint";
 (async () => {
+  await null;                                              // let the rest of the script load first
   try { bioAvailable = !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); }
   catch(_) { bioAvailable = false; }
   if (tab === "you" && session) render();
@@ -2120,11 +2152,13 @@ function viewCirclesTab(seg){
   main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
 }
 // People picker with search (used to create a circle and to add people). Buds first.
+// Private people can only be added by their Buds (database rule) — everyone else can join with the invite link
+const canAddToCircle = o => !o.private || isMutual(o);
 function pickerHtml(exclude){
-  const list = everyone().filter(o => !exclude.has(o.id)).sort((a,b) => (isMutual(b) - isMutual(a)) || (b.iBud === "accepted") - (a.iBud === "accepted") || a.name.localeCompare(b.name));
+  const list = everyone().filter(o => !exclude.has(o.id)).sort((a,b) => (canAddToCircle(b) - canAddToCircle(a)) || (isMutual(b) - isMutual(a)) || (b.iBud === "accepted") - (a.iBud === "accepted") || a.name.localeCompare(b.name));
   return `<input class="field findq" id="find-q" type="search" placeholder="Search people" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <div class="list peoplelist" id="people">${list.map(o => `<button type="button" class="li pickrow ${circleDraft.picked.has(o.id) ? "on" : ""}" data-pick="${esc(o.id)}" data-name="${esc(tidyName(o.name).toLowerCase())}" style="${pc(o)}">
-      <span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${isMutual(o) ? "🤝 Buds" : o.iBud === "accepted" ? "Spotting" : o.private ? `${LOCK} Private` : ""}</span></span><span class="tick">${CHECK}</span></button>`).join("")}</div>
+    <div class="list peoplelist" id="people">${list.map(o => `<button type="button" class="li pickrow ${circleDraft.picked.has(o.id) ? "on" : ""}" ${canAddToCircle(o) ? `data-pick="${esc(o.id)}"` : `disabled aria-disabled="true" style="opacity:.55;${pc(o)}"`} data-name="${esc(tidyName(o.name).toLowerCase())}" ${canAddToCircle(o) ? `style="${pc(o)}"` : ""}>
+      <span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${isMutual(o) ? "🤝 Buds" : !canAddToCircle(o) ? `${LOCK} Private · send them the invite link` : o.iBud === "accepted" ? "Spotting" : ""}</span></span><span class="tick">${CHECK}</span></button>`).join("")}</div>
     <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
 }
 function wirePicker(onChange){
@@ -2274,7 +2308,8 @@ function viewJoinCircle(){
   if (!joinPreview){
     main().innerHTML = `<div class="skel">Opening invite…</div>`;
     const code = pendingJoin; pendingJoin = null;
-    sb.rpc("circle_preview", { p_code: code }).then(({ data }) => {
+    sb.rpc("circle_preview", { p_code: code }).then(({ data, error }) => {
+      if (error){ joinPreview = null; pendingJoin = null; render(); showWarn("Couldn't open that invite (no signal?). Open the link again to retry."); return; }
       joinPreview = data && data[0] ? { ...data[0], code } : { bad: true };
       if (joinPreview.already){ circleId = joinPreview.id; joinPreview = null; crewView = "circles"; tab = "crew"; }
       render(); });
@@ -2299,7 +2334,7 @@ checkJoinLink();
 window.addEventListener("hashchange", () => { checkJoinLink(); if (pendingJoin) render(); });   // link opened while the app is already open
 document.addEventListener("click", e => {          // open a circle from any card
   const c = e.target.closest("[data-circle]"); if (!c || !c.closest("#main")) return;
-  circleId = c.dataset.circle; circleMode = "view"; circleAsk = null; if (tab !== "crew"){ tab = "crew"; crewView = "circles"; } render(); window.scrollTo(0,0);
+  circleId = c.dataset.circle; circleMode = "view"; circleAsk = null; if (tab !== "crew" && !chatKey){ tab = "crew"; crewView = "circles"; } render(); window.scrollTo(0,0);
 });
 
 // ================= Buds: actions =================
@@ -2345,10 +2380,11 @@ function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.s
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-bud],[data-unbud],[data-accept],[data-decline],[data-unfollow],[data-pnudge],[data-goto-find],[data-goto-buds],[data-list],[data-profile],[data-unbud-yes],[data-unbud-no]");
   if (!t || !t.closest("#main, #wn")) return;
-  if (t.hasAttribute("data-profile") && (wnActive || e.target.closest("button, input, label, a"))) return;   // a button inside a row does its own thing
+  const inner = e.target.closest("button, input, label, a");
+  if (t.hasAttribute("data-profile") && (wnActive || (inner && inner !== t))) return;   // a button inside a row does its own thing
   e.stopPropagation();
   if (t.dataset.bud) budUp(t.dataset.bud);
-  else if (t.dataset.unbud) unBud(t.dataset.unbud);
+  else if (t.dataset.unbud){ if (!profileId && members.get(t.dataset.unbud)?.iBud === "accepted"){ profileId = t.dataset.unbud; unbudAsk = t.dataset.unbud; render(); window.scrollTo(0,0); } else unBud(t.dataset.unbud); }
   else if (t.dataset.unbudYes) unBud(t.dataset.unbudYes, true);
   else if (t.hasAttribute("data-unbud-no")){ unbudAsk = null; render(); }
   else if (t.dataset.accept) answerRequest(t.dataset.accept, true);
@@ -2464,7 +2500,7 @@ function viewWhatsNew(){
   if (wnStep === 4) wireFind();
   $("wn-next").onclick = async () => {
     if (wnStep === 3){ $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
-    if (wnStep === 4){ wnActive = false; wnDone = true; tab = "today"; render(); window.scrollTo(0,0); return; }
+    if (wnStep === 4){ wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
 }
@@ -2511,9 +2547,19 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 window.addEventListener("load", () => setTimeout(settle, 300));
 window.addEventListener("resize", () => setTimeout(pinBottom, 50));
 if (window.visualViewport) visualViewport.addEventListener("resize", () => setTimeout(pinBottom, 50));
+// A background refresh shouldn't redraw the screen while you're typing (it closed the keyboard and wiped
+// half-typed text in search boxes, the join code, weight/height...). Redraw as soon as you're done instead.
+let renderPending = false;
+function renderSoft(){
+  const a = document.activeElement;
+  if (a && a.matches && a.matches("input:not([type=checkbox]):not([type=radio]), textarea") && a.id !== "chat-input" && $("main").contains(a)){ renderPending = true; updateChatBadge(); return; }
+  render();
+}
+document.addEventListener("focusout", () => setTimeout(() => { if (renderPending && !typing()){ renderPending = false; render(); } }, 200));
 function render(){
+  renderPending = false;
   if (!chatKey || profileId || circleId) document.documentElement.classList.remove("chat-open");
-  if (chatKey && !profileId && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
+  if (chatKey && !profileId && !circleId && !locked && session && ready && !ob && !wnActive && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
   settleKeyboard();
   $("date").textContent = today().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
   const m = me();
@@ -2545,7 +2591,7 @@ function render(){
   pinBottom();
   maybeShowPushSheet();
 }
-function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -2565,7 +2611,12 @@ let sb = null, session = null, authKnown = false;
     if (event === "INITIAL_SESSION" && myId && lockInfo()) locked = true;   // Face ID lock on app open
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
-    if (myId && myId !== was){ ready = false; loadAll(); subscribe(); }
+    if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
+      loadGen++; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
+      document.documentElement.classList.remove("chat-open");
+    }
+    if (myId && myId !== was){ ready = false; loading = null; loadAll(); subscribe(); }
     if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); }
     render();
   });
@@ -2575,11 +2626,13 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b19";   // bump together with version.json on every release
+const APP_VERSION = "b20";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
     const { v } = await r.json();
+    const busyNow = ob || circleDraft || typing() || busy.size || Object.values(chatDrafts).some(Boolean);
+    if (busyNow){ setTimeout(checkForUpdate, 30000); return; }     // finish what you're doing first
     if (v && v !== APP_VERSION && !sessionStorage.getItem("gs-reloaded-" + v)){
       sessionStorage.setItem("gs-reloaded-" + v, "1");   // never loop if something's off
       location.reload();

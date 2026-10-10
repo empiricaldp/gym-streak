@@ -80,7 +80,7 @@ button,input{font:inherit;color:inherit}
 .cta svg{width:22px;height:22px}
 
 /* stat tiles */
-.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:4px;min-width:0}
 .tile b{font-size:40px}
 .tile.accent b{color:var(--ct,var(--c))}
@@ -150,14 +150,14 @@ button,input{font:inherit;color:inherit}
 .chip{flex:none;display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:8px 14px;font-weight:700;font-size:14px;cursor:pointer}
 .chip[aria-pressed="true"]{background:var(--iron);color:var(--on-iron);border-color:var(--iron)}
 .whero{border-radius:18px;padding:22px 18px;background:var(--iron);color:var(--on-iron);display:flex;flex-direction:column;gap:6px;position:relative;overflow:hidden}
-.whero .n{font-size:110px;color:var(--cti,var(--c))}
+.whero .n{font-size:clamp(64px,28vw,110px);color:var(--cti,var(--c));overflow-wrap:anywhere}
 .whero .s{font-weight:600;opacity:.85}
 .whero .label{color:inherit;opacity:.6}
 .whero .pg{height:8px;border-radius:4px;background:color-mix(in srgb,var(--on-iron) 18%,transparent);overflow:hidden;margin-top:6px}
 .whero .pg i{display:block;height:100%;background:var(--c)}
 .whero .ring{position:absolute;right:-50px;top:-50px;width:200px;height:200px;border-radius:50%;border:26px solid var(--c);opacity:.18}
 .whero .ring::after{content:"";position:absolute;inset:44px;border-radius:50%;border:6px solid var(--c)}
-.badges{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.badges{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .badge{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 8px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
 .medal{width:64px;height:64px;border-radius:50%;background:var(--c);position:relative;display:grid;place-items:center;box-shadow:inset 0 0 0 4px color-mix(in srgb,#000 20%,var(--c))}
 .medal::before{content:"";position:absolute;inset:16px;border-radius:50%;border:2px solid color-mix(in srgb,#fff 35%,transparent)}
@@ -552,7 +552,7 @@ html,button,a,input,label,select,textarea,[role="button"]{touch-action:manipulat
 .budbtn{flex:none;padding:7px 14px;font-size:13px}
 .budbtn.go{background:var(--iron);color:var(--on-iron);border-color:var(--iron)}
 .budbtn.on{background:transparent;color:var(--muted)}
-.pfback{align-self:flex-start;padding:0 0 4px;font-size:16px;text-decoration:none;font-weight:700}
+.pfback{align-self:flex-start;padding:0 0 4px;font-size:16px;text-decoration:none;font-weight:700;max-width:100%;text-align:left;overflow-wrap:anywhere}
 .pfweek{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:14px 0 4px}
 .pfday{display:flex;flex-direction:column;align-items:center;gap:4px}
 .pfday i{display:block;width:100%;height:26px;border-radius:7px;background:var(--line)}
@@ -691,3 +691,8 @@ html.chat-open, html.chat-open body{overflow:hidden;overscroll-behavior:none}
 .online{transform:translateY(var(--kbgap,0px))}
 html{min-height:var(--fullh,100%)}
 body{min-height:var(--fullh,100dvh);box-sizing:border-box}
+
+/* bug-hunt layout fixes */
+.badge .bn{overflow-wrap:anywhere}
+body{padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))}                 /* last card clears the members pill */
+@media (max-width:360px){ .freezebanner{flex-wrap:wrap} .freezebanner .grow{flex-basis:calc(100% - 52px)} .freezebanner .cta{width:100%} }
