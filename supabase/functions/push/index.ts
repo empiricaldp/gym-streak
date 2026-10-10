@@ -70,6 +70,13 @@ async function rest(path: string, init: RequestInit = {}){
   if (!r.ok) throw new Error(`${path.split("?")[0]}: ${r.status} ${await r.text()}`);
   return r.status === 204 ? null : r.json();
 }
+// Everything that comes in the request body is only used to FIND a row; it's validated first and every
+// value that ends up in a notification is re-read from the database.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (x: unknown) => typeof x === "string" && UUID.test(x);
+const isDay = (x: unknown) => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x);
+const isId = (x: unknown) => /^\d{1,15}$/.test(String(x ?? ""));
+const fresh = (ts: string, mins = 15) => Date.now() - Date.parse(ts) < mins * 60e3;   // only notify about things that just happened
 const inList = (ids: string[]) => `in.(${ids.map(encodeURIComponent).join(",")})`;
 const sydneyDay = () => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(new Date());   // "2026-10-09"
 // each person's own date ("today" for someone in India isn't always today in Sydney)
@@ -80,9 +87,16 @@ async function keys(){
   if (!vapid){
     const rows = await rest("push_config?select=k,v&k=in.(vapid_public,vapid_private)");
     const get = (k: string) => rows.find((r: any) => r.k === k)?.v;
-    vapid = { pub: get("vapid_public"), priv: get("vapid_private") };
+    const v = { pub: get("vapid_public"), priv: get("vapid_private") };
+    if (!v.pub || !v.priv) return v;                     // don't cache a half-set config
+    vapid = v;
   }
   return vapid;
+}
+let secretCache: string | null = null;
+async function hookSecret(){
+  if (!secretCache){ const [row] = await rest("push_config?select=v&k=eq.hook_secret"); secretCache = row?.v || null; }
+  return secretCache || "\u0000no-secret";          // no secret set = nothing gets in
 }
 // "first time only": returns true if this exact notification hasn't been sent before
 async function firstTime(kind: string, to: string, ref: string, day: string){
@@ -133,7 +147,7 @@ async function contexts(ids: string[]): Promise<Map<string, Ctx>> {
   const from = addDays(sydneyDay(), -801);
   const [ps, cs, fs] = await Promise.all([
     rest(`profiles?select=id,name,plan,since,track_start,tz&id=${inList(ids)}`),
-    rest(`checkins?select=user_id,day&user_id=${inList(ids)}&day=gte.${from}&limit=20000`),
+    Promise.all(ids.map(id => rest(`checkins?select=user_id,day&user_id=eq.${id}&day=gte.${from}&order=day.desc&limit=1000`))).then(x => x.flat()),
     rest(`freezes?select=user_id,day&user_id=${inList(ids)}&day=gte.${from}`),
   ]);
   for (const p of ps) out.set(p.id, { ...p, days: new Set(), frozen: new Set() });
@@ -194,7 +208,7 @@ export const circleAddNote = (adder: string, circle: string, tally?: string | nu
 export function messageNote(fromName: string, body: string, chatKey: string, circle?: string | null): Note {
   const text = body.replace(/\s+/g, " ").trim();
   return { title: circle ? `${U(fromName)} · ${U(circle)}` : U(fromName),
-    body: text.length > 140 ? text.slice(0, 139) + "…" : text, tag: "chat-" + chatKey };
+    body: Array.from(text).length > 140 ? Array.from(text).slice(0, 139).join("") + "…" : text, tag: "chat-" + chatKey };
 }
 export const testNote = (): Note => ({ title: "NOTIFICATIONS ON",
   body: "Nudges, reactions, crew sessions and reminders land here.", tag: "test" });
@@ -211,26 +225,31 @@ async function circleTally(circleId: string){
 }
 
 // ---------- the four kinds of notification ----------
-async function onNudge(r: any){
-  const found = await rest(`nudges?select=from_user&from_user=eq.${r.from_user}&to_user=eq.${r.to_user}&day=eq.${r.day}`);
-  if (!found.length) return { skipped: "not found" };
+async function onNudge(b: any){
+  if (!isId(b?.id)) return { skipped: "bad" };
+  const [r] = await rest(`nudges?select=id,from_user,to_user,day,created_at&id=eq.${b.id}`);   // the real row, by its id
+  if (!r || !fresh(r.created_at)) return { skipped: "not found" };
   const [from, to] = await Promise.all([people([r.from_user]), people([r.to_user])]);
   if (!from[0] || !to[0]?.notif_nudge) return { skipped: "off" };
-  // each nudge is its own row now (Buds can nudge every 10 min), so dedupe per nudge, not per day
-  if (!await firstTime("nudge", r.to_user, r.from_user + ":" + (r.id ?? r.created_at), r.day)) return { skipped: "dupe" };
+  // each nudge is its own row (Buds can nudge every 10 min), so dedupe per nudge id
+  if (!await firstTime("nudge", r.to_user, r.from_user + ":" + r.id, r.day)) return { skipped: "dupe" };
   const me = (await contexts([r.to_user])).get(r.to_user)!;
   return send([r.to_user], nudgeNote(from[0].name, me));
 }
-async function onReaction(r: any){
-  const found = await rest(`reactions?select=emoji&from_user=eq.${r.from_user}&to_user=eq.${r.to_user}&day=eq.${r.day}&emoji=eq.${r.emoji}`);
-  if (!found.length) return { skipped: "not found" };
+async function onReaction(b: any){
+  if (!isUuid(b?.from_user) || !isUuid(b?.to_user) || !isDay(b?.day) || !(b?.emoji in EMOJI)) return { skipped: "bad" };
+  const [r] = await rest(`reactions?select=from_user,to_user,day,emoji,created_at&from_user=eq.${b.from_user}&to_user=eq.${b.to_user}&day=eq.${b.day}&emoji=eq.${b.emoji}`);
+  if (!r || !fresh(r.created_at)) return { skipped: "not found" };
   const [from, to] = await Promise.all([people([r.from_user]), people([r.to_user])]);
   if (!from[0] || !to[0]?.notif_react) return { skipped: "off" };
   if (!await firstTime("react", r.to_user, r.from_user + ":" + r.emoji, r.day)) return { skipped: "dupe" };
   const me = (await contexts([r.to_user])).get(r.to_user)!;
   return send([r.to_user], reactionNote(from[0].name, r.emoji, me, r.day));
 }
-async function onCheckin(r: any){
+async function onCheckin(b: any){
+  if (!isUuid(b?.user_id) || !isDay(b?.day)) return { skipped: "bad" };
+  const [r] = await rest(`checkins?select=user_id,day,created_at&user_id=eq.${b.user_id}&day=eq.${b.day}`);
+  if (!r || !fresh(r.created_at)) return { skipped: "not found" };
   const [who] = await people([r.user_id]);
   if (!who) return { skipped: "no profile" };
   if (r.day !== dayIn(who.tz)) return { skipped: "not today" };          // filling in old days isn't news (by THEIR date)
@@ -238,7 +257,8 @@ async function onCheckin(r: any){
   if (!found.length) return { skipped: "not found" };
   // recipient → circle label (null = not via a circle). One notification per person, however they're connected.
   const recips = new Map<string, { label: string; cid: string } | null>();
-  if (who.is_public && who.share_attendance){                         // crew activity (respects their privacy choice)
+  const isPublic = who.account ? who.account === "public" : (who.is_public && who.share_attendance);
+  if (isPublic){                         // crew activity (respects their privacy choice)
     for (const o of await rest(`profiles?select=id&notif_crew=eq.true&id=neq.${r.user_id}`)) recips.set(o.id, null);
   }
   const mine = await rest(`circle_members?select=circle_id&user_id=eq.${r.user_id}`);   // circle-mates (even if private)
@@ -266,8 +286,9 @@ async function onCheckin(r: any){
   return { to: to.length, sent };
 }
 async function onCircleAdd(r: any){
-  const found = await rest(`circle_members?select=added_by&circle_id=eq.${r.circle_id}&user_id=eq.${r.user_id}`);
-  if (!found.length || !found[0].added_by || found[0].added_by === r.user_id) return { skipped: "not an add" };
+  if (!isUuid(r?.circle_id) || !isUuid(r?.user_id)) return { skipped: "bad" };
+  const found = await rest(`circle_members?select=added_by,joined_at&circle_id=eq.${r.circle_id}&user_id=eq.${r.user_id}`);
+  if (!found.length || !found[0].added_by || found[0].added_by === r.user_id || !fresh(found[0].joined_at)) return { skipped: "not an add" };
   const [[adder], [to], [circle]] = await Promise.all([people([found[0].added_by]), people([r.user_id]),
     rest(`circles?select=name,emoji&id=eq.${r.circle_id}`)]);
   if (!adder || !circle || !to?.notif_circle) return { skipped: "off" };
@@ -275,8 +296,9 @@ async function onCircleAdd(r: any){
   return send([r.user_id], circleAddNote(adder.name, `${circle.emoji ? circle.emoji + " " : ""}${circle.name}`, await circleTally(r.circle_id).catch(() => null)));
 }
 async function onMessage(r: any){
-  const found = await rest(`messages?select=body,from_user,to_user,circle_id&id=eq.${r.id}`);   // still there (not deleted)?
-  if (!found.length) return { skipped: "not found" };
+  if (!isId(r?.id)) return { skipped: "bad" };
+  const found = await rest(`messages?select=id,body,from_user,to_user,circle_id,created_at&id=eq.${r.id}`);   // still there (not deleted)?
+  if (!found.length || !fresh(found[0].created_at, 5)) return { skipped: "not found" };
   const m = found[0], [from] = await people([m.from_user]);
   if (!from) return { skipped: "no sender" };
   let to: string[] = [], circle: string | null = null, key: string;
@@ -292,9 +314,9 @@ async function onMessage(r: any){
   }
   if (!to.length) return { to: 0 };
   const wants = (await people(to)).filter((p: any) => p.notif_chat !== false).map((p: any) => p.id);
-  const fresh: string[] = [];
-  for (const id of wants) if (await firstTime("chat", id, String(r.id), sydneyDay())) fresh.push(id);
-  return send(fresh, messageNote(from.name, m.body, key, circle));
+  const go: string[] = [];
+  for (const id of wants) if (await firstTime("chat", id, String(m.id), sydneyDay())) go.push(id);
+  return send(go, messageNote(from.name, m.body, key, circle));
 }
 async function onReminders(){
   const due = await rest("rpc/due_reminders", { method: "POST", body: "{}" });   // also marks them as reminded today
@@ -316,6 +338,10 @@ export async function handle(req: Request){
   let out: unknown;
   try {
     const b = await req.json().catch(() => ({}));
+    // Only the database (which knows the secret) may trigger notifications. "test" is checked separately
+    // (it needs the person's own login and only ever notifies them).
+    if (b.type !== "test" && req.headers.get("x-push-secret") !== await hookSecret())
+      return new Response(JSON.stringify({ error: "not allowed" }), { status: 401, headers: { "Content-Type": "application/json", ...CORS } });
     if (b.type === "nudges") out = await onNudge(b.record);
     else if (b.type === "reactions") out = await onReaction(b.record);
     else if (b.type === "checkins") out = await onCheckin(b.record);
@@ -323,9 +349,9 @@ export async function handle(req: Request){
     else if (b.type === "messages") out = await onMessage(b.record);
     else if (b.type === "reminders") out = await onReminders();
     else if (b.type === "test") out = await onTest(req);
-    else if (b.type === "ping") out = { key: SB_KEY ? SB_KEY.slice(0, 8) + "…" : "missing", vapid: !!(await keys()).priv };
+    else if (b.type === "ping") out = { ok: true, vapid: !!(await keys()).priv };
     else out = { error: "unknown type" };
-  } catch (e){ console.log(String(e)); out = { error: String(e) }; }
+  } catch (e){ console.log(String(e)); out = { error: "failed" }; }      // details stay in the logs
   return new Response(JSON.stringify(out), { headers: { "Content-Type": "application/json", ...CORS } });
 }
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info" };
