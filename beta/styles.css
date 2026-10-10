@@ -756,3 +756,12 @@ html.wn-open header.top{display:none}
 .wnbig{display:block;width:100%;overflow:hidden}
 .wnsmall{margin:12px 0 0;font-size:13px;line-height:1.4;color:var(--muted);max-width:30ch}
 .wnsmall b{color:var(--fg);font-weight:700}
+
+/* Spotting & Spotters tip */
+.tipsheet{text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
+.tipsheet h2{font-size:34px;margin:6px 0 6px}
+.tipart{display:flex;align-items:center;gap:14px;margin:6px 0 4px}
+.tiparrow{font:800 22px var(--mono);color:var(--muted)}
+.tipline{margin:0;font-size:18px}
+.tipsheet .note{margin:6px 0 10px}
+.tipsheet .cta{width:100%}

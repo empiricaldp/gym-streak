@@ -1979,7 +1979,32 @@ const setAskedPush = (days = 1) => { try { localStorage.setItem(SNOOZE_KEY, Stri
 
 // ----- The big "turn notifications on" popup, shown when the app opens -----
 let sheetShown = false;
+// One-time tip after the update: what Spotting and Spotters mean (shown once, on Today, when nothing else is up)
+const TIP_KEY = "gs-tip-spot";
+function maybeShowSpotTip(){
+  try { if (localStorage.getItem(TIP_KEY + "-" + myId)) return; } catch(e){ return; }
+  if (!me() || ob || locked || wnActive || tab !== "today" || document.querySelector(".sheetwrap")) return;
+  try { localStorage.setItem(TIP_KEY + "-" + myId, "1"); } catch(e){}
+  setTimeout(() => {
+    if (document.querySelector(".sheetwrap") || wnActive || tab !== "today") return;
+    const m = me(), wrap = document.createElement("div");
+    wrap.id = "spottip"; wrap.className = "sheetwrap";
+    wrap.innerHTML = `<div class="sheet tipsheet" role="dialog" aria-modal="true" aria-labelledby="tip-title">
+      <div class="tipart"><span class="wdisc sm" style="${pc(m)}"></span><span class="tiparrow">→</span><span class="wdisc sm" style="--c:var(--p-blue)"></span></div>
+      <h2 class="sign" id="tip-title">Spotting & Spotters</h2>
+      <p class="tipline"><b>Spotting</b> = people you bud</p>
+      <p class="tipline"><b>Spotters</b> = people who bud you</p>
+      <p class="note">Both ways? You're <b>Buds</b>.</p>
+      <button class="cta" id="tip-ok">Got it</button></div>`;
+    document.body.appendChild(wrap);
+    requestAnimationFrame(() => wrap.classList.add("open"));
+    const close = () => { wrap.classList.remove("open"); setTimeout(() => wrap.remove(), 250); };
+    wrap.onclick = e => { if (e.target === wrap) close(); };
+    $("tip-ok").onclick = close;
+  }, 700);
+}
 function maybeShowPushSheet(){
+  maybeShowSpotTip();
   if (BETA) return;
   if (sheetShown || document.getElementById("pushsheet")) return;
   const st = pushState();
@@ -2674,7 +2699,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b26";   // bump together with version.json on every release
+const APP_VERSION = "b27";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
