@@ -531,9 +531,12 @@ function viewYou(){
       ${STEPS_ENABLED ? healthCard(m) : ""}
       ${notifCard()}
       ${lockCard()}
+      <div class="sec"><h2 class="sign">What's new</h2></div>
+      <div class="card"><p class="note" style="margin:0 0 10px">See the quick tour of Buds, Profiles, Circles and Chats again.</p><button class="cta ghost" id="wn-replay" style="font-size:18px">Replay the tour</button></div>
       <div class="sec"><h2 class="sign">Invite</h2></div>
       ${invite}${acct}</div>`;
     $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
+    $("wn-replay").onclick = startTour;
     wireNotifCard();
     wireHealth();
     wireBody();
@@ -2474,24 +2477,50 @@ function viewPeopleList(kind){
 }
 
 // ================= What's new (shown once to existing members) =================
+function wnArt(kind, m){
+  const me = `--c:var(--p-${PLATES.some(p => p.id === m.plate) ? m.plate : "red"})`, bud = "--c:var(--p-blue)", b2 = "--c:var(--p-yellow)", b3 = "--c:var(--p-green)", b4 = "--c:var(--p-pink)";
+  const disc = (st, cls = "") => `<span class="wdisc ${cls}" style="${st}"></span>`;
+  if (kind === "hello") return `<div class="wa-hello">${disc(b2, "s1")}${disc(me, "s2")}${disc(bud, "s3")}<span class="wa-bar"></span></div>`;
+  if (kind === "buds") return `<div class="wa-buds">${disc(me)}<span class="wa-link"><span>BUDS</span></span>${disc(bud)}</div>
+      <div class="wa-caps"><span>You</span><span>Your gym mate</span></div>`;
+  if (kind === "profiles") return `<div class="wa-card" style="${bud}"><div class="wa-row"><span class="dot"></span><b>Your mate</b></div>
+      <div class="wa-week">${[1,1,1,0,1,1,0].map(x => `<i class="${x ? "on" : ""}"></i>`).join("")}</div>
+      <div class="wa-stats"><b class="sign">14</b><span>day streak</span></div></div>`;
+  if (kind === "circles") return `<div class="wa-ring">${[me, bud, b2, b3, b4].map((st, i) => `<span class="wdisc sm" style="${st};--i:${i}"></span>`).join("")}<span class="wa-mid sign">Crew</span></div>`;
+  return `<div class="wa-chat"><span class="wa-bub them">gym at 6?</span><span class="wa-bub me" style="${pc(m)}">yesss 💪 see you there</span><span class="wa-bub them">bring straps</span></div>`;
+}
+function startTour(){ wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
+if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
   wnPv = wnPv || pvFrom(m);
-  // One new thing per screen, one short line each. Then privacy, then find your buds.
-  const FEATS = [["🤝", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
-                 ["👤", "Profiles", "Tap anyone to see their week, streak and trophies."],
-                 ["⭕", "Circles", "Private groups for your crew, like a WhatsApp group."],
-                 ["💬", "Chats", "Message your Buds and your circles."]];
+  // One new thing per screen, one short line each, full screen with a little picture. Then privacy, then find your buds.
+  const FEATS = [["buds", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
+                 ["profiles", "Profiles", "Tap anyone to see their week, streak and trophies."],
+                 ["circles", "Circles", "Private groups for your crew, like a WhatsApp group."],
+                 ["chats", "Chats", "Message your Buds and your circles."]];
   const PRIV = 2 + FEATS.length, FIND = PRIV + 1;            // step numbers: 1 hello, 2–5 features, 6 privacy, 7 find buds
   const dots = `<div class="steps">${Array.from({ length: FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
   let body = "";
-  if (wnStep === 1) body = `<div class="wnhero"><span class="wnemoji">🎉</span><span class="rec">New</span><h2 class="sign">Big update</h2>
-      <p class="note">CREW just got more personal. Here's what's new.</p></div>
-      <button class="cta" id="wn-next">Show me</button>`;
-  if (wnStep >= 2 && wnStep < PRIV){ const [e, name, what] = FEATS[wnStep - 2];
-    body = `<div class="wnhero"><span class="wnemoji">${e}</span><span class="label">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign">${name}</h2>
-      <p class="note wnwhat">${what}</p></div>
-      <button class="cta" id="wn-next">Next</button>`; }
+  if (wnStep < PRIV){                                         // the full-screen story part
+    document.documentElement.classList.add("wn-open");
+    const art = wnArt(wnStep === 1 ? "hello" : FEATS[wnStep - 2][0], m);
+    const text = wnStep === 1
+      ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`
+      : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>`;
+    main().innerHTML = `<div class="wnfull" id="wn" style="${pc(m)}">
+      <div class="wntop">${dots}${wnStep > 1 ? `<button type="button" class="linkbtn wnskip" id="wn-skip">Skip</button>` : ""}</div>
+      <div class="wnstage" key="${wnStep}"><div class="wnart">${art}</div><div class="wntext">${text}</div></div>
+      <button class="cta wngo" id="wn-next">${wnStep === 1 ? "Show me" : wnStep === PRIV - 1 ? "Got it" : "Next"}</button></div>`;
+    // the big title always fits on one line per word (shrinks if a word is too wide, e.g. before the font loads)
+    const fit = () => { const h = $("wn")?.querySelector(".wnbig"); if (!h) return; h.style.fontSize = "";
+      let fs = parseFloat(getComputedStyle(h).fontSize); while (h.scrollWidth > h.clientWidth + 1 && fs > 34){ fs -= 3; h.style.fontSize = fs + "px"; } };
+    fit(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+    $("wn-next").onclick = () => { wnStep++; render(); window.scrollTo(0,0); };
+    if ($("wn-skip")) $("wn-skip").onclick = () => { wnStep = PRIV; render(); window.scrollTo(0,0); };
+    return;
+  }
+  document.documentElement.classList.remove("wn-open");
   if (wnStep === PRIV) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
       <p class="note">We've picked the one that matches your old settings. Change it any time in You.</p>${privacyPicker(wnPv)}
       <button class="cta" id="wn-next">Continue</button>`;
@@ -2506,7 +2535,7 @@ function viewWhatsNew(){
   if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
     if (wnStep === PRIV){ $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
-    if (wnStep === FIND){ wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
+    if (wnStep === FIND){ document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
 }
@@ -2576,6 +2605,7 @@ function renderSoft(){
 document.addEventListener("focusout", () => setTimeout(() => { if (renderPending && !typing()){ renderPending = false; render(); } }, 200));
 function render(){
   renderPending = false;
+  if (!wnActive) document.documentElement.classList.remove("wn-open");
   if (!chatKey || profileId || circleId) document.documentElement.classList.remove("chat-open");
   if (chatKey && !profileId && !circleId && !locked && session && ready && !ob && !wnActive && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
   settleKeyboard();
@@ -2644,7 +2674,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b23";   // bump together with version.json on every release
+const APP_VERSION = "b24";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

@@ -701,3 +701,56 @@ body{padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))}              
 .wnlist p{gap:3px}
 .wnwhat{font-size:19px;line-height:1.35;color:var(--fg);margin:6px 0 4px}
 .steps{gap:4px}
+
+/* ---------- What's new: full-screen tour ---------- */
+html.wn-open header.top{display:none}
+.wnfull{position:fixed;inset:0;z-index:7;background:var(--bg);display:flex;flex-direction:column;max-width:560px;margin:0 auto;
+  padding:calc(16px + env(safe-area-inset-top,0px)) 24px calc(20px + env(safe-area-inset-bottom,0px))}
+.wntop{display:flex;align-items:center;gap:16px;min-height:44px}
+.wntop .steps{flex:1}
+.wnskip{font-size:15px;color:var(--muted);text-decoration:none;padding:10px 0 10px 8px}
+.wnstage{flex:1;display:flex;flex-direction:column;justify-content:center;gap:34px;animation:wnin .5s cubic-bezier(.2,.8,.2,1) both}
+@keyframes wnin{from{opacity:0;transform:translateX(28px)}to{opacity:1;transform:none}}
+.wnart{min-height:230px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.wnkick{font:700 11px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.wnbig{font-size:clamp(54px,18.5vw,88px);line-height:.84;margin:10px 0 14px}
+.wnline{font-size:20px;line-height:1.35;color:var(--muted);margin:0;max-width:22ch}
+.wngo{width:100%;flex:none}
+/* plates */
+.wdisc{width:104px;height:104px;border-radius:50%;background:var(--c);position:relative;flex:none;
+  box-shadow:inset 0 0 0 13px color-mix(in srgb,#000 16%,var(--c)),0 14px 30px rgba(0,0,0,.25)}
+.wdisc::after{content:"";position:absolute;inset:43%;border-radius:50%;background:var(--bg)}
+.wdisc.sm{width:56px;height:56px;box-shadow:inset 0 0 0 7px color-mix(in srgb,#000 16%,var(--c)),0 8px 18px rgba(0,0,0,.2)}
+/* hello: three plates on a bar */
+.wa-hello{position:relative;display:flex;align-items:center;justify-content:center;gap:7px;width:280px;height:170px}
+.wa-hello .wa-bar{position:absolute;left:0;right:0;top:50%;height:12px;margin-top:-6px;border-radius:6px;background:var(--line2)}
+.wa-hello .wdisc{width:34px;height:120px;border-radius:8px;box-shadow:inset 0 0 0 3px color-mix(in srgb,#000 14%,var(--c));z-index:1;animation:wnplate .6s cubic-bezier(.3,1.4,.5,1) both}
+.wa-hello .wdisc::after{display:none}
+.wa-hello .wdisc.s2{height:156px;animation-delay:.08s}.wa-hello .wdisc.s3{animation-delay:.16s}
+@keyframes wnplate{from{opacity:0;transform:translateX(-60px)}to{opacity:1;transform:none}}
+/* buds: you + them, linked */
+.wa-buds{display:flex;align-items:center}
+.wa-link{width:72px;height:6px;background:var(--line2);position:relative}
+.wa-link span{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:800 11px var(--mono);letter-spacing:.12em;padding:7px 11px;border-radius:999px;background:var(--iron);color:var(--on-iron);white-space:nowrap}
+.wa-caps{display:flex;justify-content:space-between;width:280px;margin-top:14px;font:700 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+/* profiles: a little profile card */
+.wa-card{width:260px;padding:18px;border-radius:22px;background:var(--card);border:1px solid var(--line);display:flex;flex-direction:column;gap:14px;transform:rotate(-3deg);box-shadow:0 22px 44px rgba(0,0,0,.28)}
+.wa-row{display:flex;gap:10px;align-items:center;font-size:18px}
+.wa-week{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.wa-week i{height:30px;border-radius:7px;background:var(--card2);box-shadow:inset 0 0 0 1px var(--line2)}
+.wa-week i.on{background:var(--c);box-shadow:none}
+.wa-stats{display:flex;align-items:baseline;gap:8px}
+.wa-stats b{font-size:60px;line-height:.8;color:var(--c)}
+.wa-stats span{font:700 11px var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+/* circles: plates around a ring */
+.wa-ring{position:relative;width:216px;height:216px;border-radius:50%;border:2px dashed var(--line2)}
+.wa-ring .wdisc.sm{position:absolute;left:50%;top:50%;margin:-28px 0 0 -28px;transform:rotate(calc(var(--i) * 72deg)) translateY(-108px) rotate(calc(var(--i) * -72deg))}
+.wa-mid{position:absolute;inset:0;display:grid;place-items:center;font-size:36px}
+/* chats: three bubbles */
+.wa-chat{width:280px;display:flex;flex-direction:column;gap:8px}
+.wa-bub{max-width:82%;padding:11px 15px;border-radius:20px;font-size:17px;background:var(--card2);align-self:flex-start;animation:wnin .45s cubic-bezier(.2,.8,.2,1) both}
+.wa-bub.me{align-self:flex-end;background:var(--c);color:var(--on-c,#fff);animation-delay:.25s}
+.wa-bub:nth-child(3){animation-delay:.5s}
+@media (prefers-reduced-motion: reduce){ .wnstage,.wa-hello .wdisc,.wa-bub{animation:none} }
+@media (max-height:620px){ .wnart{min-height:170px;transform:scale(.8)} .wnbig{font-size:64px} .wnstage{gap:16px} }
+.wnbig{display:block;width:100%;overflow:hidden}
