@@ -1319,6 +1319,15 @@ async function loadAll(){
         fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at").catch(() => [])]);
       circles = cRows.map(c => ({ ...c, members: cmRows.filter(m => m.circle_id === c.id).sort((a,b) => String(a.joined_at).localeCompare(String(b.joined_at))) }))
         .sort((a,b) => String(a.created_at).localeCompare(String(b.created_at)));
+      // Chats: the last 90 days of messages I can see, and where I've read up to
+      const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
+      const [msgRows, readRows] = await Promise.all([
+        fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90)).catch(() => null),
+        fetchAll("chat_reads", "chat,read_at").catch(() => [])]);
+      // keep anything that arrived live while this was loading (and my unsent ones), so nothing flickers away
+      if (msgRows){ const got = new Set(msgRows.map(m => m.id));
+        messages = [...msgRows, ...messages.filter(m => !got.has(m.id) && (m.pending || m.failed || m.created_at > fetchedAt))]; }
+      for (const r of readRows) if (!chatReads[r.chat] || r.read_at > chatReads[r.chat]) chatReads[r.chat] = r.read_at;
       const freezeRows = await fetchAll("freezes", "user_id,day").catch(() => []);
       for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
       // Reactions from the last week, nudges to/from me from the last 2 days
@@ -1327,10 +1336,10 @@ async function loadAll(){
       // everyone I've ever nudged (non-buds only get one nudge, ever)
       sentNudgeTo = new Set((await fetchAll("nudges", "to_user", q => q.eq("from_user", myId)).catch(() => [])).map(n => n.to_user));
       // My private stuff: goal, height and weight log (nobody else can read these)
-      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,remind_at,tz").eq("id", myId).maybeSingle();
+      const mine = await sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,remind_at,tz").eq("id", myId).maybeSingle();
       saveTimeZone(mine.data?.tz);
       if (mine.data && "notif_nudge" in mine.data) notif = { nudge: mine.data.notif_nudge, react: mine.data.notif_react, crew: mine.data.notif_crew,
-        remind: mine.data.notif_remind, at: String(mine.data.remind_at || "19:00").slice(0,5) };
+        remind: mine.data.notif_remind, chat: mine.data.notif_chat !== false, at: String(mine.data.remind_at || "19:00").slice(0,5) };
       syncPush();
       body.goals = mine.data?.goals?.length ? mine.data.goals : (mine.data?.goal ? [mine.data.goal] : []);
       body.trainedSince = mine.data?.trained_since || null;
@@ -1361,6 +1370,7 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"buds" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"circles" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"circle_members" }, reloadSoon)
+    .on("postgres_changes", { event:"*", schema:"public", table:"messages" }, onMessageLive)
     .subscribe();
 }
 
@@ -1399,6 +1409,156 @@ async function toggleDay(d){
   }
 }
 
+// ================= Chats =================
+// Buds (both ways) can message 1-on-1; every circle has one group chat. Text + emoji.
+// A chat's key from MY side: "d:<their id>" for a 1-on-1, "c:<circle id>" for a circle (same keys as chat_reads).
+let messages = [], chatReads = {}, chatKey = null, chatDrafts = {}, tmpId = 0;
+const keyOfMsg = m => m.circle_id ? "c:" + m.circle_id : "d:" + (m.from_user === myId ? m.to_user : m.from_user);
+const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+const unreadIn = k => { const r = chatReads[k] || ""; return messages.filter(m => m.from_user !== myId && !m.pending && keyOfMsg(m) === k && m.created_at > r).length; };
+const chatTarget = k => k.startsWith("c:") ? { circle: circleOf(k.slice(2)) } : { person: members.get(k.slice(2)) };
+const chatName = k => { const t = chatTarget(k); return t.circle ? circleLabel(t.circle) : (t.person?.name || "Chat"); };
+const canSend = k => { const t = chatTarget(k); return t.circle ? !!t.circle : isMutual(t.person); };
+// Every chat I can see: all my circles, every Bud, plus old 1-on-1s (e.g. someone who isn't a Bud any more)
+function chatList(){
+  const keys = new Set([...circles.map(c => "c:" + c.id), ...[...members.values()].filter(o => o.id !== myId && isMutual(o)).map(o => "d:" + o.id)]);
+  for (const m of messages) keys.add(keyOfMsg(m));
+  return [...keys].filter(k => k.startsWith("c:") ? circleOf(k.slice(2)) : members.get(k.slice(2))).map(k => {
+    const ms = chatMsgs(k), last = ms[ms.length - 1] || null;
+    return { k, last, unread: unreadIn(k) }; })
+    .sort((a, b) => (b.last?.created_at || "").localeCompare(a.last?.created_at || "") || chatName(a.k).localeCompare(chatName(b.k)));
+}
+const totalUnread = () => chatList().reduce((n, c) => n + c.unread, 0);
+function updateChatBadge(){
+  const n = ready ? totalUnread() : 0, b = $("chat-badge"); if (!b) return;
+  b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n);
+}
+const whenShort = iso => { const d = new Date(iso), t = today(), dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((t - dd) / 864e5);
+  return diff === 0 ? d.toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) : diff === 1 ? "Yesterday" : diff < 7 ? DAYS_LONG[dow(dd)].slice(0, 3) : fmt(dd); };
+const dayLabel = iso => { const d = new Date(iso), dd = new Date(d.getFullYear(), d.getMonth(), d.getDate()), diff = Math.round((today() - dd) / 864e5);
+  return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : DAYS_LONG[dow(dd)] + " " + fmt(dd); };
+async function markRead(k){
+  const last = chatMsgs(k).filter(m => !m.pending).pop(); if (!last) return;
+  if ((chatReads[k] || "") >= last.created_at) return;
+  chatReads[k] = last.created_at; updateChatBadge();
+  await sb.from("chat_reads").upsert({ user_id: myId, chat: k, read_at: last.created_at }, { onConflict: "user_id,chat" }).then(() => {}, () => {});
+}
+function openChat(k){
+  chatKey = k; profileId = null; circleId = null; circleMode = "view"; tab = "chats";
+  try { localStorage.setItem("gs-tab", "chats"); } catch(e){}
+  render(); window.scrollTo(0, document.body.scrollHeight);
+}
+document.addEventListener("click", e => {
+  const el = e.target.closest && e.target.closest("[data-openchat]"); if (!el) return;
+  e.preventDefault(); e.stopPropagation(); openChat(el.dataset.openchat);
+}, true);
+
+function viewChats(){
+  $("title").textContent = "Chats";
+  const list = chatList();
+  if (!list.length){
+    main().innerHTML = `<div class="view"><div class="card"><b>No chats yet</b><p class="note" style="margin:6px 0 0">You can message your Buds (people you bud who bud you back) and chat in your circles. Find people in Crew → Everyone, or start a circle.</p></div></div>`;
+    return;
+  }
+  const rows = list.map(({ k, last, unread }) => {
+    const t = chatTarget(k), o = t.person;
+    const av = t.circle ? circleBadge(t.circle) : `<span class="dot" style="${pc(o)}"></span>`;
+    const who = last ? (last.from_user === myId ? "You: " : t.circle ? nameOf(last.from_user) + ": " : "") : "";
+    const prev = last ? who + last.body : (canSend(k) ? (t.circle ? "Say something to the circle" : "Say hi 👋") : "");
+    return `<button type="button" class="li chatrow" data-openchat="${esc(k)}"><span class="av">${av}</span>
+      <span class="grow" style="min-width:0"><span class="nm">${esc(t.circle ? t.circle.name : chatName(k))}</span><span class="prev ${unread ? "unread" : ""}">${esc(prev)}</span></span>
+      <span class="when">${last ? esc(whenShort(last.created_at)) : ""}${unread ? `<span class="ucount">${unread}</span>` : ""}</span></button>`; }).join("");
+  main().innerHTML = `<div class="view"><div class="list">${rows}</div></div>`;
+}
+
+function chatLogHtml(k){
+  const ms = chatMsgs(k), isCircle = k.startsWith("c:"), m0 = me();
+  if (!ms.length) return `<p class="chatnote">${isCircle ? "No messages yet. Start the chat." : `This is the start of your chat with ${esc(chatName(k))}.`}</p>`;
+  let out = "", lastDay = "", lastFrom = "";
+  ms.forEach((m, i) => {
+    const day = dayLabel(m.created_at); if (day !== lastDay){ out += `<div class="chatday">${esc(day)}</div>`; lastDay = day; lastFrom = ""; }
+    const mine = m.from_user === myId, o = members.get(m.from_user);
+    if (isCircle && !mine && m.from_user !== lastFrom) out += `<div class="msgwho" style="${o ? pc(o) : ""}"><span class="dot"></span>${esc(nameOf(m.from_user))}</div>`;
+    out += `<div class="msg ${mine ? "me" : ""} ${m.pending ? "pending" : ""} ${m.failed ? "failed" : ""}" style="${mine && m0 ? pc(m0) : ""}" ${m.failed ? `data-retry="${esc(m.id)}"` : ""}>${esc(m.body)}</div>`;
+    const next = ms[i + 1];
+    if (m.failed) out += `<div class="msgtime me">Didn't send · tap to retry</div>`;
+    else if (!next || next.from_user !== m.from_user || dayLabel(next.created_at) !== day)
+      out += `<div class="msgtime ${mine ? "me" : ""}">${m.pending ? "Sending…" : esc(new Date(m.created_at).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }))}</div>`;
+    lastFrom = m.from_user;
+  });
+  return out;
+}
+// Redraw just the messages (not the text box), so typing isn't interrupted
+function patchChat(){
+  const log = $("chatlog"); if (!log || !chatKey) return;
+  const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
+  log.innerHTML = chatLogHtml(chatKey);
+  if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
+  if (document.visibilityState === "visible") markRead(chatKey);
+}
+function viewChat(k){
+  const t = chatTarget(k), o = t.person;
+  if (!(t.circle || o)){ chatKey = null; return render(); }
+  $("title").textContent = "Chat";
+  $("tabbar").hidden = true;
+  const head = t.circle
+    ? `<div class="chathead tappable" data-circle="${esc(t.circle.id)}">${circleBadge(t.circle)}<div><div class="nm">${esc(t.circle.name)}</div><div class="sub">${t.circle.members.length} members · ${trainedToday(t.circle)} trained today</div></div></div>`
+    : `<div class="chathead tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div><div class="nm">${esc(o.name)}</div><div class="sub">${has(o, today()) ? "Trained today ✓" : isGym(o, today()) ? "Not trained yet today" : "Rest day"} · ${dayStreak(o)}-day streak</div></div></div>`;
+  const composer = canSend(k)
+    ? `<form class="composer" id="chat-form"><textarea id="chat-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message" enterkeyhint="send">${esc(chatDrafts[k] || "")}</textarea>
+        <button class="cta" id="chat-send" type="submit">Send</button></form>`
+    : `<p class="chatnote">${t.circle ? "" : `You and ${esc(o.name)} aren't Buds any more, so you can't send messages.`}</p>`;
+  main().innerHTML = `<div class="view">${backTo("Chats", () => { chatKey = null; render(); window.scrollTo(0, 0); })}${head}
+    <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div>`;
+  const inp = $("chat-input"), form = $("chat-form");
+  if (inp){
+    const grow = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 140) + "px"; };
+    inp.oninput = () => { chatDrafts[k] = inp.value; grow(); }; grow();
+    inp.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !device.phone){ e.preventDefault(); form.requestSubmit(); } };
+    form.onsubmit = e => { e.preventDefault(); sendMsg(k, inp.value); inp.value = ""; chatDrafts[k] = ""; grow(); inp.focus(); };
+  }
+  $("chatlog").onclick = e => { const r = e.target.closest("[data-retry]"); if (r){ const m = messages.find(x => String(x.id) === r.dataset.retry); if (m){ messages = messages.filter(x => x !== m); sendMsg(k, m.body); } } };
+  markRead(k);
+}
+async function sendMsg(k, text){
+  const body = String(text || "").trim(); if (!body) return;
+  const row = k.startsWith("c:") ? { from_user: myId, circle_id: k.slice(2), body } : { from_user: myId, to_user: k.slice(2), body };
+  const tmp = { ...row, id: "tmp" + (++tmpId), created_at: new Date().toISOString(), pending: true };
+  messages.push(tmp); patchChat(); window.scrollTo(0, document.body.scrollHeight);
+  let res = await sb.from("messages").insert(row).select("id,created_at");
+  if (res.error && /load failed|failed to fetch|network/i.test(res.error.message || "")){ await new Promise(r => setTimeout(r, 1200));
+    // it may have landed anyway: only resend if it isn't there
+    const chk = await sb.from("messages").select("id,created_at").eq("from_user", myId).eq("body", body).gte("created_at", new Date(Date.now() - 120000).toISOString());
+    res = !chk.error && chk.data?.length ? { data: chk.data.slice(-1), error: null } : await sb.from("messages").insert(row).select("id,created_at"); }
+  if (res.error){ tmp.pending = false; tmp.failed = true; patchChat(); return; }
+  const real = (res.data || [])[0];
+  if (real && messages.some(m => m.id === real.id)) messages = messages.filter(m => m !== tmp);   // the live update got here first
+  else if (real){ tmp.id = real.id; tmp.created_at = real.created_at; tmp.pending = false; }
+  else tmp.pending = false;
+  patchChat();
+}
+// Live: a new message (or a deleted one) arrives without reloading everything
+function onMessageLive(p){
+  if (p.eventType === "DELETE"){ messages = messages.filter(m => m.id !== p.old?.id); if (chatKey) patchChat(); updateChatBadge(); return; }
+  const m = p.new; if (!m || messages.some(x => x.id === m.id)) return;
+  if (m.from_user === myId){                                     // my own message: replace the "Sending…" copy
+    const tmp = messages.find(x => x.pending && x.body === m.body && keyOfMsg(x) === keyOfMsg(m));
+    if (tmp){ tmp.id = m.id; tmp.created_at = m.created_at; tmp.pending = false; if (chatKey) patchChat(); return; }
+  }
+  messages.push(m);
+  const k = keyOfMsg(m);
+  if (chatKey === k && document.visibilityState === "visible"){ patchChat(); }
+  else if (m.from_user !== myId){
+    const t = chatTarget(k), o = members.get(m.from_user);
+    if (!(t.circle && myRow(t.circle)?.muted))
+      showBanner({ style: o ? pc(o) : "", title: t.circle ? `${UP(nameOf(m.from_user))} · ${UP(t.circle.name)}` : UP(nameOf(m.from_user)),
+        sub: m.body, subClass: "smsg", action: { label: "REPLY", run: () => openChat(k) } });
+    if (tab === "chats" && !chatKey && !(document.activeElement || {}).matches?.("input, textarea")) render();
+  }
+  updateChatBadge();
+}
+
 // ================= In-app banners =================
 // When something happens while the app is open (a nudge, a reaction, a crewmate trains, you're added to a circle)
 // a banner slides down: tall condensed heading + one mono line, same words as the phone notifications.
@@ -1413,7 +1573,7 @@ function nextBanner(){
   if (!b){ bannerOn = false; el.classList.remove("show"); return; }
   bannerOn = true;
   el.style.cssText = b.style || "";
-  el.innerHTML = `<span class="dot" aria-hidden="true"></span><div class="grow"><div class="t">${esc(b.title)}</div><div class="s">${esc(b.sub)}</div></div>
+  el.innerHTML = `<span class="dot" aria-hidden="true"></span><div class="grow"><div class="t">${esc(b.title)}</div><div class="s ${b.subClass || ""}">${esc(b.sub)}</div></div>
     ${b.action ? `<button type="button" class="cta" id="ib-go" style="font-size:16px;padding:10px 14px">${esc(b.action.label)}</button>` : ""}`;
   requestAnimationFrame(() => el.classList.add("show"));
   try { navigator.vibrate && navigator.vibrate(10); } catch(e){}
@@ -1742,7 +1902,7 @@ document.addEventListener("visibilitychange", () => {
 // Turning them on asks the phone for a private "push address" at Apple/Google plus two encryption keys.
 // We save that in push_subs; the server's "push" function encrypts each message for this phone and posts it there.
 // On iPhone this only works once the app is on the Home Screen (iOS 16.4 or newer).
-let notif = { nudge: true, react: true, crew: true, remind: true, at: "19:00" };
+let notif = { nudge: true, react: true, crew: true, remind: true, chat: true, at: "19:00" };
 let pushOn = false, pushBusy = false;
 const PUSH_URL = () => window.GYM_CONFIG.SUPABASE_URL + "/functions/v1/push";
 const pushSupported = () => !BETA && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
@@ -1850,7 +2010,7 @@ async function syncPush(){
 }
 async function saveNotif(patch){
   const before = notif; notif = { ...notif, ...patch };
-  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", at:"remind_at" }[k]] = v;
+  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", chat:"notif_chat", at:"remind_at" }[k]] = v;
   const { error } = await sb.from("profiles").update(row).eq("id", myId);
   if (error){ notif = before; showWarn("Couldn't save that: " + error.message); render(); return false; }
   return true;
@@ -1868,11 +2028,14 @@ const NOTIF_TYPES = [
   ["react",  "Reactions", "When someone reacts to your session"],
   ["crew",   "Crew activity", "When a friend logs today's session"],
   ["remind", "Gym reminder", "On gym days, if you haven't logged yet"],
+  ["chat",   "Messages", "Chats with your Buds and circles"],
 ];
 function notifCard(){
   const st = pushState();
   const head = `<div class="sec"><h2 class="sign">Notifications</h2><span class="label">${st === "on" ? "On" : "Off"}</span></div>`;
-  if (BETA) return head.replace(/>(On|Off)</, ">Main app<") + `<div class="card"><p style="margin:0" class="note">During the beta, notifications keep coming from the normal CREW app.</p></div>`;
+  if (BETA) return head.replace(/>(On|Off)</, ">Main app<") + `<div class="card"><p style="margin:0" class="note">During the beta, notifications keep coming from the normal CREW app (tapping one opens that app, so open CREW Beta to reply to messages).</p>
+    <div class="ntypes"><label class="tg" for="nt-chat"><span><b>Messages</b><small>Chats with your Buds and circles</small></span>
+      <input type="checkbox" class="sw" id="nt-chat" data-nt="chat" ${notif.chat ? "checked" : ""}></label></div></div>`;
   if (st === "needs-install") return head + `<div class="card"><p style="margin:0" class="note">On iPhone, notifications only work when CREW is opened from your Home Screen. Add it there, open it from the icon, then come back here.</p></div>`;
   if (st === "unsupported") return head + `<div class="card"><p style="margin:0" class="note">This browser can't show notifications. On iPhone you need iOS 16.4 or newer, with the app on your Home Screen.</p></div>`;
   if (st === "denied") return head + `<div class="card"><p style="margin:0" class="note">Notifications are blocked for this app. ${device.ios
@@ -1891,9 +2054,9 @@ function notifCard(){
   </div>`;
 }
 function wireNotifCard(){
+  document.querySelectorAll("[data-nt]").forEach(c => c.onchange = async () => { if (await saveNotif({ [c.dataset.nt]: c.checked })) render(); });
   const main = $("nt-main"); if (!main) return;
   main.onchange = () => { main.checked ? enablePush() : disablePush(); };
-  document.querySelectorAll("[data-nt]").forEach(c => c.onchange = async () => { if (await saveNotif({ [c.dataset.nt]: c.checked })) render(); });
   const at = $("nt-at");
   if (at) at.onchange = async () => { if (/^\d\d:\d\d$/.test(at.value) && await saveNotif({ at: at.value })) toast("Reminder set for " + at.value); };
   const test = $("nt-test");
@@ -2039,7 +2202,7 @@ function viewCircle(c){
   const top = `${backTo("Circles", () => { circleId = null; circleAsk = null; crewView = "circles"; render(); })}${ask}
     <div class="card hero circlehero">${circleBadge(c, true)}<div class="work sign">${esc(c.name)}</div>
       <p class="sub">${c.members.length} member${c.members.length===1?"":"s"} · ${trainedToday(c)} trained today</p>
-      <div class="pfacts"><button type="button" class="chip" id="c-invite">🔗 Invite</button>
+      <div class="pfacts"><button type="button" class="chip" data-openchat="c:${esc(c.id)}">💬 Chat${unreadIn("c:" + c.id) ? ` · ${unreadIn("c:" + c.id)}` : ""}</button><button type="button" class="chip" id="c-invite">🔗 Invite</button>
         <button type="button" class="chip" id="c-mute">${mine?.muted ? "🔕 Muted" : "🔔 Notifications on"}</button>
         ${admin ? `<button type="button" class="chip" id="c-edit">⚙️ Edit</button>` : ""}</div></div>
     <div class="sec"><h2 class="sign">Today</h2><span class="label">${trainedToday(c)}/${ppl.length} done</span></div><div class="list">${todayRows}</div>`;
@@ -2211,7 +2374,7 @@ function viewProfile(inYou){
       ${countsRow(o, inYou)}
       <div class="pfweek">${boxes}</div>
       <p class="sub">This week: ${w.hit} of ${w.target} gym days${w.bonus ? ` · +${w.bonus} bonus` : ""}</p>
-      ${self ? "" : `<div class="pfacts">${budBtn(o)}${nudge}</div>`}
+      ${self ? "" : `<div class="pfacts">${budBtn(o)}${nudge}${isMutual(o) ? `<button type="button" class="chip" data-openchat="d:${esc(o.id)}">💬 Message</button>` : ""}</div>`}
       ${!self && o.theyBud === "accepted" && me()?.private ? `<button type="button" class="linkbtn" data-unfollow="${esc(o.id)}" style="padding-left:0">Remove as spotter</button>` : ""}</div>
     <div class="card statstrip" style="${pc(o)}">
       <div class="accent"><b class="sign">${dayStreak(o)}</b><span class="label">Day streak</span></div>
@@ -2283,7 +2446,7 @@ function viewWhatsNew(){
 }
 
 // ================= Shell =================
-const TITLES = {today:"Today",crew:"Crew",trophies:"Trophies",you:"You"};
+const TITLES = {today:"Today",crew:"Crew",chats:"Chats",trophies:"Trophies",you:"You"};
 // iPhone Home Screen apps: if a text box still has the keyboard up when the screen is redrawn, iOS drops the keyboard
 // but leaves the page pushed up, so the bottom bar floats mid-screen. Close the keyboard first, then nudge iOS back.
 function settleKeyboard(){ const ae = document.activeElement; if (ae && ae.matches && ae.matches("input, textarea") && $("main").contains(ae)) ae.blur(); }
@@ -2292,6 +2455,7 @@ document.addEventListener("focusout", e => { if (e.target.matches && e.target.ma
 if (window.visualViewport) visualViewport.addEventListener("resize", () => {   // keyboard closed → snap fixed bars back
   if (visualViewport.height > window.innerHeight * 0.85 && !(document.activeElement || {}).matches?.("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); });
 function render(){
+  if (chatKey && !profileId && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
   settleKeyboard();
   $("date").textContent = today().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
   const m = me();
@@ -2313,14 +2477,16 @@ function render(){
   if (!ready){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="skel">Loading the crew…</div>`; return; }
   if (ob){ $("title").textContent = ob.edit ? "Edit" : "Set up"; viewOnboarding(); return; }
   if (wnActive) return viewWhatsNew();
+  updateChatBadge();
+  if (chatKey && !profileId && !circleId) return viewChat(chatKey);
   if (profileId) return viewProfile();
   if (joinPreview || (pendingJoin && me())) return viewJoinCircle();
   if (circleId || circleMode === "new") return viewCircleRoute();
   $("title").textContent = TITLES[tab];
-  ({today:viewToday,crew:viewCrew,trophies:viewTrophies,you:viewYou})[tab]();
+  ({today:viewToday,crew:viewCrew,chats:viewChats,trophies:viewTrophies,you:viewYou})[tab]();
   maybeShowPushSheet();
 }
-function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -2350,7 +2516,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b14";   // bump together with version.json on every release
+const APP_VERSION = "b15";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
