@@ -766,3 +766,6 @@ html.wn-open header.top{display:none}
 .tipsheet .note{margin:6px 0 10px}
 .tipsheet .cta{width:100%}
 .spotnote{margin:10px 0 0;font-size:14px}
+.watchpath{border-style:dashed}
+.watchcard .wline{margin:0 0 6px;font-size:18px}
+.watchhero .work{font-size:44px}

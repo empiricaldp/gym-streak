@@ -3,8 +3,8 @@
 // It caches the app's own files so the app opens instantly and works on a bad connection.
 // Strategy: "network first" for our files (always try for the newest version, fall back to the cache).
 // Database calls to Supabase are never cached, so your data is always live.
-const CACHE = "crew-beta-b32";
-const SHELL = ["./", "index.html", "styles.css?v=b32", "app.js?v=b32", "config.js?v=b32", "split.js?v=b32", "manifest.webmanifest",
+const CACHE = "crew-beta-b33";
+const SHELL = ["./", "index.html", "styles.css?v=b33", "app.js?v=b33", "config.js?v=b33", "split.js?v=b33", "manifest.webmanifest",
                "../icons/icon-192.png", "../icons/icon-512.png", "../icons/apple-touch-icon.png"];
 
 self.addEventListener("install", e => {

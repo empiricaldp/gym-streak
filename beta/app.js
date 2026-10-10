@@ -252,7 +252,12 @@ function viewToday(){
     <div class="tile"><b class="sign">${weekNo(m)}</b><span class="label">Week</span></div>
     <div class="tile"><b class="sign">${bestStreak(m)}</b><span class="label">Best run</span></div></div>`;
   const q = `<div class="card quote"><span class="bolt">${BOLT}</span><div class="q">${qa}<small>${qb}</small></div></div>`;
-  const crew = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o));   // just your buds
+  if (m.watcher){                                   // here to watch: no barbell, no streak, just the crew
+    hero = `<div class="card hero watchhero" style="${pc(m)}"><span class="label">Watching</span><div class="work sign">👀 Here for the crew</div>
+      <p class="note" style="margin:6px 0 12px">Cheer them on, nudge them and react to their sessions.</p>
+      <button class="cta ghost" id="watch-train" style="font-size:18px">Start training</button></div>`;
+  }
+  const crew = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o) && !o.watcher);   // just your buds (who train)
   let crewHtml = "";
   if (crew.length){
     crewHtml = `<div class="sec"><h2 class="sign">Your crew today</h2><span class="label">${crew.length} ${crew.length===1?"person":"people"}</span></div><div class="list">` +
@@ -331,8 +336,9 @@ function viewToday(){
       <button class="linkbtn" id="steps-setup" style="padding-left:0">Set it up</button></div></div>`;
   }
   const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
-  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${tiles}${stepsHtml}${q}${crewHtml}${circleRow}</div>`;
-  $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
+  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${m.watcher ? "" : tiles + stepsHtml + q}${crewHtml}${circleRow}</div>`;
+  if ($("watch-train")) $("watch-train").onclick = () => startOnboarding(true, "split");
+  if ($("logbtn")) $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
   main().querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => { b.disabled = true; sendNudge(b.dataset.nudge); });
   main().querySelectorAll("[data-goal]").forEach(b => b.onclick = () => { goalDraft = toggleIn(goalDraft, b.dataset.goal); render(); });
@@ -410,6 +416,9 @@ function wireFind(){
 }
 function crewBoard(list, quiet, top, opts){
   const t = today(), ws = startOfWeek(t);
+  const watching = list.filter(o => o.watcher); list = list.filter(o => !o.watcher);   // watchers cheer, they don't compete
+  if (watching.length) opts = { ...opts, bottom: `<div class="sec"><h2 class="sign">Watching</h2><span class="label">${watching.length}</span></div>
+    <div class="list">${watching.map(o => `<div class="li tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">👀 Here for the crew</span></div></div>`).join("")}</div>` + (opts.bottom || "") };
   if (!list.length){ main().innerHTML = `<div class="view">${top}${opts.bottom || ""}</div>`; return; }
   const quietHtml = quiet.length ? `<div class="sec"><h2 class="sign">Keeping it private</h2><span class="label">${quiet.length}</span></div>
     <div class="list">${quiet.map(o=>`<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
@@ -1044,7 +1053,7 @@ function wireDur(id, d, onChange){
 // startOnboarding(true, "split") edits just that one thing (from the You tab); no review screen
 function startOnboarding(edit, only){
   const m = edit ? me() : null;
-  ob = { edit, only: edit ? only || null : null, step:0, name: m?.name || "", plate: m?.plate || PLATES[members.size % PLATES.length].id,
+  ob = { edit, only: edit ? only || null : null, step:0, watch: !!m?.watcher, name: m?.name || "", plate: m?.plate || PLATES[members.size % PLATES.length].id,
     plan: m ? m.plan.map(s=>s?s.w:"") : ["","","","","","",""], opt: m ? m.plan.map(s=>!!s?.opt) : [false,false,false,false,false,false,false],
     exp: { n: 6, unit: "months" },      // how long you've been going to the gym at all
     streak: { n: 0, unit: "weeks" },    // how long you've been going consistently (sets your streak)
@@ -1053,7 +1062,8 @@ function startOnboarding(edit, only){
 }
 function viewOnboarding(){
   // Steps by name, so adding a question is just adding a word here
-  const STEPS = ob.only ? [ob.only] : ob.edit ? ["name","goal","plate","split","review"] : ["name","goal","plate","split","experience","streak","privacy","review"];
+  const STEPS = ob.only ? [ob.only] : ob.edit ? ["name","goal","plate","split","review"]
+    : ob.watch ? ["name","goal","plate","split","privacy","review"] : ["name","goal","plate","split","experience","streak","privacy","review"];
   const total = STEPS.length, s = ob.step, k = STEPS[s], qn = s + 1;
   const ql = ob.only ? "Edit" : "Question " + qn;      // label above each question
   const dots = ob.only ? "" : `<div class="steps">${Array.from({length:total},(_,i)=>`<i class="${i<=s?"on":""}"></i>`).join("")}</div>`;
@@ -1086,11 +1096,11 @@ function viewOnboarding(){
         <div><span>Name</span><b>${esc(ob.name)}</b></div>
         <div><span>Goals</span><b>${esc(goalsText(ob.goals) || "Not set")}</b></div>
         <div><span>Plate</span><b style="display:flex;align-items:center;gap:6px">${plateSvg(ob.plate, 22)}${plateName(ob.plate)}</b></div>
-        <div><span>Gym days a week</span><b>${gym}</b></div>
-        ${ob.edit?"":`<div><span>Gym experience</span><b>${esc(durText(ob.exp))}</b></div>
-          <div><span>Starting on</span><b>Week ${weekNo(previewMember())}</b></div>
+        <div><span>Gym days a week</span><b>${ob.watch ? "Just watching 👀" : gym}</b></div>
+        ${ob.edit?"":`${ob.watch ? "" : `<div><span>Gym experience</span><b>${esc(durText(ob.exp))}</b></div>
+          <div><span>Starting on</span><b>Week ${weekNo(previewMember())}</b></div>`}
           <div><span>Crew sees</span><b>${privacySummary({private:ob.pv.priv, splitHidden:ob.pv.hide})}</b></div>`}
-        ${DAYS.map((d,i)=>{ const w = normalizeWorkout(ob.plan[i]); return `<div><span>${d}</span><b>${w?esc(w)+(ob.opt[i]?" (optional)":""):"Rest"}</b></div>`; }).join("")}
+        ${ob.watch ? "" : DAYS.map((d,i)=>{ const w = normalizeWorkout(ob.plan[i]); return `<div><span>${d}</span><b>${w?esc(w)+(ob.opt[i]?" (optional)":""):"Rest"}</b></div>`; }).join("")}
       </div>`; }
   main().innerHTML = `<div class="card ob">${dots}${body}
     <div class="row2"><button class="cta ghost" id="ob-back">${s===0 && !(k==="split" && (ob.splitMode==="ready" || ob.splitMode==="custom" || (ob.splitMode==="review" && !ob.edit))) ? "Cancel" : "Back"}</button>
@@ -1128,6 +1138,7 @@ function viewOnboarding(){
   $("ob-back").onclick = () => {
     if (k==="split" && (ob.splitMode === "ready" || ob.splitMode === "custom")){ ob.splitMode = hasPlan() ? "review" : null; render(); return; }
     if (k==="split" && ob.splitMode === "review" && !ob.edit){ ob.splitMode = null; render(); return; }
+    if (k==="split" && ob.splitMode === "watch" && !ob.edit){ ob.splitMode = null; ob.watch = false; render(); return; }
     if (s===0){ ob = null; } else ob.step--; render(); };
   nextBtn.onclick = () => { if (last) saveOnboarding(); else { ob.step++; render(); } };
 }
@@ -1145,18 +1156,25 @@ function splitLabel(m){
 }
 const LEVELS = [["beginner","Beginner"],["popular","Popular"],["advanced","Advanced"]];
 const hasPlan = () => ob.plan.some(w => normalizeWorkout(w));
-const splitReady = () => ob.plan.some((w,i) => normalizeWorkout(w) && !ob.opt[i]) && (ob.splitMode === "review" || ob.splitMode === "custom");
+const splitReady = () => ob.splitMode === "watch" || (ob.plan.some((w,i) => normalizeWorkout(w) && !ob.opt[i]) && (ob.splitMode === "review" || ob.splitMode === "custom"));
 const shortName = w => w.replace(/Upper Body/g,"Upper").replace(/Lower Body/g,"Lower");
 const gymDays = days => days.filter(Boolean).length;
 const weekStrip = days => `<span class="wstrip">${days.map((w,i)=>`<i class="${w?"on":""}" title="${DAYS[i]}: ${esc(w||"Rest")}">${DAYS[i][0]}</i>`).join("")}</span>`;
 function splitStepHtml(ql){
-  if (ob.splitMode === undefined) ob.splitMode = ob.edit && hasPlan() ? "review" : null;
+  if (ob.splitMode === undefined) ob.splitMode = ob.watch ? "watch" : ob.edit && hasPlan() ? "review" : null;
+  const forFriends = (ob.goals || []).some(g => g === "friends" || g === "happy");
   const head = (title, sub) => `<span class="label">${ql}</span><h2 class="sign">${title}</h2>${sub ? `<p class="note">${sub}</p>` : ""}`;
   if (ob.splitMode === null) return head("Your weekly split") + `
     <div class="pathpick">
       <button type="button" class="path" data-path="ready"><span class="rec">Recommended</span><b>Pick a ready-made split</b><small>Popular plans. One tap.</small></button>
       <button type="button" class="path" data-path="custom"><b>Build my own</b><small>Choose what you train each day.</small></button>
+      <button type="button" class="path watchpath" data-path="watch">${forFriends ? `<span class="rec">For you</span>` : ""}<b>👀 Just here to watch</b><small>No split. Cheer on the crew and keep an eye on your friends.</small></button>
     </div>`;
+  if (ob.splitMode === "watch") return head("Just watching 👀") + `
+    <div class="card watchcard"><p class="wline"><b>No split, no streak.</b></p>
+      <p class="note" style="margin:0">You'll see your crew's sessions, nudge them, react and chat. You won't be on the leaderboards.</p>
+      <p class="note" style="margin:8px 0 0">Want to train later? Set up a split any time in You.</p></div>
+    <button type="button" class="linkbtn" data-path="choose" style="padding-left:0">← Actually, I want a split</button>`;
   if (ob.splitMode === "ready"){
     const lvl = ob.splitLevel || "popular";
     const cards = SPLITS.filter(x => x.level === lvl).map(x => `<button type="button" class="splitcard" data-split="${esc(x.name)}">
@@ -1190,7 +1208,9 @@ function splitStepHtml(ql){
       <button type="button" class="path small" data-path="ready"><b>Ready-made</b><small>Pick a different split</small></button></div>`;
 }
 function wireSplitStep(){
-  main().querySelectorAll("[data-path]").forEach(b => b.onclick = () => { ob.splitMode = b.dataset.path; if (ob.splitMode === "custom" && ob.active === undefined) ob.active = 0; render(); });
+  main().querySelectorAll("[data-path]").forEach(b => b.onclick = () => {
+    const p = b.dataset.path; ob.watch = p === "watch"; ob.splitMode = p === "choose" ? null : p;
+    if (p === "custom" && ob.active === undefined) ob.active = 0; render(); });
   main().querySelectorAll("[data-level]").forEach(b => b.onclick = () => { ob.splitLevel = b.dataset.level; render(); });
   main().querySelectorAll("[data-split]").forEach(b => b.onclick = () => {
     const x = SPLITS.find(s => s.name === b.dataset.split); if (!x) return;
@@ -1243,10 +1263,10 @@ async function checkNameTaken(n){
 }
 
 async function saveOnboarding(){
-  const plan = ob.plan.map((w,i)=> { const t = normalizeWorkout(w); return t ? {w:t, opt:!!ob.opt[i]} : null; });
+  const plan = ob.watch ? [null,null,null,null,null,null,null] : ob.plan.map((w,i)=> { const t = normalizeWorkout(w); return t ? {w:t, opt:!!ob.opt[i]} : null; });
   const old = ob.edit ? me() : null;
   const ws = startOfWeek(today());
-  const row = { id: myId, name: tidyName(ob.name).slice(0,20), plate: ob.plate, plan, goals: ob.goals, goal: legacyGoal(ob.goals) };
+  const row = { id: myId, name: tidyName(ob.name).slice(0,20), plate: ob.plate, plan, watcher: !!ob.watch, goals: ob.goals, goal: legacyGoal(ob.goals) };
   if (!old){ row.since = key(streakStart(ob.streak)); row.track_start = key(ws);
     // you can't have been consistent for longer than you've been going at all
     const exp = durStart(ob.exp); row.trained_since = key(exp < parse(row.since) ? exp : parse(row.since));
@@ -1260,8 +1280,8 @@ async function saveOnboarding(){
   const { error } = old
     ? await sb.from("profiles").update(
         // editing one thing from the You tab only sends that one thing
-        ob.only === "name" ? { name: row.name } : ob.only === "plate" ? { plate: row.plate } : ob.only === "split" ? { plan: row.plan }
-        : { name: row.name, plate: row.plate, plan: row.plan, goals: row.goals, goal: row.goal }).eq("id", myId)
+        ob.only === "name" ? { name: row.name } : ob.only === "plate" ? { plate: row.plate } : ob.only === "split" ? { plan: row.plan, watcher: row.watcher }
+        : { name: row.name, plate: row.plate, plan: row.plan, watcher: row.watcher, goals: row.goals, goal: row.goal }).eq("id", myId)
     : await sb.from("profiles").insert(row);
   if (error){
     if (btn) btn.disabled = false;
@@ -1308,7 +1328,7 @@ async function loadAll(){
       const [profiles, checkins] = await Promise.all([
         // "crew" is a database view that already strips out whatever each person keeps private
         // "people" (database view) = everyone, with only what I'm allowed to see about each person
-        fetchAll("people", "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters"),
+        fetchAll("people", "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters,watcher"),
         fetchAll("checkins", "user_id,day")
       ]);
       // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
@@ -1323,7 +1343,7 @@ async function loadAll(){
       const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
       for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
         isPublic:!p.private, shareAtt:p.visible, shareSplit:!p.split_hidden, privacyChosen:true, shareSteps:false,
-        private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0,
+        private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0, watcher:!!p.watcher,
         days:{}, steps:{}, stepsAt:null });
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
@@ -2477,16 +2497,17 @@ function viewProfile(inYou){
       <p class="sub">This week: ${w.hit} of ${w.target} gym days${w.bonus ? ` · +${w.bonus} bonus` : ""}</p>
       ${self ? "" : `<div class="pfacts">${budBtn(o)}${nudge}${isMutual(o) ? `<button type="button" class="chip" data-openchat="d:${esc(o.id)}">💬 Message</button>` : ""}</div>`}
       ${!self && o.theyBud === "accepted" && me()?.private ? `<button type="button" class="linkbtn" data-unfollow="${esc(o.id)}" style="padding-left:0">Remove as spotter</button>` : ""}</div>
-    <div class="card statstrip" style="${pc(o)}">
+    ${o.watcher ? `<div class="card watchcard" style="${pc(o)}"><p class="wline"><b>👀 Here for the crew</b></p><p class="note" style="margin:0">${self ? "You're" : esc(o.name) + " is"} watching, no split. Cheering everyone on.</p></div>${youBar}`
+    : `<div class="card statstrip" style="${pc(o)}">
       <div class="accent"><b class="sign">${dayStreak(o)}</b><span class="label">Day streak</span></div>
       <div><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
       <div><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
     ${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
     <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
-    ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}</div>`;
+    ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}`}</div>`;
   if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
-  $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
+  if ($("pf-trophies")) $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
   if (inYou){ $("you-edit").onclick = () => { youView = "edit"; render(); window.scrollTo(0,0); };
               $("you-settings").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); }; }
 }
@@ -2726,7 +2747,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b32";   // bump together with version.json on every release
+const APP_VERSION = "b33";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
