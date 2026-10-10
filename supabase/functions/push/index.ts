@@ -149,40 +149,60 @@ const people = async (ids: string[]) =>
 const EMOJI: Record<string, string> = { fire: "🔥", muscle: "💪", clap: "👏" };
 
 // ---------- the wording ----------
-// Every notification has the same shape:
-//   title = emoji + who/what happened           ("👊 Meha nudged you")
-//   body  = the detail about YOU + what to do     ("Push day and it's not logged yet. Your 6-day streak is on the line.")
+// Style E (picked by DP): short and to the point.
+//   title = CAPITALS, what happened          ("DEVAM'S DONE. YOU'RE UP.")
+//   body  = one short line of detail, joined with " · "   ("Lower ✓ · Uni gym boys 4 of 6 today")
 // Pure functions (no database), so tests can check every variation.
-const streakLine = (n: number) => n >= 2 ? `Your ${n}-day streak is on the line.` : "Start a streak today.";
+const U = (x: string) => (x || "").toLocaleUpperCase("en");
+const join = (...parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" · ");
+const streakBit = (n: number) => n >= 2 ? `${n}-day streak` : null;
+// time left before midnight, in that person's time zone ("4h 56m left")
+export function leftToday(tz?: string | null, now = new Date()){
+  const hm = new Intl.DateTimeFormat("en-GB", { timeZone: tz || TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(now);
+  const [h, m] = hm.split(":").map(Number), mins = 24 * 60 - (h * 60 + m);
+  return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m left` : `${mins}m left`;
+}
 export function nudgeNote(fromName: string, me: Ctx): Note {
-  const t = dayIn(me.tz), w = slotOf(me, t)?.w;
-  const body = me.days.has(t) ? "You've already trained today. Show them the receipts 😤"
-    : gymDay(me, t) ? `${w ? w + " day" : "Gym day"} and it's not logged yet. ${streakLine(streak(me))}`
-    : "It's a rest day for you, but they're keeping you honest. Bonus session?";
-  return { title: `👊 ${fromName} nudged you`, body, tag: "nudge" };
+  const t = dayIn(me.tz), w = slotOf(me, t)?.w, n = streak(me);
+  const body = me.days.has(t) ? "Already trained today. Show them the receipts."
+    : gymDay(me, t) ? `${w || "Today's session"}'s not logged. ${n >= 2 ? n + "-day streak on the line." : "Start a streak today."}`
+    : "Rest day. Bonus session?";
+  return { title: `${U(fromName)} NUDGED YOU`, body, tag: "nudge" };
 }
 export function reactionNote(fromName: string, emoji: string, me: Ctx, day: string): Note {
-  const w = slotOf(me, day)?.w, n = streak(me);
-  return { title: `${EMOJI[emoji] || "👏"} ${fromName} reacted to your session`,
-    body: `${w ? w + " session" : "Your session"} ${dayWord(day, me.tz)}.${n >= 2 ? ` ${n}-day streak and counting.` : " Keep it rolling."}`, tag: "react" };
+  const w = slotOf(me, day)?.w, n = streak(me), today = day === dayIn(me.tz);
+  return { title: `${U(fromName)} ${EMOJI[emoji] || "👏"} YOUR SESSION`,
+    body: join(w || "Session", today ? (n >= 2 ? `day ${n}` : "today") : dayWord(day, me.tz).replace(/^on /, "")), tag: "react" };
 }
-export function crewNote(who: Ctx, showWorkout: boolean, me: Ctx, circle?: string | null): Note {
+// circle = "🔥 Uni gym boys" when this came through a circle, tally = "4 of 6" trained today in it
+export function crewNote(who: Ctx, showWorkout: boolean, me: Ctx, circle?: string | null, tally?: string | null): Note {
   const tw = dayIn(who.tz), t = dayIn(me.tz);                 // their day (what they trained) vs my day (what I've got on)
-  const w = showWorkout ? slotOf(who, tw)?.w : null, n = streak(who), mine = slotOf(me, t)?.w;
-  const done = `${w ? w + " done" : "Session logged"}${n >= 2 ? ` · ${n}-day streak` : ""}.`;
-  const you = me.days.has(t) ? "You've both trained today 🤝"
-    : gymDay(me, t) ? `Your ${mine ? mine + " session" : "session"} is still waiting.`
-    : "Rest day for you, so enjoy it.";
-  return { title: `💪 ${who.name} just trained${circle ? " · " + circle : ""}`, body: `${done} ${you}`, tag: "crew-" + who.id };
+  const w = showWorkout ? slotOf(who, tw)?.w : null, name = U(who.name);
+  const title = me.days.has(t) ? `${name} TRAINED TOO`
+    : gymDay(me, t) ? `${name}'S DONE. YOU'RE UP.`
+    : `${name} JUST TRAINED`;
+  const body = join(`${w || "Session"} ✓`, circle ? `${circle}${tally ? " " + tally + " today" : ""}` : streakBit(streak(who)));
+  return { title, body, tag: "crew-" + who.id };
 }
-export function reminderNote(me: Ctx): Note {
+export function reminderNote(me: Ctx, now = new Date()): Note {
   const w = slotOf(me, dayIn(me.tz))?.w;
-  return { title: `⏰ ${w ? w + " day" : "Gym day"}: not logged yet`, body: `${streakLine(streak(me))} Train, then tap to log it.`, tag: "remind" };
+  return { title: `${U(w || "Gym day")}. NOT LOGGED.`, body: join(streakBit(streak(me)) || "Start a streak", leftToday(me.tz, now) + " today"), tag: "remind" };
 }
-export const circleAddNote = (adder: string, circle: string): Note => ({ title: `➕ ${adder} added you to ${circle}`,
-  body: "See who's trained today and keep each other going.", tag: "circle" });
-export const testNote = (): Note => ({ title: "✅ Notifications are on",
-  body: "You'll get nudges, reactions, crew sessions and gym reminders here. Change them any time in the You tab.", tag: "test" });
+export const circleAddNote = (adder: string, circle: string, tally?: string | null): Note => ({ title: `YOU'RE IN ${U(circle)}`,
+  body: join(`Added by ${adder}`, tally && `${tally} trained today`), tag: "circle" });
+export const testNote = (): Note => ({ title: "NOTIFICATIONS ON",
+  body: "Nudges, reactions, crew sessions and reminders land here.", tag: "test" });
+
+// How many people in a circle have trained today (each by their own date): "4 of 6"
+async function circleTally(circleId: string){
+  const ms = await rest(`circle_members?select=user_id&circle_id=eq.${circleId}`);
+  const ids = ms.map((m: any) => m.user_id); if (!ids.length) return null;
+  const [ps, cs] = await Promise.all([rest(`profiles?select=id,tz&id=${inList(ids)}`),
+    rest(`checkins?select=user_id,day&user_id=${inList(ids)}&day=gte.${addDays(sydneyDay(), -2)}`)]);
+  const done = new Set(cs.map((c: any) => c.user_id + "|" + c.day));
+  const n = ps.filter((p: any) => done.has(p.id + "|" + dayIn(p.tz))).length;
+  return `${n} of ${ids.length}`;
+}
 
 // ---------- the four kinds of notification ----------
 async function onNudge(r: any){
@@ -211,7 +231,7 @@ async function onCheckin(r: any){
   const found = await rest(`checkins?select=day&user_id=eq.${r.user_id}&day=eq.${r.day}`);
   if (!found.length) return { skipped: "not found" };
   // recipient → circle label (null = not via a circle). One notification per person, however they're connected.
-  const recips = new Map<string, string | null>();
+  const recips = new Map<string, { label: string; cid: string } | null>();
   if (who.is_public && who.share_attendance){                         // crew activity (respects their privacy choice)
     for (const o of await rest(`profiles?select=id&notif_crew=eq.true&id=neq.${r.user_id}`)) recips.set(o.id, null);
   }
@@ -224,14 +244,19 @@ async function onCheckin(r: any){
     const unmuted = mates.filter((m: any) => !m.muted);
     const wants = unmuted.length ? new Set((await rest(`profiles?select=id&notif_circle=eq.true&id=${inList([...new Set(unmuted.map((m: any) => m.user_id))] as string[])}`)).map((p: any) => p.id)) : new Set();
     for (const m of unmuted) if (wants.has(m.user_id) && !recips.has(m.user_id)){
-      const c = circles.find((c: any) => c.id === m.circle_id); recips.set(m.user_id, c ? `${c.emoji ? c.emoji + " " : ""}${c.name}` : null); }
+      const c = circles.find((c: any) => c.id === m.circle_id); recips.set(m.user_id, c ? { label: `${c.emoji ? c.emoji + " " : ""}${c.name}`, cid: c.id } : null); }
   }
   const to: string[] = [];
   for (const id of recips.keys()) if (await firstTime("crew", id, r.user_id, r.day)) to.push(id);   // once per person per day, even if they untick + tick
   const ctx = await contexts([r.user_id, ...to]);
   const showWorkout = who.account ? !who.hide_split : who.share_split;
   let sent = 0;
-  for (const id of to){ const me = ctx.get(id); if (me) sent += (await send([id], crewNote(ctx.get(r.user_id)!, showWorkout, me, recips.get(id)))).sent; }
+  const tallies = new Map<string, string | null>();              // one count per circle, shared by everyone in it
+  for (const id of to){
+    const me = ctx.get(id), via = recips.get(id); if (!me) continue;
+    if (via && !tallies.has(via.cid)) tallies.set(via.cid, await circleTally(via.cid).catch(() => null));
+    sent += (await send([id], crewNote(ctx.get(r.user_id)!, showWorkout, me, via?.label, via ? tallies.get(via.cid) : null))).sent;
+  }
   return { to: to.length, sent };
 }
 async function onCircleAdd(r: any){
@@ -241,7 +266,7 @@ async function onCircleAdd(r: any){
     rest(`circles?select=name,emoji&id=eq.${r.circle_id}`)]);
   if (!adder || !circle || !to?.notif_circle) return { skipped: "off" };
   if (!await firstTime("circle_add", r.user_id, r.circle_id, sydneyDay())) return { skipped: "dupe" };
-  return send([r.user_id], circleAddNote(adder.name, `${circle.emoji ? circle.emoji + " " : ""}${circle.name}`));
+  return send([r.user_id], circleAddNote(adder.name, `${circle.emoji ? circle.emoji + " " : ""}${circle.name}`, await circleTally(r.circle_id).catch(() => null)));
 }
 async function onReminders(){
   const due = await rest("rpc/due_reminders", { method: "POST", body: "{}" });   // also marks them as reminded today
