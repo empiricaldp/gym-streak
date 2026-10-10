@@ -2477,36 +2477,36 @@ function viewPeopleList(kind){
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
   wnPv = wnPv || pvFrom(m);
-  const dots = `<div class="steps">${[1,2,3,4].map(i => `<i class="${i<=wnStep?"on":""}"></i>`).join("")}</div>`;
+  // One new thing per screen, one short line each. Then privacy, then find your buds.
+  const FEATS = [["🤝", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
+                 ["👤", "Profiles", "Tap anyone to see their week, streak and trophies."],
+                 ["⭕", "Circles", "Private groups for your crew, like a WhatsApp group."],
+                 ["💬", "Chats", "Message your Buds and your circles."]];
+  const PRIV = 2 + FEATS.length, FIND = PRIV + 1;            // step numbers: 1 hello, 2–5 features, 6 privacy, 7 find buds
+  const dots = `<div class="steps">${Array.from({ length: FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
   let body = "";
   if (wnStep === 1) body = `<div class="wnhero"><span class="wnemoji">🎉</span><span class="rec">New</span><h2 class="sign">Big update</h2>
-      <p class="note">CREW just got more personal. Your crew, your way.</p></div>
-      <button class="cta" id="wn-next">See what's new</button>`;
-  // Each new thing in three short lines: what it is, how to use it, why it's worth it
-  const feat = (emoji, name, what, how, why) => `<div><span>${emoji}</span><p><b>${name}</b>
-      <small class="wnl"><i>What</i>${what}</small><small class="wnl"><i>How</i>${how}</small><small class="wnl"><i>Why</i>${why}</small></p></div>`;
-  if (wnStep === 2) body = `<span class="label">What's new</span><h2 class="sign">Four things</h2>
-      <div class="wnlist">
-        ${feat("🤝", "Buds", "Follow your gym mates. Bud each other and you're Buds.", "Tap Bud on anyone in Crew or on their profile.", "Today shows just your crew, and Buds can nudge each other.")}
-        ${feat("👤", "Profiles", "Everyone now has a profile.", "Tap any name to see their week, streak and trophies.", "Check on your crew in one tap.")}
-        ${feat("⭕", "Circles", "Private groups, like a WhatsApp group.", "Crew → Circles → New circle, then add people or share the link.", "Your own leaderboard with just your group.")}
-        ${feat("💬", "Chats", "Message your Buds and your circles.", "Open the Chats tab, or tap Message on a Bud.", "Plan sessions and hype each other up, right in CREW.")}
-      </div><button class="cta" id="wn-next">Next</button>`;
-  if (wnStep === 3) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
+      <p class="note">CREW just got more personal. Here's what's new.</p></div>
+      <button class="cta" id="wn-next">Show me</button>`;
+  if (wnStep >= 2 && wnStep < PRIV){ const [e, name, what] = FEATS[wnStep - 2];
+    body = `<div class="wnhero"><span class="wnemoji">${e}</span><span class="label">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign">${name}</h2>
+      <p class="note wnwhat">${what}</p></div>
+      <button class="cta" id="wn-next">Next</button>`; }
+  if (wnStep === PRIV) body = `<span class="label">Your account</span><h2 class="sign">Public or private?</h2>
       <p class="note">We've picked the one that matches your old settings. Change it any time in You.</p>${privacyPicker(wnPv)}
       <button class="cta" id="wn-next">Continue</button>`;
-  if (wnStep === 4) body = `<span class="label">Last step</span><h2 class="sign">Find your buds</h2>
+  if (wnStep === FIND) body = `<span class="label">Last step</span><h2 class="sign">Find your buds</h2>
       <p class="note">Bud the people you train with. You can always do this later in Crew.</p>
       <input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
       <div class="list peoplelist" id="people">${everyone().map(personRow).join("")}</div>
       <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>
       <button class="cta" id="wn-next">Done</button>`;
   main().innerHTML = `<div class="view" id="wn"><div class="card ob">${dots}${body}</div></div>`;
-  if (wnStep === 3) wirePrivacy(wnPv, render);
-  if (wnStep === 4) wireFind();
+  if (wnStep === PRIV) wirePrivacy(wnPv, render);
+  if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
-    if (wnStep === 3){ $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
-    if (wnStep === 4){ wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
+    if (wnStep === PRIV){ $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: 1 })){ $("wn-next").disabled = false; return; } }
+    if (wnStep === FIND){ wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
 }
@@ -2644,7 +2644,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b22";   // bump together with version.json on every release
+const APP_VERSION = "b23";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

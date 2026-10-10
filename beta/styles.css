@@ -699,3 +699,5 @@ body{padding-bottom:calc(132px + env(safe-area-inset-bottom,0px))}              
 .wnl{display:flex;gap:8px;align-items:baseline}
 .wnl i{flex:none;width:34px;font:700 10px var(--mono);font-style:normal;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);opacity:.8}
 .wnlist p{gap:3px}
+.wnwhat{font-size:19px;line-height:1.35;color:var(--fg);margin:6px 0 4px}
+.steps{gap:4px}
