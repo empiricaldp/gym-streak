@@ -1447,7 +1447,7 @@ async function markRead(k){
 function openChat(k){
   chatKey = k; profileId = null; circleId = null; circleMode = "view"; tab = "chats";
   try { localStorage.setItem("gs-tab", "chats"); } catch(e){}
-  render(); window.scrollTo(0, document.body.scrollHeight);
+  render();
 }
 document.addEventListener("click", e => {
   const el = e.target.closest && e.target.closest("[data-openchat]"); if (!el) return;
@@ -1490,42 +1490,61 @@ function chatLogHtml(k){
   return out;
 }
 // Redraw just the messages (not the text box), so typing isn't interrupted
+const chatAtBottom = () => { const l = $("chatlog"); return !l || l.scrollTop + l.clientHeight >= l.scrollHeight - 120; };
+const chatToBottom = () => { const l = $("chatlog"); if (l) l.scrollTop = l.scrollHeight; };
 function patchChat(){
   const log = $("chatlog"); if (!log || !chatKey) return;
-  const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 160;
+  const nearBottom = chatAtBottom();
   log.innerHTML = chatLogHtml(chatKey);
-  if (nearBottom) window.scrollTo(0, document.body.scrollHeight);
+  if (nearBottom) chatToBottom();
   if (document.visibilityState === "visible") markRead(chatKey);
 }
+// The chat is its own full screen (like WhatsApp): name at the top, messages filling the middle and
+// starting from the bottom, the text box pinned to the bottom (and sitting right on top of the keyboard).
 function viewChat(k){
   const t = chatTarget(k), o = t.person;
   if (!(t.circle || o)){ chatKey = null; return render(); }
   $("title").textContent = "Chat";
   $("tabbar").hidden = true;
-  const head = t.circle
-    ? `<div class="chathead tappable" data-circle="${esc(t.circle.id)}">${circleBadge(t.circle)}<div><div class="nm">${esc(t.circle.name)}</div><div class="sub">${t.circle.members.length} members · ${trainedToday(t.circle)} trained today</div></div></div>`
-    : `<div class="chathead tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div><div class="nm">${esc(o.name)}</div><div class="sub">${has(o, today()) ? "Trained today ✓" : isGym(o, today()) ? "Not trained yet today" : "Rest day"} · ${dayStreak(o)}-day streak</div></div></div>`;
+  document.documentElement.classList.add("chat-open");
+  const who = t.circle
+    ? `<button type="button" class="chatwho" data-circle="${esc(t.circle.id)}">${circleBadge(t.circle)}<span class="grow"><span class="nm">${esc(t.circle.name)}</span><span class="sub">${t.circle.members.length} members · ${trainedToday(t.circle)} trained today</span></span></button>`
+    : `<button type="button" class="chatwho" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="sub">${has(o, today()) ? "Trained today ✓" : isGym(o, today()) ? "Not trained yet" : "Rest day"} · ${dayStreak(o)}-day streak</span></span></button>`;
   const composer = canSend(k)
     ? `<form class="composer" id="chat-form"><textarea id="chat-input" rows="1" maxlength="1000" placeholder="Message" aria-label="Message" enterkeyhint="send">${esc(chatDrafts[k] || "")}</textarea>
-        <button class="cta" id="chat-send" type="submit">Send</button></form>`
-    : `<p class="chatnote">${t.circle ? "" : `You and ${esc(o.name)} aren't Buds any more, so you can't send messages.`}</p>`;
-  main().innerHTML = `<div class="view">${backTo("Chats", () => { chatKey = null; render(); window.scrollTo(0, 0); })}${head}
-    <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div>`;
+        <button class="cta" id="chat-send" type="submit" aria-label="Send">Send</button></form>`
+    : `<p class="chatnote composer">${t.circle ? "" : `You and ${esc(o.name)} aren't Buds any more, so you can't send messages.`}</p>`;
+  main().innerHTML = `<div class="chatscreen" id="chatscreen"><div class="chatinner">
+    <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}</div>
+    <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div></div>`;
+  $("chat-back").onclick = () => { chatKey = null; document.documentElement.classList.remove("chat-open"); render(); window.scrollTo(0, 0); };
   const inp = $("chat-input"), form = $("chat-form");
   if (inp){
-    const grow = () => { inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 140) + "px"; };
+    const grow = () => { const end = chatAtBottom(); inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 140) + "px"; if (end) chatToBottom(); };
     inp.oninput = () => { chatDrafts[k] = inp.value; grow(); }; grow();
+    inp.onfocus = () => setTimeout(() => { fitChat(); chatToBottom(); }, 60);
     inp.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !device.phone){ e.preventDefault(); form.requestSubmit(); } };
     form.onsubmit = e => { e.preventDefault(); sendMsg(k, inp.value); inp.value = ""; chatDrafts[k] = ""; grow(); inp.focus(); };
   }
   $("chatlog").onclick = e => { const r = e.target.closest("[data-retry]"); if (r){ const m = messages.find(x => String(x.id) === r.dataset.retry); if (m){ messages = messages.filter(x => x !== m); sendMsg(k, m.body); } } };
+  fitChat(); chatToBottom();
   markRead(k);
 }
+// Size the chat screen to the part of the screen you can actually see (above the keyboard on iPhone)
+function fitChat(){
+  const el = $("chatscreen"); if (!el) return;
+  const vv = window.visualViewport, end = chatAtBottom();
+  el.style.height = (vv ? vv.height : window.innerHeight) + "px";
+  el.style.transform = vv && vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+  if (end) chatToBottom();
+}
+if (window.visualViewport){ visualViewport.addEventListener("resize", fitChat); visualViewport.addEventListener("scroll", fitChat); }
+window.addEventListener("resize", fitChat);
 async function sendMsg(k, text){
   const body = String(text || "").trim(); if (!body) return;
   const row = k.startsWith("c:") ? { from_user: myId, circle_id: k.slice(2), body } : { from_user: myId, to_user: k.slice(2), body };
   const tmp = { ...row, id: "tmp" + (++tmpId), created_at: new Date().toISOString(), pending: true };
-  messages.push(tmp); patchChat(); window.scrollTo(0, document.body.scrollHeight);
+  messages.push(tmp); patchChat(); chatToBottom();
   let res = await sb.from("messages").insert(row).select("id,created_at");
   if (res.error && /load failed|failed to fetch|network/i.test(res.error.message || "")){ await new Promise(r => setTimeout(r, 1200));
     // it may have landed anyway: only resend if it isn't there
@@ -2455,6 +2474,7 @@ document.addEventListener("focusout", e => { if (e.target.matches && e.target.ma
 if (window.visualViewport) visualViewport.addEventListener("resize", () => {   // keyboard closed → snap fixed bars back
   if (visualViewport.height > window.innerHeight * 0.85 && !(document.activeElement || {}).matches?.("input, textarea")) window.scrollTo(window.scrollX, window.scrollY); });
 function render(){
+  if (!chatKey || profileId || circleId) document.documentElement.classList.remove("chat-open");
   if (chatKey && !profileId && document.activeElement && document.activeElement.id === "chat-input" && $("chatlog")){ patchChat(); updateChatBadge(); return; }
   settleKeyboard();
   $("date").textContent = today().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
@@ -2516,7 +2536,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b15";   // bump together with version.json on every release
+const APP_VERSION = "b16";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
