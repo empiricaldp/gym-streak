@@ -364,11 +364,13 @@ function viewJoin(){
       <div class="work sign">Set up your plan</div>
       <p class="sub">6 quick questions: your name, your goal, your plate colour, your weekly split, how long you've been going, and what the crew can see. Then tick off every session and keep the streak alive.</p>
       <button class="cta" id="startob">Get started</button>
+      <button type="button" class="linkbtn" id="join-out" style="margin-top:8px;padding-left:0">Not you? Sign out</button>
     </div>
     ${roster().length ? `<div class="sec"><h2 class="sign">Already here</h2><span class="label">${roster().length} lifting</span></div>
       <div class="list">${roster().map(o=>`<div class="li" style="${pc(o)}"><span class="dot"></span><span class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${sharesStats(o) ? `Week ${weekNo(o)} · ${dayStreak(o)} day streak` : "Keeps stats private"}</span></span></div>`).join("")}</div>` : ""}
   </div>`;
   $("startob").onclick = () => startOnboarding(false);
+  $("join-out").onclick = () => sb.auth.signOut();
 }
 
 function cellBtn(o,d){
@@ -2701,6 +2703,13 @@ function render(){
   if (locked) return viewLock();
   if (!ready){ $("title").textContent = TITLES[tab]; main().innerHTML = `<div class="skel">Loading the crew…</div>`; return; }
   if (ob){ $("title").textContent = ob.edit ? "Edit" : "Set up"; viewOnboarding(); return; }
+  // Logged in but no CREW profile yet (sign-up not finished): set up first. Nothing else works without a profile
+  // (e.g. "Bud" failed with a database error), so every tab leads here.
+  if (!me() && !members.size){                                   // nothing loaded at all = bad signal, not "no profile"
+    $("title").textContent = TITLES[tab];
+    main().innerHTML = `<div class="view"><div class="card"><b>Couldn't load the crew</b><p class="note" style="margin:6px 0 12px">Check your connection and try again.</p><button class="cta" id="load-retry">Try again</button></div></div>`;
+    $("load-retry").onclick = () => { main().innerHTML = `<div class="skel">Loading the crew…</div>`; loadAll(); }; return; }
+  if (!me()){ $("title").textContent = "Welcome"; $("tabbar").hidden = true; profileId = null; chatKey = null; circleId = null; return viewJoin(); }
   if (wnActive) return viewWhatsNew();
   updateChatBadge();
   if (chatKey && !profileId && !circleId) return viewChat(chatKey);
@@ -2747,7 +2756,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b33";   // bump together with version.json on every release
+const APP_VERSION = "b34";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
