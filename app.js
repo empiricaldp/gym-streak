@@ -599,7 +599,7 @@ const toggleIn = (arr, id) => arr.includes(id) ? arr.filter(x => x !== id) : [..
 const goalsText = gs => (gs || []).map(goalLabel).filter(Boolean).join(", ");
 async function saveGoals(goals){
   const { error } = await sb.from("profiles").update({ goals, goal: legacyGoal(goals) }).eq("id", myId);
-  if (error){ showWarn("Couldn't save goals: " + error.message); return false; }
+  if (error){ showWarn(oops("save goals", error)); return false; }
   body.goals = goals; render(); return true;
 }
 // Scale direction for your goals combined: only when they all agree (e.g. Lose weight + Cut = down)
@@ -698,7 +698,7 @@ async function saveExperience(){
   const d = xpDraft(), btn = $("xp-save"); if (btn) btn.disabled = true;
   const trained_since = d.n === 0 ? key(today()) : key(durStart(d));
   const { error } = await sb.from("profiles").update({ trained_since }).eq("id", myId);
-  if (error){ if (btn) btn.disabled = false; return showWarn("Couldn't save: " + error.message); }
+  if (error){ if (btn) btn.disabled = false; return showWarn(oops("save", error)); }
   body.trainedSince = trained_since; xpEdit = null; toast("Experience saved"); render();
 }
 
@@ -717,11 +717,11 @@ function wireBody(){
     save.disabled = true;
     if ($("b-height").value && h !== body.height){
       const { error } = await sb.from("profiles").update({ height_cm: h }).eq("id", myId);
-      if (error){ save.disabled = false; return showWarn("Couldn't save height: " + error.message); }
+      if (error){ save.disabled = false; return showWarn(oops("save height", error)); }
     }
     if ($("b-kg").value){
       const { error } = await sb.from("bodyweight").upsert({ user_id: myId, day: key(today()), kg: Math.round(kg*10)/10 });
-      if (error){ save.disabled = false; return showWarn("Couldn't save weight: " + error.message); }
+      if (error){ save.disabled = false; return showWarn(oops("save weight", error)); }
     }
     toast("Saved"); await loadAll();
   };
@@ -750,13 +750,13 @@ async function toggleReaction(e, to, day){
   if (mine){
     reactions = reactions.filter(r => r !== mine); render();
     const { error } = await sb.from("reactions").delete().match({ from_user: myId, to_user: to, day, emoji: e });
-    if (error){ reactions.push(mine); render(); showWarn("Couldn't remove that: " + error.message); }
+    if (error){ reactions.push(mine); render(); showWarn(oops("remove that", error)); }
   } else {
     const r = { from_user: myId, to_user: to, day, emoji: e };
     reactions.push(r); render();
     try { navigator.vibrate && navigator.vibrate(8); } catch(_){}
     const { error } = await sb.from("reactions").insert(r);
-    if (error){ reactions = reactions.filter(x => x !== r); render(); showWarn("Couldn't react: " + error.message); }
+    if (error){ reactions = reactions.filter(x => x !== r); render(); showWarn(oops("react", error)); }
   }
 }
 
@@ -766,7 +766,7 @@ async function sendNudge(to){
   const n = { from_user: myId, to_user: to, day: key(today()), seen: false, created_at: new Date().toISOString() };
   nudges.push(n); sentNudgeTo.add(to); render();
   const { error } = await sb.from("nudges").insert({ from_user: myId, to_user: to });
-  if (error){ nudges = nudges.filter(x => x !== n); sentNudgeTo.delete(to); render(); return showWarn("Couldn't nudge: " + error.message); }
+  if (error){ nudges = nudges.filter(x => x !== n); sentNudgeTo.delete(to); render(); return showWarn(oops("nudge", error)); }
   toast(`Nudged ${nameOf(to)} 👀`);
 }
 async function dismissNudges(){
@@ -790,7 +790,7 @@ function freezeOffer(m){
 }
 async function useFreeze(d){
   const { error } = await sb.from("freezes").insert({ user_id: myId, day: key(d) });
-  if (error) return showWarn("Couldn't use the freeze: " + error.message);
+  if (error) return showWarn(oops("use the freeze", error));
   toast("❄️ Streak saved"); burst(); await loadAll();
 }
 
@@ -922,6 +922,64 @@ function wirePrivacy(p, onChange){
 const pvFrom = m => ({ priv: !!m?.private, hide: !!m?.splitHidden });
 // Phone signal drops show up as "TypeError: Load failed" (Safari) / "Failed to fetch" (Chrome): the request may or may not have landed.
 const netErr = e => /load failed|failed to fetch|networkerror|network request failed|network connection was lost/i.test(String(e?.message || e || ""));
+
+// ── Friendly errors: never show raw database text. Say WHY + WHAT TO DO. ──
+// `doing` is the action in plain words ("bud", "nudge", "add") — used for the fallback line and for picking the right reason.
+function oops(doing, e){
+  const raw = String(e?.message || e?.error_description || e || ""), code = String(e?.code || e?.status || "");
+  try { console.warn("[CREW error]", doing, code, raw); } catch(_){}            // the real text still goes to the console for debugging
+  const has = re => re.test(raw), d = String(doing).toLowerCase();
+  const fresh = msg => { setTimeout(() => { try { loadAll(); } catch(_){} }, 0); return msg; };   // the app's info was out of date → reload it for them
+  if (netErr(e) || has(/timeout|timed out|fetch|network|offline|connection/i)) return "No connection right now. Check your signal and try again.";
+  if (has(/jwt|token|not authenticated|sign in first|session/i) || code === "401" || code === "PGRST301")
+    return "Your login needs a refresh. Fully close CREW, open it again and sign in if it asks.";
+  if (has(/slow down|too many|rate limit/i) || code === "429") return "That's a lot at once. Wait a minute, then try again.";
+  if (has(/NAME_RULES/)) return "No emoji in names, just letters and numbers.";
+  if (has(/invite link has expired/i)) return "This invite link has expired. Ask someone in the circle to send a fresh one.";
+  if (has(/at least one admin/i)) return "A circle needs at least one admin. Make someone else admin first.";
+  if (has(/only admins/i)) return "Only circle admins can do that. Ask an admin of the circle.";
+  if (has(/within the last week|-31|day/i) && code === "23514") return "You can only change days from the last few weeks.";
+  if (code === "23503" || has(/foreign key/i)){                                      // something it points to doesn't exist
+    if (has(/follower_fkey|from_user_fkey|user_id_fkey|owner|created_by/i) && !has(/followee|to_user/i))
+      return "Your profile isn't set up yet. Fully close CREW, open it again and finish the quick set-up.";
+    if (has(/circle/i)) return fresh("That circle doesn't exist anymore.");
+    return fresh("That person isn't on CREW anymore.");
+  }
+  if (code === "23505" || has(/duplicate key/i)){                                    // it's already done
+    if (d.startsWith("bud")) return fresh("You already bud them.");
+    if (d.startsWith("join")) return "You're already in this circle.";
+    if (d.startsWith("nudge")) return "You've already nudged them. Give it a little while.";
+    if (d.startsWith("use the freeze")) return "You've already used your freeze this month.";
+    return fresh("That's already done.");
+  }
+  if (code === "42501" || code === "403" || has(/row-level security|permission denied|not allowed/i)){   // a rule said no
+    if (d.startsWith("nudge")) return "Nudges are for Buds and circle-mates, and there's a short cool-down between them. Try again a bit later.";
+    if (d.startsWith("add") || d.startsWith("create")) return "Private people can only be added by their Buds. Bud each other first, then add them.";
+    if (d.startsWith("send") || d.startsWith("chat")) return "You can only chat with Buds and your circles.";
+    if (d.startsWith("react")) return fresh("You can only react to people you can see.");
+    if (d.startsWith("bud")) return fresh("You can't bud this person right now. The app just refreshed, so try again.");
+    if (d.startsWith("use the freeze")) return "You've already used your freeze this month.";
+    return fresh("That's not allowed for you right now. The app just refreshed, so try again.");
+  }
+  if (code === "23514" || has(/check constraint|violates check/i)) return "That doesn't look right. Double-check it and try again.";
+  if (code === "22001") return "That's too long. Make it shorter and try again.";
+  return `Couldn't ${d} just now. Try again in a moment. If it keeps happening, let DP know.`;
+}
+// Sign-in screen errors (from Supabase Auth) in plain words.
+function authOops(e){
+  const raw = String(e?.message || e || "");
+  try { console.warn("[CREW auth]", raw); } catch(_){}
+  if (netErr(e)) return "No connection right now. Check your signal and try again.";
+  if (/invalid login|invalid credentials/i.test(raw)) return "Email or password is wrong. Check both, or tap Forgot password.";
+  if (/not confirmed/i.test(raw)) return "Check your email and tap the confirm link first, then sign in.";
+  if (/already registered|already exists/i.test(raw)) return "There's already an account with this email. Sign in instead.";
+  if (/password.*(at least|short|characters)/i.test(raw)) return "Password is too short. Use at least 6 characters.";
+  if (/same.*password|different from the old/i.test(raw)) return "Pick a new password that's different from your old one.";
+  if (/rate limit|too many|seconds/i.test(raw)) return "Too many tries. Wait a minute, then try again.";
+  if (/valid email|invalid email|email.*invalid/i.test(raw)) return "That email doesn't look right. Check it for typos.";
+  if (/expired|invalid.*(link|token)/i.test(raw)) return "That link has expired. Ask for a new one.";
+  return "Something went wrong signing in. Try again in a moment.";
+}
 async function retryNet(run){            // for saves that are safe to repeat: try once more after a blip
   let r = await run();
   if (r.error && netErr(r.error)){ await new Promise(ok => setTimeout(ok, 900)); r = await run(); }
@@ -938,7 +996,7 @@ async function savePrivacy(p, extra = {}){
     const d = chk?.data;
     if (d && d.account === row.account && d.hide_split === row.hide_split && (extra.seen_update == null || d.seen_update === extra.seen_update)) error = null;
   }
-  if (error){ showWarn(netErr(error) ? "Connection dropped. Check your signal and tap Continue again." : "Couldn't save privacy: " + error.message); return false; }
+  if (error){ showWarn(oops("save privacy", error)); return false; }
   $("warn").hidden = true;
   await loadAll(); return true;
 }
@@ -986,7 +1044,7 @@ function wireHealth(){
     if (!resetArmed){ resetArmed = true; return wireHealth(); }
     resetArmed = false;
     const { data, error } = await sb.rpc("reset_steps_key");
-    if (error) return showWarn("Couldn't reset: " + error.message);
+    if (error) return showWarn(oops("reset", error));
     stepsKey = data; toast("New steps key"); render();
   };
 }
@@ -1290,7 +1348,7 @@ async function saveOnboarding(){
     // someone grabbed the name between typing and saving, or it broke a name rule: back to the name question
     const nameErr = error.code === "23505" ? `“${row.name}” was just taken by someone else. Pick another.` : /NAME_RULES/.test(error.message) ? "No emoji in names, just letters and numbers." : "";
     if (nameErr){ ob.step = 0; ob.nameState = "bad"; ob.nameMsg = nameErr; render(); return; }   // the name question is step 0
-    showWarn("Couldn't save: " + error.message); return;
+    showWarn(oops("save", error)); return;
   }
   ob = null; tab = wasEdit ? "you" : "today";
   await loadAll();
@@ -1401,7 +1459,7 @@ async function loadAll(){
       if (gen !== loadGen) return;
       members = next; ready = true; $("warn").hidden = true;
       if (before) try { announce(before, failed); } catch(e){ console.warn("banner", e); }
-    } catch(e){ showWarn("Couldn't load the crew: " + (e.message || e)); ready = true; }
+    } catch(e){ showWarn(oops("load the crew", e)); ready = true; }
     finally { loading = null; if (gen === loadGen){ renderSoft(); loadMemberCount(); } if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
   })();
   return loading;
@@ -1722,7 +1780,7 @@ function announce(before, failed = new Set()){
 // ================= FX: chalk burst =================
 let toastT;
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),2200); }
-function showWarn(t){ const w=$("warn"); w.textContent=t; w.hidden=false; }
+function showWarn(t){ const w=$("warn"); w.textContent=t; w.hidden=false; w.title="Tap to dismiss"; w.onclick=()=>{ w.hidden=true; }; }
 function burst(){
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const cv=$("fx"), ctx=cv.getContext("2d"), dpr=window.devicePixelRatio||1;
@@ -1800,7 +1858,7 @@ function viewAuth(){
       res = await sb.auth.updateUser({ password: pass.value });
       if (!res.error){ authMode = "signin"; toast("Password updated"); }
     }
-    if (res && res.error) authErr = res.error.message;
+    if (res && res.error) authErr = authOops(res.error);
     go.disabled = false; render();
   };
   go.onclick = submit;
@@ -1939,7 +1997,7 @@ async function enableLock(){
     toast(`${bioName()} lock on`); render();
   } catch(e){
     if (e && e.name === "NotAllowedError") toast("Cancelled");
-    else showWarn(`Couldn't turn on ${bioName()}: ${e && e.message ? e.message : e}`);
+    else showWarn(oops(`turn on ${bioName()}`, e));
   }
 }
 function disableLock(){ try { localStorage.removeItem(LOCK_KEY); } catch(_) {} toast("Lock off"); render(); }
@@ -2102,7 +2160,7 @@ async function enablePush(){
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(window.GYM_CONFIG.VAPID_PUBLIC_KEY) });
     await saveSub(sub);
     pushOn = true; toast("Notifications on");
-  } catch(e){ showWarn("Couldn't turn on notifications: " + (e.message || e)); }
+  } catch(e){ showWarn(oops("turn on notifications", e)); }
   finally { pushBusy = false; render(); }
 }
 async function disablePush(){
@@ -2111,7 +2169,7 @@ async function disablePush(){
     const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
     if (sub){ await sb.rpc("remove_push_sub", { p_endpoint: sub.endpoint }); await sub.unsubscribe(); }
     pushOn = false; toast("Notifications off on this device");
-  } catch(e){ showWarn("Couldn't turn them off: " + (e.message || e)); }
+  } catch(e){ showWarn(oops("turn them off", e)); }
   finally { pushBusy = false; render(); }
 }
 // Every launch: if this phone already said yes, re-save its address (it can change, or a friend may
@@ -2130,7 +2188,7 @@ async function saveNotif(patch){
   const before = notif; notif = { ...notif, ...patch };
   const row = {}; for (const [k, v] of Object.entries(patch)) row[{ nudge:"notif_nudge", react:"notif_react", crew:"notif_crew", remind:"notif_remind", chat:"notif_chat", buds:"notif_buds", at:"remind_at" }[k]] = v;
   const { error } = await sb.from("profiles").update(row).eq("id", myId);
-  if (error){ notif = before; showWarn("Couldn't save that: " + error.message); render(); return false; }
+  if (error){ notif = before; showWarn(oops("save that", error)); render(); return false; }
   return true;
 }
 async function sendTestPush(){
@@ -2139,7 +2197,7 @@ async function sendTestPush(){
     body: JSON.stringify({ type: "test" }) });
   const out = await r.json().catch(() => ({}));
   if (out.sent) toast("Sent. Check your notifications");
-  else showWarn("Test didn't send: " + (out.error || (out.removed ? "this phone's address expired, turn notifications off and on" : "no device found, try turning them off and on")));
+  else showWarn(out.removed || !out.error ? "Test didn't send. Turn notifications off and on below, then try again." : oops("send the test", out.error));
 }
 const NOTIF_TYPES = [
   ["nudge",  "Nudges", "When a friend nudges you to train"],
@@ -2257,7 +2315,7 @@ function viewCircleNew(){
   go.onclick = async () => {
     go.disabled = true; go.textContent = "Creating…";
     const { data, error } = await sb.rpc("create_circle", { p_name: d.name.trim(), p_emoji: d.emoji, p_members: [...d.picked] });
-    if (error){ go.disabled = false; go.textContent = "Create circle"; return showWarn("Couldn't create the circle: " + error.message); }
+    if (error){ go.disabled = false; go.textContent = "Create circle"; return showWarn(oops("create the circle", error)); }
     circleDraft = null; circleMode = "view"; circleId = data; toast(`${circleLabel({ emoji: d.emoji, name: d.name })} created`);
     await loadAll(); window.scrollTo(0,0);
   };
@@ -2274,7 +2332,7 @@ function viewCircleAdd(c){
   go.onclick = async () => {
     go.disabled = true;
     const { error } = await sb.rpc("add_to_circle", { p_circle: c.id, p_members: [...circleDraft.picked] });
-    if (error){ go.disabled = false; return showWarn("Couldn't add: " + error.message); }
+    if (error){ go.disabled = false; return showWarn(oops("add", error)); }
     toast(`Added ${circleDraft.picked.size} to ${c.name}`); circleDraft = null; circleMode = "view"; await loadAll();
   };
 }
@@ -2293,11 +2351,11 @@ function viewCircleEdit(c){
   main().querySelectorAll("[data-emoji]").forEach(b => b.onclick = () => { d.emoji = b.dataset.emoji; main().querySelectorAll("[data-emoji]").forEach(x => x.classList.toggle("on", x === b)); });
   $("c-save").onclick = async () => {
     const { error } = await sb.rpc("edit_circle", { p_circle: c.id, p_name: d.name.trim(), p_emoji: d.emoji });
-    if (error) return showWarn("Couldn't save: " + error.message);
+    if (error) return showWarn(oops("save", error));
     toast("Saved"); circleDraft = null; circleMode = "view"; await loadAll(); };
   $("c-reset").onclick = async () => {
     const { error } = await sb.rpc("reset_invite", { p_circle: c.id });
-    if (error) return showWarn("Couldn't reset: " + error.message);
+    if (error) return showWarn(oops("reset", error));
     toast("New invite link made"); await loadAll(); };
 }
 let circleAsk = null;   // "leave" or a user id to remove, waiting for "are you sure?"
@@ -2340,7 +2398,7 @@ function viewCircle(c){
   $("c-mute").onclick = async () => {
     const to = !mine?.muted; if (mine) mine.muted = to; render();
     const { error } = await sb.rpc("mute_circle", { p_circle: c.id, p_muted: to });
-    if (error){ if (mine) mine.muted = !to; render(); return showWarn("Couldn't change that: " + error.message); }
+    if (error){ if (mine) mine.muted = !to; render(); return showWarn(oops("change that", error)); }
     toast(to ? "Circle muted" : "Circle notifications on"); };
   if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
   if ($("c-addppl")) $("c-addppl").onclick = () => { circleDraft = { picked: new Set() }; circleMode = "add"; render(); window.scrollTo(0,0); };
@@ -2348,16 +2406,16 @@ function viewCircle(c){
   if ($("c-ask-no")) $("c-ask-no").onclick = () => { circleAsk = null; render(); };
   if ($("c-leave-yes")) $("c-leave-yes").onclick = async () => {
     const { error } = await sb.rpc("leave_circle", { p_circle: c.id });
-    if (error) return showWarn("Couldn't leave: " + error.message);
+    if (error) return showWarn(oops("leave", error));
     toast(`Left ${c.name}`); circleAsk = null; circleId = null; crewView = "circles"; await loadAll(); };
   if ($("c-remove-yes")) $("c-remove-yes").onclick = async () => {
     const who = circleAsk; const { error } = await sb.rpc("remove_from_circle", { p_circle: c.id, p_user: who });
-    if (error) return showWarn("Couldn't remove: " + error.message);
+    if (error) return showWarn(oops("remove", error));
     toast(`Removed ${nameOf(who)}`); circleAsk = null; await loadAll(); };
   main().querySelectorAll("[data-remove]").forEach(b => b.onclick = e => { e.stopPropagation(); circleAsk = b.dataset.remove; render(); window.scrollTo(0,0); });
   main().querySelectorAll("[data-role]").forEach(b => b.onclick = async e => {
     e.stopPropagation(); const { error } = await sb.rpc("set_circle_role", { p_circle: c.id, p_user: b.dataset.role, p_role: b.dataset.to });
-    if (error) return showWarn(error.message.includes("at least one admin") ? "A circle needs at least one admin." : "Couldn't change that: " + error.message);
+    if (error) return showWarn(oops("change that", error));
     toast(b.dataset.to === "admin" ? `${nameOf(b.dataset.role)} is now an admin` : `${nameOf(b.dataset.role)} is no longer an admin`); await loadAll(); });
 }
 // Opening an invite link: "Join 🔥 Uni gym boys? 6 members"
@@ -2390,7 +2448,7 @@ function viewJoinCircle(){
   $("j-yes").onclick = async () => {
     $("j-yes").disabled = true;
     const { data, error } = await sb.rpc("join_circle", { p_code: j.code });
-    if (error){ $("j-yes").disabled = false; return showWarn("Couldn't join: " + error.message); }
+    if (error){ $("j-yes").disabled = false; return showWarn(oops("join", error)); }
     joinPreview = null; circleId = data; tab = "crew"; crewView = "circles"; toast(`Joined ${circleLabel(j)}`); await loadAll(); window.scrollTo(0,0); };
 }
 checkJoinLink();
@@ -2411,7 +2469,7 @@ async function budUp(id){
   const o = members.get(id); if (!o) return;
   o.iBud = o.private && o.theyBud !== "accepted" ? "pending" : "accepted"; render();   // they already bud you = no request needed
   const { error } = await sb.from("buds").insert({ follower: myId, followee: id });
-  if (error && error.code !== "23505"){ o.iBud = null; render(); return showWarn("Couldn't bud: " + error.message); }
+  if (error && error.code !== "23505"){ o.iBud = null; render(); return showWarn(oops("bud", error)); }
   toast(o.iBud === "pending" ? `Request sent to ${o.name}` : o.theyBud === "accepted" ? `You and ${o.name} are Buds 🤝` : `Spotting ${o.name}. Bud each other to become Buds`);
   loadAll();
 }
@@ -2420,7 +2478,7 @@ async function unBud(id, confirmed){
   if (!confirmed && o.iBud === "accepted"){ unbudAsk = id; render(); return; }      // ask once before unbudding
   unbudAsk = null; const was = o.iBud; o.iBud = null; render();
   const { error } = await sb.from("buds").delete().eq("follower", myId).eq("followee", id);
-  if (error){ o.iBud = was; render(); return showWarn("Couldn't undo: " + error.message); }
+  if (error){ o.iBud = was; render(); return showWarn(oops("undo", error)); }
   toast(was === "pending" ? "Request cancelled" : `Stopped spotting ${o.name}`); loadAll();
 }
 let unbudAsk = null;
@@ -2428,13 +2486,13 @@ async function answerRequest(id, accept){
   const o = members.get(id); if (o) o.theyBud = accept ? "accepted" : null; render();
   const { error } = accept ? await sb.rpc("accept_bud", { p_follower: id })
                            : await sb.from("buds").delete().eq("follower", id).eq("followee", myId);
-  if (error) return showWarn("Couldn't save that: " + error.message);
+  if (error) return showWarn(oops("save that", error));
   const r = members.get(id);
   toast(!accept ? "Request declined" : r && r.iBud === "accepted" ? `You and ${nameOf(id)} are Buds 🤝` : `${nameOf(id)} is now spotting you`); loadAll();
 }
 async function removeFollower(id){
   const { error } = await sb.from("buds").delete().eq("follower", id).eq("followee", myId);
-  if (error) return showWarn("Couldn't remove: " + error.message);
+  if (error) return showWarn(oops("remove", error));
   toast(`Removed ${nameOf(id)}`); loadAll();
 }
 function openProfile(id){ if (!members.has(id)) return; profileId = id; unbudAsk = null; render(); window.scrollTo(0,0); }
@@ -2756,7 +2814,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "49";   // bump together with version.json on every release
+const APP_VERSION = "50";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
