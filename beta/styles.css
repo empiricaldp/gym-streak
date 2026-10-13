@@ -1174,3 +1174,13 @@ button.hrow{cursor:pointer}
 .hamount.half input{font-size:44px}
 .hdel{align-self:center;color:var(--p-red)}
 @media (max-width:350px){ .hebig b.sign{font-size:44px} .hcal .hcalnum{font-size:54px} .htile b.sign{font-size:28px} .hamount input{font-size:44px} }
+
+/* Chats (b53): toolbar with Edit + new chat, delete in edit mode */
+.chtools{display:flex;align-items:center;justify-content:space-between;margin:-6px 0 2px}
+.chtool{border:0;background:none;color:var(--fg);font:700 16px var(--body);padding:10px 2px;min-height:44px;cursor:pointer}
+.chnew{width:44px;height:44px;margin-right:-8px;border:0;background:none;color:var(--fg);display:grid;place-items:center;cursor:pointer;border-radius:12px}
+.chnew svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.chnew:active{background:var(--card2)}
+.chdel{flex:none;padding:7px 12px;font-size:13px}
+.chip.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
+.ncnew .hplus{width:28px;height:28px}

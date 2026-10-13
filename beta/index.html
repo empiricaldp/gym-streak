@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="styles.css?v=b52">
+<link rel="stylesheet" href="styles.css?v=b53">
 </head>
 <body>
 <canvas id="fx" aria-hidden="true"></canvas>
@@ -52,11 +52,12 @@
 
 <!-- Supabase's official browser library, then our settings, then the app -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=b52"></script>
+<script src="config.js?v=b53"></script>
 <script>window.GYM_BETA = true;   // beta build: push notifications stay on the main app
 window.GYM_SAFETY = true;   // block + report (migration 027 applied 2026-10-13). GYM_DELETE stays off until 028 is approved.
-window.GYM_HEALTH = true;   // Health (b52): stays hidden by itself until migration 029 is applied</script>
-<script src="split.js?v=b52"></script>
-<script src="app.js?v=b52"></script>
+window.GYM_HEALTH = true;   // Health (b53): stays hidden by itself until migration 029 is applied
+window.GYM_CHATDEL = true;  // Chats (b53): new-chat button; delete chat / delete circle appear once migration 030 is applied</script>
+<script src="split.js?v=b53"></script>
+<script src="app.js?v=b53"></script>
 </body>
 </html>

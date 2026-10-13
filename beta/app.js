@@ -1510,7 +1510,7 @@ async function loadAll(){
         soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
         soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
         soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
-        soft(fetchAll("chat_reads", "chat,read_at")),
+        soft(CHATDEL ? fetchAll("chat_reads", "chat,read_at,cleared_at").then(r => { chatDelOk = true; return r; }, () => { chatDelOk = false; return fetchAll("chat_reads", "chat,read_at"); }) : fetchAll("chat_reads", "chat,read_at")),
         soft(fetchAll("freezes", "user_id,day")),
         soft(fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8))))),
         soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
@@ -1532,6 +1532,7 @@ async function loadAll(){
       if (msgRows){ const got = new Set(msgRows.map(m => m.id));
         messages = [...msgRows, ...messages.filter(m => !got.has(m.id) && (m.pending || m.failed || m.created_at > fetchedAt))]; }
       for (const r of readRows || []) if (!chatReads[r.chat] || r.read_at > chatReads[r.chat]) chatReads[r.chat] = r.read_at;
+      if (readRows) for (const r of readRows) if (r.cleared_at && (!chatCleared[r.chat] || r.cleared_at > chatCleared[r.chat])) chatCleared[r.chat] = r.cleared_at;
       if (freezeRows) for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
       else for (const [id, m] of next){ const old = members.get(id); if (old?.frozen) m.frozen = old.frozen; }
       // Reactions from the last week, nudges to/from me from the last 2 days
@@ -1643,6 +1644,9 @@ const DELETE_ON = WORKOUTS && !!window.GYM_DELETE;   // 'Delete my account' — 
 const HEALTH = WORKOUTS && !!window.GYM_HEALTH;
 let meals = [], hp = { goal: null, unit: "kcal", notify: false, at: "22:00" }, healthOk = false, healthView = null, healthBack = "today";
 let mealSheet = null, bodySheet = null;   // the "Add meal" sheet and the height / weight / goal sheet
+// Chats (b53): a new-chat button, delete a chat (just for you), admins delete a circle. Deleting needs migration 030.
+const CHATDEL = WORKOUTS && !!window.GYM_CHATDEL;
+let chatCleared = {}, chatDelOk = false, chatEdit = false, chatAsk = null, newChat = null;   // newChat = search text while picking who to message
 let workouts = [], plans = [], unit = "kg", woDay = null, woSaveT = null, woErr = null, woAdding = false, woDiscardAsk = false, woOpenEx = null;
 let woPlan = null;                                       // the plan being written: { label, exercises, then: "start"|"back"|"workout", day }
 const lc = s => String(s || "").trim().toLowerCase();
@@ -2610,18 +2614,20 @@ function wireGuide(){
 // A chat's key from MY side: "d:<their id>" for a 1-on-1, "c:<circle id>" for a circle (same keys as chat_reads).
 let messages = [], chatReads = {}, chatKey = null, chatDrafts = {}, tmpId = 0;
 const keyOfMsg = m => m.circle_id ? "c:" + m.circle_id : "d:" + (m.from_user === myId ? m.to_user : m.from_user);
-const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k && !(blockedIds.size && blockedIds.has(m.from_user))).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-const unreadIn = k => { const r = chatReads[k] || ""; return messages.filter(m => m.from_user !== myId && !m.pending && keyOfMsg(m) === k && m.created_at > r).length; };
+const gone = (m, k) => !!chatCleared[k] && !m.pending && m.created_at <= chatCleared[k];   // deleted (for me) before this point
+const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k && !gone(m, k) && !(blockedIds.size && blockedIds.has(m.from_user))).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+const unreadIn = k => { const r = chatReads[k] || ""; return messages.filter(m => m.from_user !== myId && !m.pending && keyOfMsg(m) === k && m.created_at > r && !gone(m, k)).length; };
 const chatTarget = k => k.startsWith("c:") ? { circle: circleOf(k.slice(2)) } : { person: members.get(k.slice(2)) };
 const chatName = k => { const t = chatTarget(k); return t.circle ? circleLabel(t.circle) : (t.person?.name || "Chat"); };
 const canSend = k => { const t = chatTarget(k); return t.circle ? !!t.circle : isMutual(t.person); };
 // Every chat I can see: all my circles, every Bud, plus old 1-on-1s (e.g. someone who isn't a Bud any more)
 function chatList(){
-  const keys = new Set([...circles.map(c => "c:" + c.id), ...[...members.values()].filter(o => o.id !== myId && isMutual(o)).map(o => "d:" + o.id)]);
+  // (b53: Buds you haven't messaged no longer fill the list — the new-chat button finds them, like WhatsApp)
+  const keys = new Set([...circles.map(c => "c:" + c.id), ...(CHATDEL ? [] : [...members.values()].filter(o => o.id !== myId && isMutual(o)).map(o => "d:" + o.id))]);
   // one pass over all messages (was: a filter + sort per chat, on every redraw)
   const sum = new Map();
   for (const m of messages){
-    const k = keyOfMsg(m); keys.add(k);
+    const k = keyOfMsg(m); if (gone(m, k)) continue; keys.add(k);
     const e = sum.get(k) || { last: null, unread: 0 }; sum.set(k, e);
     if (!e.last || m.created_at > e.last.created_at) e.last = m;
     if (m.from_user !== myId && !m.pending && m.created_at > (chatReads[k] || "")) e.unread++;
@@ -2648,6 +2654,7 @@ async function markRead(k){
   await sb.from("chat_reads").upsert({ user_id: myId, chat: k, read_at: last.created_at }, { onConflict: "user_id,chat" }).then(() => {}, () => {});
 }
 function openChat(k){
+  newChat = null; chatEdit = false; chatAsk = null;
   chatKey = k; profileId = null; circleId = null; circleMode = "view"; tab = "chats";
   try { localStorage.setItem("gs-tab", "chats"); } catch(e){}
   render();
@@ -2659,6 +2666,7 @@ document.addEventListener("click", e => {
 
 function viewChats(){
   $("title").textContent = "Chats";
+  if (CHATDEL) return viewChats2();
   const list = chatList();
   if (!list.length){
     main().innerHTML = `<div class="view"><div class="card"><b>No chats yet</b><p class="note" style="margin:6px 0 0">You can message your Buds (people you bud who bud you back) and chat in your circles. Find people in Crew → Everyone, or start a circle.</p></div></div>`;
@@ -3432,7 +3440,7 @@ function viewCircleNew(){
 function viewCircleAdd(c){
   $("title").textContent = "Add people";
   circleDraft = circleDraft || { picked: new Set() };
-  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; circleAsk = null; render(); })}
     <p class="note" style="margin:0">They'll be added straight in, like a WhatsApp group. They can leave any time.</p>
     ${pickerHtml(new Set(c.members.map(m => m.user_id)))}
     <button class="cta" id="c-add" disabled>Add</button></div>`;
@@ -3448,20 +3456,32 @@ function viewCircleAdd(c){
 function viewCircleEdit(c){
   $("title").textContent = "Edit circle";
   const d = circleDraft = circleDraft || { name: c.name, emoji: c.emoji };
-  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; circleAsk = null; render(); })}
     <div class="card ob"><span class="label">Name</span>
       <input class="field" id="c-name" maxlength="30" value="${esc(d.name)}" autocapitalize="words">
       <span class="label" style="margin-top:12px">Emoji</span>${emojiPicker(d.emoji)}
       <button class="cta" id="c-save" style="margin-top:12px">Save</button></div>
     <div class="card"><b>Invite link</b><p class="note">Resetting makes the old link stop working.</p>
-      <button class="cta ghost" id="c-reset" style="font-size:18px">Reset invite link</button></div></div>`;
+      <button class="cta ghost" id="c-reset" style="font-size:18px">Reset invite link</button></div>
+    ${CHATDEL && chatDelOk ? (circleAsk === "delete"
+      ? `<div class="card ask"><b>Delete ${esc(c.name)} for everyone?</b><p class="note">The circle and its chat are removed for all ${c.members.length} member${c.members.length === 1 ? "" : "s"}. This can't be undone.</p>
+          <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip danger" id="c-del-yes">Delete circle</button><button type="button" class="linkbtn" id="c-del-no">Keep it</button></span></div>`
+      : `<div class="card"><b>Delete circle</b><p class="note">Removes it for everyone, including its chat.</p><button class="cta ghost danger" id="c-del" style="font-size:18px">Delete circle</button></div>`) : ""}</div>`;
   const name = $("c-name");
   name.oninput = () => { d.name = name.value; $("c-save").disabled = !d.name.trim(); };
   main().querySelectorAll("[data-emoji]").forEach(b => b.onclick = () => { d.emoji = b.dataset.emoji; main().querySelectorAll("[data-emoji]").forEach(x => x.classList.toggle("on", x === b)); });
   $("c-save").onclick = async () => {
     const { error } = await sb.rpc("edit_circle", { p_circle: c.id, p_name: d.name.trim(), p_emoji: d.emoji });
     if (error) return showWarn(oops("save", error));
-    toast("Saved"); circleDraft = null; circleMode = "view"; await loadAll(); };
+    toast("Saved"); circleDraft = null; circleMode = "view"; circleAsk = null; await loadAll(); };
+  if ($("c-del")) $("c-del").onclick = () => { circleAsk = "delete"; render(); setTimeout(() => $("c-del-yes")?.scrollIntoView({ block: "center" }), 50); };
+  if ($("c-del-no")) $("c-del-no").onclick = () => { circleAsk = null; render(); };
+  if ($("c-del-yes")) $("c-del-yes").onclick = async () => {
+    const b = $("c-del-yes"); b.disabled = true; b.textContent = "Deleting…";
+    const { error } = await sb.rpc("delete_circle", { p_circle: c.id });
+    if (error){ b.disabled = false; b.textContent = "Delete circle"; return showWarn(oops("delete the circle", error)); }
+    circles = circles.filter(x => x.id !== c.id); messages = messages.filter(m => m.circle_id !== c.id);
+    toast(`Deleted ${c.name}`); circleAsk = null; circleDraft = null; circleMode = "view"; circleId = null; crewView = "circles"; render(); window.scrollTo(0, 0); loadAll(); };
   $("c-reset").onclick = async () => {
     const { error } = await sb.rpc("reset_invite", { p_circle: c.id });
     if (error) return showWarn(oops("reset", error));
@@ -3509,7 +3529,7 @@ function viewCircle(c){
     const { error } = await sb.rpc("mute_circle", { p_circle: c.id, p_muted: to });
     if (error){ if (mine) mine.muted = !to; render(); return showWarn(oops("change that", error)); }
     toast(to ? "Circle muted" : "Circle notifications on"); };
-  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
+  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleAsk = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
   if ($("c-addppl")) $("c-addppl").onclick = () => { circleDraft = { picked: new Set() }; circleMode = "add"; render(); window.scrollTo(0,0); };
   $("c-leave").onclick = () => { circleAsk = "leave"; render(); window.scrollTo(0,0); };
   if ($("c-ask-no")) $("c-ask-no").onclick = () => { circleAsk = null; render(); };
@@ -3907,7 +3927,7 @@ function render(){
 }
 let trophyBack = "you";
 { const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
-function setTab(t){ healthView = null; mealSheet = null; bodySheet = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ healthView = null; mealSheet = null; bodySheet = null; chatEdit = false; chatAsk = null; newChat = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -3942,7 +3962,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b52";   // bump together with version.json on every release
+const APP_VERSION = "b53";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4215,4 +4235,67 @@ function wireHealth2(){
     $("b-save").onclick = () => saveBody(false);
     $("b-clear")?.addEventListener("click", () => saveBody(true));
   }
+}
+
+
+// ================= Chats (b53): new chat, Edit → delete a chat, like WhatsApp =================
+const COMPOSE = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>';
+function chatRowHtml(k, last, unread, edit){
+  const t = chatTarget(k), o = t.person;
+  const av = t.circle ? circleBadge(t.circle) : `<span class="dot" style="${pc(o)}"></span>`;
+  const who = last ? (last.from_user === myId ? "You: " : t.circle ? nameOf(last.from_user) + ": " : "") : "";
+  const prev = last ? who + last.body : (t.circle ? "Say something to the circle" : "Say hi 👋");
+  const inner = `<span class="av">${av}</span><span class="grow" style="min-width:0"><span class="nm">${esc(t.circle ? t.circle.name : chatName(k))}</span><span class="prev ${unread ? "unread" : ""}">${esc(prev)}</span></span>`;
+  if (edit) return `<div class="li chatrow">${inner}${last ? `<button type="button" class="chip danger chdel" data-chatdel="${esc(k)}">${t.circle ? "Clear" : "Delete"}</button>` : `<span class="when"></span>`}</div>`;
+  return `<button type="button" class="li chatrow" data-openchat="${esc(k)}">${inner}<span class="when">${last ? esc(whenShort(last.created_at)) : ""}${unread ? `<span class="ucount">${unread}</span>` : ""}</span></button>`;
+}
+function viewChats2(){
+  if (newChat !== null) return viewNewChat();
+  const list = chatList(), canEdit = chatDelOk && list.some(c => c.last);
+  if (!canEdit) chatEdit = false;
+  const tools = `<div class="chtools">${canEdit ? `<button type="button" class="chtool" id="ch-edit">${chatEdit ? "Done" : "Edit"}</button>` : "<span></span>"}
+    <button type="button" class="chnew" id="ch-new" aria-label="New chat">${COMPOSE}</button></div>`;
+  let ask = "";
+  if (chatAsk){ const isC = chatAsk.startsWith("c:"), nm = esc(isC ? chatTarget(chatAsk).circle?.name || "the circle" : chatName(chatAsk));
+    ask = `<div class="card ask"><b>${isC ? `Clear the chat in ${nm}?` : `Delete your chat with ${nm}?`}</b>
+      <p class="note">${isC ? "Old messages are hidden for you. You stay in the circle." : `It's removed from your Chats. ${nm} still has their copy. If they message again, it comes back.`}</p>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip danger" id="ch-del-yes">${isC ? "Clear chat" : "Delete chat"}</button><button type="button" class="linkbtn" id="ch-del-no">Cancel</button></span></div>`; }
+  const body = list.length ? `<div class="list">${list.map(({ k, last, unread }) => chatRowHtml(k, last, unread, chatEdit)).join("")}</div>`
+    : `<div class="card"><b>No chats yet</b><p class="note" style="margin:6px 0 12px">Message your Buds (people you bud who bud you back) or chat in your circles.</p><button class="cta" id="ch-start">Start a chat</button></div>`;
+  main().innerHTML = `<div class="view">${tools}${ask}${body}</div>`;
+  $("ch-new").onclick = () => { newChat = ""; chatEdit = false; chatAsk = null; render(); window.scrollTo(0, 0); };
+  $("ch-start")?.addEventListener("click", () => { newChat = ""; render(); });
+  $("ch-edit")?.addEventListener("click", () => { chatEdit = !chatEdit; chatAsk = null; render(); });
+  main().querySelectorAll("[data-chatdel]").forEach(b => b.onclick = () => { chatAsk = b.dataset.chatdel; render(); window.scrollTo(0, 0); });
+  $("ch-del-no")?.addEventListener("click", () => { chatAsk = null; render(); });
+  $("ch-del-yes")?.addEventListener("click", () => deleteChat(chatAsk));
+}
+async function deleteChat(k){
+  const last = chatMsgs(k).filter(m => !m.pending).pop(); if (!last){ chatAsk = null; return render(); }
+  const before = chatCleared[k], at = last.created_at;              // the server's time of the newest message, so the phone's clock doesn't matter
+  chatCleared[k] = at; chatAsk = null; render();
+  const { error } = await sb.from("chat_reads").upsert({ user_id: myId, chat: k, read_at: at > (chatReads[k] || "") ? at : chatReads[k], cleared_at: at }, { onConflict: "user_id,chat" });
+  if (error){ if (before) chatCleared[k] = before; else delete chatCleared[k]; render(); return showWarn(oops("delete the chat", error)); }
+  if (at > (chatReads[k] || "")) chatReads[k] = at;
+  updateChatBadge(); toast(k.startsWith("c:") ? "Chat cleared" : "Chat deleted");
+}
+function viewNewChat(){
+  $("title").textContent = "New chat";
+  main().innerHTML = `<div class="view"><button type="button" class="linkbtn pfback" id="nc-back">‹ Chats</button>
+    <input class="field" id="nc-q" type="search" placeholder="Search your Buds and circles" autocomplete="off" value="${esc(newChat)}" aria-label="Search">
+    <button type="button" class="li chatrow ncnew" id="nc-circle"><span class="av"><span class="hplus">${'<svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 1v10M1 6h10"/></svg>'}</span></span><span class="grow"><span class="nm">New circle</span><span class="prev">A group chat with its own leaderboard</span></span></button>
+    <div id="nc-list"></div></div>`;
+  const paint = () => {
+    const q = (newChat || "").trim().toLowerCase(), hit = n => !q || String(n).toLowerCase().includes(q);
+    const buds = [...members.values()].filter(o => o.id !== myId && isMutual(o) && !(blockedIds.size && blockedIds.has(o.id)) && hit(o.name)).sort((a, b) => a.name.localeCompare(b.name));
+    const cs = circles.filter(c => hit(c.name)).sort((a, b) => a.name.localeCompare(b.name));
+    const row = (k, av, nm, sub) => `<button type="button" class="li chatrow" data-openchat="${esc(k)}"><span class="av">${av}</span><span class="grow" style="min-width:0"><span class="nm">${esc(nm)}</span>${sub ? `<span class="prev">${esc(sub)}</span>` : ""}</span></button>`;
+    $("nc-list").innerHTML = (buds.length ? `<div class="sec"><h2 class="sign">Buds</h2><span class="label">${buds.length}</span></div><div class="list">${buds.map(o => row("d:" + o.id, `<span class="dot" style="${pc(o)}"></span>`, o.name, "")).join("")}</div>` : "")
+      + (cs.length ? `<div class="sec"><h2 class="sign">Circles</h2><span class="label">${cs.length}</span></div><div class="list">${cs.map(c => row("c:" + c.id, circleBadge(c), c.name, `${c.members.length} members`)).join("")}</div>` : "")
+      + (!buds.length && !cs.length ? `<p class="note" style="text-align:center;margin-top:16px">${q ? "No matches." : "No Buds yet. You can message people who bud you back. Find people in Crew → Everyone."}</p>` : "");
+  };
+  paint();
+  $("nc-q").oninput = e => { newChat = e.target.value; paint(); };
+  $("nc-back").onclick = () => { newChat = null; render(); window.scrollTo(0, 0); };
+  $("nc-circle").onclick = () => { newChat = null; setTab("crew"); crewView = "circles"; circleMode = "new"; circleDraft = null; render(); window.scrollTo(0, 0); };
 }
