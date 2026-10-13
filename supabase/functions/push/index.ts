@@ -127,8 +127,9 @@ async function send(userIds: string[], note: Note){
 // ---------- dates + streak maths (same rules as the app: rest days skipped, freezes keep it alive, today isn't over yet) ----------
 const addDays = (d: string, n: number) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const dowOf = (d: string) => (new Date(d + "T00:00:00Z").getUTCDay() + 6) % 7;      // Mon = 0
-type Ctx = { id: string; name: string; plan: any[]; since: string; track_start: string; tz?: string; days: Set<string>; frozen: Set<string> };
-const slotOf = (m: Ctx, d: string) => (m.plan || [])[dowOf(d)] || null;
+type Ctx = { id: string; name: string; plan: any[]; since: string; track_start: string; tz?: string; days: Set<string>; frozen: Set<string>; swaps?: Map<string, string> };
+// A one-day swap ("Push instead of Pull, just today") wins over the split for that date
+const slotOf = (m: Ctx, d: string) => { const sw = m.swaps?.get(d); return sw ? { w: sw, opt: false } : (m.plan || [])[dowOf(d)] || null; };
 const gymDay = (m: Ctx, d: string) => { const s = slotOf(m, d); return !!s && !s.opt; };
 const hasDay = (m: Ctx, d: string) => m.days.has(d) || (d < m.track_start && d >= m.since && gymDay(m, d));
 function streak(m: Ctx){
@@ -145,14 +146,16 @@ function streak(m: Ctx){
 async function contexts(ids: string[]): Promise<Map<string, Ctx>> {
   const out = new Map<string, Ctx>(); if (!ids.length) return out;
   const from = addDays(sydneyDay(), -801);
-  const [ps, cs, fs] = await Promise.all([
+  const [ps, cs, fs, ss] = await Promise.all([
     rest(`profiles?select=id,name,plan,since,track_start,tz&id=${inList(ids)}`),
     Promise.all(ids.map(id => rest(`checkins?select=user_id,day&user_id=eq.${id}&day=gte.${from}&order=day.desc&limit=1000`))).then(x => x.flat()),
     rest(`freezes?select=user_id,day&user_id=${inList(ids)}&day=gte.${from}`),
+    rest(`day_swaps?select=user_id,day,label&user_id=${inList(ids)}&day=gte.${from}`).catch(() => []),
   ]);
-  for (const p of ps) out.set(p.id, { ...p, days: new Set(), frozen: new Set() });
+  for (const p of ps) out.set(p.id, { ...p, days: new Set(), frozen: new Set(), swaps: new Map() });
   for (const c of cs) out.get(c.user_id)?.days.add(c.day);
   for (const f of fs) out.get(f.user_id)?.frozen.add(f.day);
+  for (const x of ss || []) out.get(x.user_id)?.swaps!.set(x.day, x.label);
   return out;
 }
 const dayWord = (d: string, tz?: string) => d === dayIn(tz) ? "today" : d === addDays(dayIn(tz), -1) ? "yesterday"

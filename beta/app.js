@@ -41,7 +41,8 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 
 // ================= Member maths =================
 // A member doc: {name, plate, plan:[{w,opt}|null x7], since, trackStart, days:{date:1}}
-const slot = (m,d) => (m.plan||[])[dow(d)] || null;
+let swaps = new Map();   // one-day swaps: "userId|2026-10-13" → "Push" (beta). Your split stays as it is.
+const slot = (m,d) => { const sw = m && swaps.size && swaps.get(m.id + "|" + key(d)); return sw ? { w: sw, opt: false, swapped: true } : (m.plan||[])[dow(d)] || null; };
 const isGym = (m,d) => { const s = slot(m,d); return !!s && !s.opt; };
 const credited = (m,d) => d < parse(m.trackStart) && d >= parse(m.since) && isGym(m,d);
 const ticked = (m,d) => !!(m.days && m.days[key(d)]);
@@ -490,7 +491,7 @@ function viewTrophies(){
     const w = weekStats(m,s);
     hist += `<div class="li hist"><span>Week of ${fmt(s)}</span><span class="mono">${w.hit}/${w.target}</span><span class="status ${w.hit>=w.target?"done":"todo"}">${w.hit>=w.target?"Hit":"Missed"}</span></div>`;
   }
-  main().innerHTML = `<div class="view">
+  main().innerHTML = `<div class="view">${WORKOUTS ? `<button type="button" class="linkbtn pfback" id="tp-back">‹ Back</button>` : ""}
     <div class="chips" role="group" aria-label="Whose trophies">${list.map(o=>`<button class="chip" data-tp="${esc(o.id)}" aria-pressed="${o.id===m.id}" style="${pc(o)}"><span class="dot"></span>${esc(o.name)}</button>`).join("")}</div>
     ${m.id === myId ? `<div class="sec" style="margin-top:4px"><h2 class="sign">Weekly recap</h2></div>${recapCard(m)}<div class="sec"><h2 class="sign">Trophies</h2></div>` : ""}
     <div class="whero" style="${pc(m)}"><span class="ring"></span><span class="label">${esc(m.name)} is on</span>
@@ -504,6 +505,7 @@ function viewTrophies(){
     <div class="list">${hist || `<div class="li"><span class="note">The first finished week lands here next Monday.</span></div>`}</div></div>`;
   main().querySelectorAll("[data-tp]").forEach(b => b.onclick = () => { trophyFor = b.dataset.tp; render(); });
   if (m.id === myId) wireRecap(m);
+  if ($("tp-back")) $("tp-back").onclick = () => setTab(TITLES[trophyBack] ? trophyBack : "you");
 }
 
 function viewYou(){
@@ -1413,7 +1415,7 @@ async function loadAll(){
       // keep what we had instead of treating it as "empty" (that kicked people out of circles and caused false banners).
       const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
       const soft = p => p.then(v => v, () => null);           // null = this part failed
-      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows, planRows] = await Promise.all([
+      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows, planRows, swapRows] = await Promise.all([
         soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
         soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
         soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
@@ -1425,7 +1427,8 @@ async function loadAll(){
         sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz" + (WORKOUTS ? ",weight_unit" : "")).eq("id", myId).maybeSingle(),
         soft(fetchAll("bodyweight", "day,kg", q => q.order("day"))),
         WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at", q => q.gte("day", key(addDays(today(), -120))))) : null,
-        WORKOUTS ? soft(fetchAll("workout_plans", "label,exercises,updated_at")) : null]);
+        WORKOUTS ? soft(fetchAll("workout_plans", "label,exercises,updated_at")) : null,
+        WORKOUTS ? soft(fetchAll("day_swaps", "user_id,day,label", q => q.gte("day", key(addDays(today(), -60))))) : null]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
       failed = new Set();
       // Circles I'm in (the database only returns those) and their members
@@ -1461,6 +1464,7 @@ async function loadAll(){
         for (const l of local){ const srv = woRows.find(r => r.user_id === myId && r.day === l.day); if (srv && srv.finished_at && !l.finished_at) l.finished_at = srv.finished_at; }
         workouts = [...woRows.filter(r => !local.some(l => l.user_id === r.user_id && l.day === r.day)), ...local]; }
       if (planRows) plans = planRows;
+      if (swapRows) swaps = new Map(swapRows.map(r => [r.user_id + "|" + r.day, r.label]));
       if (WORKOUTS && mine.data?.weight_unit) unit = mine.data.weight_unit;
       // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
@@ -1489,6 +1493,7 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"circles" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"circle_members" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"messages" }, onMessageLive);
+  if (WORKOUTS) channel.on("postgres_changes", { event:"*", schema:"public", table:"day_swaps" }, p => { if ((p.new?.user_id || p.old?.user_id) !== myId) reloadSoon(); });
   if (WORKOUTS) channel.on("postgres_changes", { event:"*", schema:"public", table:"workouts" }, p => { if ((p.new?.user_id || p.old?.user_id) !== myId) reloadSoon(); });
   channel.subscribe();
 }
@@ -1787,7 +1792,7 @@ function woProfileHtml(o, inYou){
   if (!WORKOUTS || !o) return "";
   const self = o.id === myId; if (!self && !isMutual(o)) return "";
   let out = "";
-  if (self && inYou){
+  if (self && inYou && false){                       // moved to the Split tab
     const labels = [...new Set([...(o.plan || []).filter(s => s && s.w).map(s => s.w), ...plans.map(p => p.label)])];
     if (labels.length) out += `<div class="sec"><h2 class="sign">Workout plans</h2><span class="label">Only you</span></div>
       <div class="list">${labels.map(l => { const p = planFor(l);
@@ -1801,6 +1806,165 @@ function woProfileHtml(o, inYou){
   return out + `<div class="sec"><h2 class="sign">Workouts</h2><span class="label">${self ? "You + your Buds see this" : "Buds only"}</span></div>
     <div class="card wolist">${list.map(w => `<div class="wolog"><div class="wologhead"><b>${esc(w.label || "Workout")}</b><span class="note">${when(w.day)}${w.finished_at ? "" : " · in progress"}</span></div>
       ${woDone(w).map(e => `<div class="wologex"><span>${esc(e.name)}</span><span class="mono note">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>`).join("")}</div>`;
+}
+
+// ================= Split tab (beta) =================
+// Your week, simplest first: just the days. Tap a day to see it; details are optional ("+ Add details").
+// Today opens by itself and moves on at midnight. "Change" swaps a day: just today (a one-off, saved as a
+// day_swap) or every week (your split changes). Start workout sits at the bottom. The ⓘ replays a 3-step guide.
+let splitOpen = null, splitOpenDay = null, chg = null, guideStep = -1, lastDayKey = null;
+const splitLabels = m => [...new Set([...(m.plan || []).filter(s => s && s.w).map(s => s.w), ...plans.map(p => p.label)])];
+const planLabel = (m, d) => { const s = (m.plan || [])[dow(d)]; return s ? (s.w || "Gym day") : null; };   // the split, ignoring swaps
+// Real time: when the date changes (midnight, or opening the app the next morning), redraw so "today" moves on
+setInterval(() => { const k = key(today()); if (lastDayKey && k !== lastDayKey && ready && session) renderSoft(); lastDayKey = k; }, 30000);
+
+function splitDayHtml(m, d, tk){
+  const k = key(d), s = slot(m, d), isT = k === tk, past = k < tk, done = ticked(m, d), open = splitOpen === k;
+  const swapped = swaps.has(myId + "|" + k), lab = s ? (s.w || "Gym day") : "Rest", rest = !s;
+  const tag = swapped ? `<span class="swaptag">${isT ? "swapped today" : "swapped"}</span>` : s?.opt ? `<span class="swaptag opt">optional</span>` : "";
+  const right = done ? `<span class="sdot"></span>` : isT ? `<span class="spill">Today</span>` : open || rest ? "" : `<span class="schev">›</span>`;
+  const head = `<button type="button" class="sdhead" data-sday="${k}" aria-expanded="${open}"><span class="sdn">${DAYS[dow(d)]}</span><span class="slab">${esc(lab)}${tag}</span>${right}</button>`;
+  if (!open) return `<div class="sday${isT ? " today" : ""}${rest ? " rest" : ""}${done ? " done" : ""}">${head}</div>`;
+  const chgBtn = past ? "" : `<button type="button" class="schg" data-chg="${k}">Change</button>`;
+  let body = "";
+  const w = myWo(k);
+  if (past && w && woDone(w).length) body = woDone(w).map(e => `<div class="sex"><span>${esc(e.name)}</span><span>${esc(fmtSets(e.sets))}</span></div>`).join("");
+  else if (rest) body = `<p class="note" style="margin:0">Rest day.${past ? "" : " Training anyway? Tap Change."}</p>`;
+  else { const p = planFor(lab);
+    body = p ? p.exercises.map(e => `<div class="sex"><span>${esc(e.name)}</span><span>${esc(fmtSets(e.sets))}</span></div>`).join("") +
+               `<button type="button" class="linkbtn slink" data-editplan="${esc(lab)}">Edit details</button>`
+             : `<div class="ssoft"><b>Just “${esc(lab)}” is fine.</b><span class="note">Want more? Write the exercises, sets and weights once and they're ready every time.</span>
+                <button type="button" class="cta ghost ssm" data-editplan="${esc(lab)}">+ Add details</button></div>`; }
+  if (swapped && !past) body += `<button type="button" class="linkbtn slink" data-unswap="${k}">Undo swap (back to ${esc(planLabel(m, d) || "Rest")})</button>`;
+  return `<div class="sday open${isT ? " today" : ""}${done ? " done" : ""}"><div class="sdheadrow">${head}${chgBtn}</div><div class="sbody">${body}</div></div>`;
+}
+function splitGoHtml(m, t){
+  if (m.watcher || !slot(m, t)) return "";
+  const w = myWo(key(t)), lab = slot(m, t)?.w || "Gym day";
+  const txt = w && !w.finished_at ? `Continue workout${w.exercises.length ? ` · ${woDone(w).length}/${w.exercises.length}` : ""}`
+    : w && woDone(w).length ? "See today's workout" : `🏋️ Start ${lab} workout`;
+  return `<div class="splitgo"><button class="cta" id="split-go">${esc(txt)}</button></div>`;
+}
+function viewSplit(){
+  const m = me(); if (!m) return viewJoin();
+  const t = today(), tk = key(t), ws = startOfWeek(t);
+  if (splitOpenDay !== tk){ splitOpen = tk; splitOpenDay = tk; }               // today opens by itself, and moves on at midnight
+  try { document.documentElement.style.setProperty("--tabh", ($("tabbar").offsetHeight || 70) + "px"); } catch(_){}
+  const info = `<div class="shead"><span class="label">Week of ${fmt(ws)}</span><button type="button" class="sinfo" id="split-info" aria-label="How Split works">i</button></div>`;
+  if (m.watcher){
+    main().innerHTML = `<div class="view">${info}<div class="card"><b>👀 You're here to watch</b><p class="note" style="margin:6px 0 12px">No split needed. If you start training, set one up and it lives here.</p>
+      <button class="cta" id="split-start">Start training</button></div></div>`;
+    $("split-start").onclick = () => startOnboarding(true, "split"); $("split-info").onclick = () => { guideStep = 0; render(); }; return;
+  }
+  const days = Array.from({ length: 7 }, (_, i) => splitDayHtml(m, addDays(ws, i), tk)).join("");
+  const go = splitGoHtml(m, t);
+  main().innerHTML = `<div class="view split${go ? " hasgo" : ""}" style="${pc(m)}">${info}<div class="sweek">${days}</div>
+    <button type="button" class="cta ghost ssm" id="split-edit">✏️ Edit split</button>
+    <p class="note" style="text-align:center">Tap a day to see it. Details are optional.</p>${go}${chgSheetHtml(m)}${guideHtml()}</div>`;
+  main().querySelectorAll("[data-sday]").forEach(b => b.onclick = () => { const k = b.dataset.sday; splitOpen = splitOpen === k ? null : k; render(); });
+  main().querySelectorAll("[data-editplan]").forEach(b => b.onclick = () => editPlan(b.dataset.editplan, "back"));
+  main().querySelectorAll("[data-chg]").forEach(b => b.onclick = () => openChange(b.dataset.chg));
+  main().querySelectorAll("[data-unswap]").forEach(b => b.onclick = () => unswap(b.dataset.unswap));
+  $("split-edit").onclick = () => startOnboarding(true, "split");
+  $("split-info").onclick = () => { guideStep = 0; render(); };
+  if ($("split-go")) $("split-go").onclick = () => startWorkout(t);
+  wireChgSheet(m); wireGuide();
+  // First time here: show the guide once by itself
+  if (guideStep < 0){ let seen = true; try { seen = !!localStorage.getItem("gs-split-guide-" + myId); } catch(_){}
+    if (!seen){ try { localStorage.setItem("gs-split-guide-" + myId, "1"); } catch(_){} guideStep = 0; render(); } }
+}
+
+// ---- Change a day ----
+function openChange(k){
+  const d = parse(k), isT = k === key(today());
+  chg = { k, scope: isT ? "day" : "every", label: null, custom: false }; render();
+}
+function chgSheetHtml(m){
+  if (!chg) return "";
+  const d = parse(chg.k), isT = chg.k === key(today()), cur = slot(m, d), curLab = cur ? (cur.w || "Gym day") : "Rest";
+  const dayName = DAYS_LONG[dow(d)], restNow = !planLabel(m, d);
+  const opts = splitLabels(m).filter(l => lc(l) !== lc(curLab));
+  if (chg.scope === "every" && curLab !== "Rest") opts.push("Rest");
+  if (chg.label && !opts.includes(chg.label) && !chg.custom) chg.label = null;
+  const pick = chg.label;
+  const scopeDay = isT ? "Just today" : `Just this ${dayName}`;
+  const note = chg.scope === "day"
+    ? `${isT ? "Just today" : "Just this " + dayName}: ${esc(planLabel(m, d) || "Rest")} is back next week. Your split doesn't change.${pick && pick !== "Rest" ? ` ${esc(pick)}'s details come with it.` : ""}`
+    : `Every ${dayName} becomes ${esc(pick || "…")} in your split.`;
+  const go = !pick ? "Pick one" : chg.scope === "day" ? `Swap to ${pick}` : `Every ${dayName}: ${pick}`;
+  return `<div class="chgwrap" id="chgwrap"><div class="chgdim" data-chgclose></div><div class="chgsheet" role="dialog" aria-label="Change ${dayName}">
+    <div class="grab"></div><span class="label">${dayName} · was ${esc(curLab)}</span>
+    <h3 class="sign chgtitle">Change to</h3>
+    <div class="chgchips">${opts.map(l => `<button type="button" class="chip${pick === l && !chg.custom ? " on" : ""}" data-chgpick="${esc(l)}">${esc(l)}</button>`).join("")}
+      <button type="button" class="chip add${chg.custom ? " on" : ""}" data-chgcustom>+ Something else</button></div>
+    ${chg.custom ? `<input id="chg-custom" class="woin" placeholder="e.g. Arms, Cardio, Chest + Back" maxlength="40" value="${esc(pick || "")}" autocomplete="off" enterkeyhint="done">` : ""}
+    <div class="chgscope" role="group"><button type="button" class="${chg.scope === "day" ? "on" : ""}" data-chgscope="day">${scopeDay}</button><button type="button" class="${chg.scope === "every" ? "on" : ""}" data-chgscope="every">Every ${dayName}</button></div>
+    <p class="note chgnote">${note}${restNow && chg.scope === "day" ? " Training on a rest day counts as a bonus." : ""}</p>
+    <button class="cta" id="chg-go" ${pick ? "" : "disabled"}>${esc(go)}</button>
+    <button type="button" class="linkbtn" data-chgclose style="align-self:center">Cancel</button></div></div>`;
+}
+function wireChgSheet(m){
+  if (!chg) return;
+  main().querySelectorAll("[data-chgclose]").forEach(b => b.onclick = () => { chg = null; render(); });
+  main().querySelectorAll("[data-chgpick]").forEach(b => b.onclick = () => { chg.label = b.dataset.chgpick; chg.custom = false; render(); });
+  main().querySelectorAll("[data-chgscope]").forEach(b => b.onclick = () => { chg.scope = b.dataset.chgscope; if (chg.scope === "day" && chg.label === "Rest") chg.label = null; render(); });
+  const c = main().querySelector("[data-chgcustom]"); if (c) c.onclick = () => { chg.custom = true; chg.label = null; render(); $("chg-custom")?.focus(); };
+  const f = $("chg-custom");
+  if (f){ f.oninput = () => { const v = normalizeWorkout(f.value) || f.value.trim(); chg.label = v || null; const g = $("chg-go"); g.disabled = !v;
+      g.textContent = !v ? "Pick one" : chg.scope === "day" ? `Swap to ${v}` : `Every ${DAYS_LONG[dow(parse(chg.k))]}: ${v}`; };
+    f.onkeydown = ev => { if (ev.key === "Enter" && chg.label){ ev.preventDefault(); applyChange(); } }; }
+  $("chg-go").onclick = applyChange;
+}
+async function applyChange(){
+  const m = me(); if (!m || !chg || !chg.label) return;
+  const { k, scope } = chg, label = String(chg.label).trim().slice(0, 40), d = parse(k), dayName = DAYS_LONG[dow(d)], isT = k === key(today());
+  const btn = $("chg-go"); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  // An untouched workout for that day was for the old plan: drop it so Start opens the new one
+  const w = myWo(k); if (w && !w.finished_at && !woDone(w).length){ workouts = workouts.filter(x => x !== w); sb.from("workouts").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); }
+  let error;
+  if (scope === "day"){
+    if (lc(label) === lc(planLabel(m, d) || "")) ({ error } = await sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k));   // same as the split = no swap
+    else ({ error } = await sb.from("day_swaps").upsert({ user_id: myId, day: k, label }, { onConflict: "user_id,day" }));
+    if (!error){ if (lc(label) === lc(planLabel(m, d) || "")) swaps.delete(myId + "|" + k); else swaps.set(myId + "|" + k, label); }
+  } else {
+    const plan = [...(m.plan || [null, null, null, null, null, null, null])], i = dow(d), old = plan[i];
+    plan[i] = label === "Rest" ? null : { w: normalizeWorkout(label) || label, opt: !!old?.opt };
+    ({ error } = await sb.from("profiles").update({ plan }).eq("id", myId));
+    if (!error){ members.set(myId, { ...m, plan });
+      if (swaps.has(myId + "|" + k)){ swaps.delete(myId + "|" + k); sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); } }
+  }
+  if (error){ if (btn){ btn.disabled = false; btn.textContent = "Try again"; } return showWarn(oops("change that day", error)); }
+  chg = null; splitOpen = k; render();
+  toast(scope === "day" ? `${isT ? "Today" : dayName}: ${label}` : `Every ${dayName} is now ${label}`);
+}
+async function unswap(k){
+  const had = swaps.get(myId + "|" + k); swaps.delete(myId + "|" + k); render();
+  const { error } = await sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k);
+  if (error){ swaps.set(myId + "|" + k, had); render(); return showWarn(oops("undo the swap", error)); }
+  toast("Back to your split");
+}
+
+// ---- The ⓘ guide: 3 short slides ----
+const GUIDE = [
+  ["Your week", "This is your split. That's all you need. Today opens by itself.", "week"],
+  ["Details are optional", "Tap a day, then + Add details to write your exercises, sets and weights once. Skip it if you just want to show up.", "details"],
+  ["At the gym", "Tap Start workout at the bottom and tick ✓ as you go. Your crew hears once, when you finish. Doing something else today? Tap Change.", "gym"]];
+function guideHtml(){
+  if (guideStep < 0) return "";
+  const [h, p, art] = GUIDE[guideStep], last = guideStep === GUIDE.length - 1;
+  const ill = art === "week" ? `<div class="gmini"><span>Mon</span>Push</div><div class="gmini hl"><span>Tue</span>Pull<i>TODAY</i></div><div class="gmini"><span>Wed</span>Legs</div>`
+    : art === "details" ? `<div class="gmini hl"><span>Wed</span>Legs</div><div class="gsoft">Just “Legs” is fine.<b>+ Add details</b></div>`
+    : `<div class="gmini done"><span>✓</span>Lat pulldown<em>3×10</em></div><div class="gmini"><span>○</span>Barbell row<em>3×8</em></div><div class="gbtn">Finish workout</div>`;
+  return `<div class="chgwrap"><div class="chgdim" data-gclose></div><div class="chgsheet guide" role="dialog" aria-label="How Split works">
+    <div class="grab"></div><span class="label">How Split works · ${guideStep + 1} of ${GUIDE.length}</span>
+    <h3 class="sign chgtitle">${h}</h3><div class="gill">${ill}</div><p class="gtext">${p}</p>
+    <div class="gdots">${GUIDE.map((_, i) => `<i class="${i === guideStep ? "on" : ""}"></i>`).join("")}</div>
+    <button class="cta" id="g-next">${last ? "Got it" : "Next"}</button>${last ? "" : `<button type="button" class="linkbtn" data-gclose style="align-self:center">Skip</button>`}</div></div>`;
+}
+function wireGuide(){
+  if (guideStep < 0) return;
+  main().querySelectorAll("[data-gclose]").forEach(b => b.onclick = () => { guideStep = -1; render(); });
+  $("g-next").onclick = () => { guideStep = guideStep >= GUIDE.length - 1 ? -1 : guideStep + 1; render(); };
 }
 
 // ================= Chats =================
@@ -2092,7 +2256,7 @@ async function loadMemberCount(){
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay && !woPlan;
+  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay && !woPlan && !(tab === "split" && !profileId && !circleId && !chatKey);
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
@@ -2849,8 +3013,8 @@ function viewProfile(inYou){
     ${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
     ${woProfileHtml(o, inYou)}
-    <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
-    ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}`}</div>`;
+    ${WORKOUTS && inYou ? "" : `<div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
+    ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}`}`}</div>`;
   if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
   main().querySelectorAll("[data-editplan]").forEach(b => b.onclick = () => editPlan(b.dataset.editplan, "back"));
   if ($("pf-trophies")) $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
@@ -2958,7 +3122,8 @@ function viewWhatsNew(){
 }
 
 // ================= Shell =================
-const TITLES = {today:"Today",crew:"Crew",chats:"Chats",trophies:"Trophies",you:"You"};
+// Beta: Trophies leaves the tab bar (it opens from your profile); Split takes its place
+const TITLES = WORKOUTS ? {today:"Today",crew:"Crew",chats:"Chats",split:"Split",you:"You"} : {today:"Today",crew:"Crew",chats:"Chats",trophies:"Trophies",you:"You"};
 // iPhone Home Screen apps: if a text box still has the keyboard up when the screen is redrawn, iOS drops the keyboard
 // but leaves the page pushed up, so the bottom bar floats mid-screen. Close the keyboard first, then nudge iOS back.
 function settleKeyboard(){ const ae = document.activeElement; if (ae && ae.matches && ae.matches("input, textarea") && $("main").contains(ae)) ae.blur(); }
@@ -3063,11 +3228,14 @@ function render(){
   if (joinPreview || (pendingJoin && me())) return viewJoinCircle();
   if (circleId || circleMode === "new") return viewCircleRoute();
   $("title").textContent = TITLES[tab];
-  ({today:viewToday,crew:viewCrew,chats:viewChats,trophies:viewTrophies,you:viewYou})[tab]();
+  if (!TITLES[tab] && tab !== "trophies") tab = "today";
+  $("title").textContent = TITLES[tab] || "Trophies";
+  ({today:viewToday,crew:viewCrew,chats:viewChats,trophies:viewTrophies,split:viewSplit,you:viewYou})[tab]();
   pinBottom();
   maybeShowPushSheet();
 }
-function setTab(t){ woPlan = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+let trophyBack = "you";
+function setTab(t){ if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -3088,7 +3256,7 @@ let sb = null, session = null, authKnown = false;
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
     if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
-      loadGen++; workouts = []; plans = []; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      loadGen++; workouts = []; plans = []; swaps = new Map(); splitOpenDay = null; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
       messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
       document.documentElement.classList.remove("chat-open");
     }
@@ -3102,7 +3270,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b37";   // bump together with version.json on every release
+const APP_VERSION = "b38";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
