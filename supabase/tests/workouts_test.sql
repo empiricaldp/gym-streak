@@ -53,7 +53,10 @@ begin
   perform public.finish_stale_workouts();
   out := out || E'\n12 yesterday''s unfinished workout → logged on yesterday: ' || case when exists (select 1 from checkins where user_id = c and day = t - 1) then 'PASS' else 'FAIL' end;
   -- once finished, stays finished (can't be "un-finished" to re-trigger)
+  update public.workouts set label = 'Push' where user_id = a and day = t;
+  out := out || E'\n13 a normal save keeps it finished: ' || case when (select finished_at from workouts where user_id = a and day = t) is not null then 'PASS' else 'FAIL' end;
+  update public.workouts set duration_s = 3000 where user_id = a and day = t;
   update public.workouts set finished_at = null where user_id = a and day = t;
-  out := out || E'\n13 finished stays finished: ' || case when (select finished_at from workouts where user_id = a and day = t) is not null then 'PASS' else 'FAIL' end;
+  out := out || E'\n14 undo the log → reopened, length cleared: ' || case when (select finished_at is null and duration_s is null from workouts where user_id = a and day = t) then 'PASS' else 'FAIL' end;
   raise exception 'TESTS:%', out;
 end $$;
