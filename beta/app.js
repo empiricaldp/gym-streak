@@ -3807,8 +3807,14 @@ function viewWhatsNew(){
       <div class="wnstage" key="${wnStep}"><div class="wnart">${art}</div><div class="wntext">${text}</div></div>
       <button class="cta wngo" id="wn-next">${wnStep === 1 ? "Show me" : wnStep === PRIV - 1 ? "Got it" : "Next"}</button></div>`;
     // the big title always fits on one line per word (shrinks if a word is too wide, e.g. before the font loads)
+    // b54: every feature screen uses the SAME size — the size the longest word on any of them needs — so the titles don't jump around
     const fit = () => { const h = $("wn")?.querySelector(".wnbig"); if (!h) return; h.style.fontSize = "";
-      let fs = parseFloat(getComputedStyle(h).fontSize); while (h.scrollWidth > h.clientWidth + 1 && fs > 34){ fs -= 3; h.style.fontSize = fs + "px"; } };
+      const words = wnStep === 1 ? [h.innerHTML] : FEATS.map(f => f[1]);
+      const probe = h.cloneNode(false); probe.style.cssText = "position:absolute;visibility:hidden;width:" + h.clientWidth + "px"; h.parentNode.appendChild(probe);
+      let fs = parseFloat(getComputedStyle(h).fontSize);
+      const tooWide = () => words.some(w => { probe.innerHTML = w; return probe.scrollWidth > probe.clientWidth + 1; });
+      probe.style.fontSize = fs + "px"; while (tooWide() && fs > 34){ fs -= 3; probe.style.fontSize = fs + "px"; }
+      probe.remove(); h.style.fontSize = fs + "px"; };
     fit(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
     $("wn-next").onclick = () => { if (wnShort && wnStep === PRIV - 1) return finishShortTour(); wnStep++; render(); window.scrollTo(0,0); };
     if ($("wn-skip")) $("wn-skip").onclick = () => { if (wnShort) return finishShortTour(); wnStep = PRIV; render(); window.scrollTo(0,0); };
