@@ -18,7 +18,7 @@ Rule: **one change at a time, DP approves each database change separately, and e
 | 027 | Block + report | **Live 2026-10-13** (test 29/29 on prod; rollback: supabase/rollback/027_rollback.sql, exact pre-027 definitions) | `GYM_SAFETY` flag, then deploy push function's block filter |
 | 028 | Delete my account | Ready, waiting | `GYM_DELETE` flag |
 | 029 | Health: meals + calories, nightly total | **Live 2026-10-13** (test 22/22 on prod; push function with nightly total deployed 23:35, cron run 200 OK; rollback: supabase/rollback/029_rollback.sql — deletes logged meals) | `GYM_HEALTH` flag (on in b52; heart stays hidden until 029 is live), then deploy push function (nightly total; tolerates 029 missing; previous version saved in supabase/rollback/push_index_before_meals.ts) |
-| 030 | Delete chat (for me) + admins delete circle | Ready, waiting (local test 11/11; rollback: supabase/rollback/030_rollback.sql) | `GYM_CHATDEL` flag (on in b53; delete options stay hidden until 030 is live) |
+| 030 | Delete chat (for me) + admins delete circle | **Live 2026-10-13** (test 11/11 on prod; rollback: supabase/rollback/030_rollback.sql) | `GYM_CHATDEL` flag (on in b53; delete options stay hidden until 030 is live) |
 
 For each one:
 1. [ ] DP says yes to this specific migration.
