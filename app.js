@@ -1891,8 +1891,12 @@ function restSheetHtml(w){
   const chips = [0, 45, 60, 90, 120, 180];
   return `<div class="chgwrap"><div class="chgdim" data-rsclose></div><div class="chgsheet" role="dialog" aria-label="Rest timer">
     <div class="grab"></div><span class="label">${e ? esc(e.name) : "Rest timer"}</span><h3 class="sign chgtitle">Rest between sets</h3>
-    <div class="chgchips">${chips.map(c => `<button type="button" class="chip${cur === c ? " on" : ""}" data-rspick="${c}">${c ? restLabel(c) : "Off"}</button>`).join("")}
+    <div class="chgchips">${chips.map(c => `<button type="button" class="chip${cur === c && !restSheet.custom ? " on" : ""}" data-rspick="${c}">${c ? restLabel(c) : "Off"}</button>`).join("")}
+      <button type="button" class="chip add${restSheet.custom || !chips.includes(cur) ? " on" : ""}" data-rscustom>${!restSheet.custom && !chips.includes(cur) ? restLabel(cur) : "Custom"}</button>
       ${e && e.rest != null ? `<button type="button" class="chip add" data-rspick="default">Use my default (${restLabel(restPrefs.s)})</button>` : ""}</div>
+    ${restSheet.custom ? `<div class="hamounts rscustom"><label class="hamount half"><input id="rs-m" type="number" inputmode="numeric" min="0" max="10" step="1" placeholder="1" value="${cur ? Math.floor(cur / 60) : ""}" aria-label="Minutes" enterkeyhint="next"><span class="label">min</span></label>
+        <label class="hamount half"><input id="rs-sec" type="number" inputmode="numeric" min="0" max="59" step="1" placeholder="30" value="${cur ? cur % 60 : ""}" aria-label="Seconds" enterkeyhint="done"><span class="label">sec</span></label></div>
+      <button class="cta" id="rs-set">Set rest</button>` : ""}
     ${e ? `<p class="note">Just for ${esc(e.name)}. Saved to your plan, so it's set next time.</p>`
         : `<label class="rsrow"><span>Start rest when I tick a set</span><input type="checkbox" class="sw" id="rs-auto" ${restPrefs.auto ? "checked" : ""}></label>
            <p class="note">Your default for every exercise. Tap an exercise's REST tag to give it its own.</p>`}
@@ -1901,12 +1905,22 @@ function restSheetHtml(w){
 function wireRestSheet(w){
   if (!restSheet) return;
   main().querySelectorAll("[data-rsclose]").forEach(b => b.onclick = () => { restSheet = null; render(); });
-  main().querySelectorAll("[data-rspick]").forEach(b => b.onclick = () => {
-    const v = b.dataset.rspick, e = restSheet.ex != null ? w?.exercises?.[restSheet.ex] : null;
+  const c = main().querySelector("[data-rscustom]"); if (c) c.onclick = () => { restSheet.custom = true; render(); setTimeout(() => $("rs-m")?.focus(), 60); };
+  const setBtn = $("rs-set");
+  if (setBtn){
+    const secs = () => (parseInt($("rs-m").value, 10) || 0) * 60 + (parseInt($("rs-sec").value, 10) || 0);
+    const label = () => { const n = secs(); setBtn.textContent = n >= 5 && n <= 600 ? `Set ${restLabel(n)}` : n > 600 ? "10 min max" : "Set rest"; setBtn.disabled = !(n >= 5 && n <= 600); };
+    ["rs-m", "rs-sec"].forEach(id => { $(id).oninput = label; $(id).onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); if (id === "rs-m") $("rs-sec").focus(); else if (!setBtn.disabled) setBtn.click(); } }; });
+    label();
+    setBtn.onclick = () => { const n = secs(); if (n < 5 || n > 600) return; restSheet.custom = false; pickRest(String(n)); };
+  }
+  const pickRest = v => {
+    const e = restSheet.ex != null ? w?.exercises?.[restSheet.ex] : null;
     if (e){ e.rest = v === "default" ? null : +v; if (e.rest == null) delete e.rest; woChanged(false); render(); return; }
     restPrefs.s = +v; render();
     sb.from("profiles").update({ rest_s: restPrefs.s }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save your rest time", error)); });
-  });
+  };
+  main().querySelectorAll("[data-rspick]").forEach(b => b.onclick = () => { restSheet.custom = false; pickRest(b.dataset.rspick); });
   const a = $("rs-auto"); if (a) a.onchange = () => { restPrefs.auto = a.checked;
     sb.from("profiles").update({ rest_auto: restPrefs.auto }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save that", error)); }); };
 }
@@ -3997,7 +4011,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b57" : "51";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b58" : "52";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
