@@ -284,8 +284,8 @@ async function onCheckin(b: any){
     for (const m of unmuted) if (wants.has(m.user_id) && !recips.has(m.user_id)){
       const c = circles.find((c: any) => c.id === m.circle_id); recips.set(m.user_id, c ? { label: `${c.emoji ? c.emoji + " " : ""}${c.name}`, cid: c.id } : null); }
   }
-  const to: string[] = [];
-  for (const id of recips.keys()) if (await firstTime("crew", id, r.user_id, r.day)) to.push(id);   // once per person per day, even if they untick + tick
+  const to: string[] = [], nope = await blockedWith(r.user_id);
+  for (const id of recips.keys()) if (!nope.has(id) && await firstTime("crew", id, r.user_id, r.day)) to.push(id);   // once per person per day, even if they untick + tick
   const ctx = await contexts([r.user_id, ...to]);
   const showWorkout = who.account ? !who.hide_split : who.share_split;
   // Logged with "Start workout" (beta)? Say how many exercises: "Push ✓ · 5 exercises". Details stay in the app (Buds only).
@@ -300,6 +300,12 @@ async function onCheckin(b: any){
     sent += (await send([id], crewNote(ctx.get(r.user_id)!, showWorkout, me, via?.label, via ? tallies.get(via.cid) : null, nEx, mins))).sent;
   }
   return { to: to.length, sent };
+}
+// People who blocked this person, or whom they blocked (migration 027). If 027 isn't applied yet the table
+// doesn't exist: treat that as "nobody blocked", so notifications keep working exactly as before.
+async function blockedWith(uid: string): Promise<Set<string>> {
+  const rows = await rest(`blocks?select=blocker,blocked&or=(blocker.eq.${uid},blocked.eq.${uid})`).catch(() => []);
+  return new Set((rows || []).map((r: any) => r.blocker === uid ? r.blocked : r.blocker));
 }
 // Rest timer finished (booked by the phone, fired by the 5-second job). Re-read the row: only the job marks it fired.
 export const restNote = (title: string, body: string): Note => ({ title: String(title || "REST'S UP").slice(0, 60), body: String(body || "Next set").slice(0, 140), tag: "rest" });
@@ -340,7 +346,8 @@ async function onMessage(r: any){
   if (!to.length) return { to: 0 };
   const wants = (await people(to)).filter((p: any) => p.notif_chat !== false).map((p: any) => p.id);
   const go: string[] = [];
-  for (const id of wants) if (await firstTime("chat", id, String(m.id), sydneyDay())) go.push(id);
+  const nope = await blockedWith(m.from_user);
+  for (const id of wants) if (!nope.has(id) && await firstTime("chat", id, String(m.id), sydneyDay())) go.push(id);
   return send(go, messageNote(from.name, m.body, key, circle));
 }
 async function budRow(b: any){

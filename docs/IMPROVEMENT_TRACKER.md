@@ -34,7 +34,7 @@ Legend: **Bug** = verified defect · **UX** = works but confusing · **Scale** =
 | U4 | Bonus day looks like a normal session in recap | Bug | Recap checked "trained?" before "planned day?", so a rest-day session showed as a planned one. | Fixed: planned day first; bonus = "+" tile + legend |
 | U5 | Settings mixes everything | UX | | Pending (Phase 3) |
 | X1 | Trophies "WEEK 1" heading broke mid-word ("WEE / K 1") | Bug | Found while testing; pre-existing. | Fixed |
-| S1 | No block / report | Scale (safety) | Not in code. | Pending: needs migration (Phase 2) |
+| S1 | No block / report | Scale (safety) | Not in code. Found while building: the legacy `shares_attendance` read rules would have let a BLOCKED person keep reading a public account's check-ins/freezes/reactions. | Built: migration 027 (not applied) + app UI behind `SAFETY` switch (off) + push filter (not deployed). 23/23 DB checks, UI run-through pass |
 | S2 | No account deletion / privacy policy / terms | Scale (store) | Not in code. | Pending (Phase 5) |
 | S3 | Everyone list loads every user | Scale | `fetchAll("people")` pages through all rows. | Pending (Phase 4) |
 | S4 | Names globally unique | Scale | | Pending: handles vs display names (Q) |
@@ -43,6 +43,9 @@ Legend: **Bug** = verified defect · **UX** = works but confusing · **Scale** =
 ## Verified extra
 - Legacy check-in rule `shares_attendance` lets anyone read check-ins of accounts that are public AND have the old flag on. Private accounts with the flag on: **0 of 36**, and `sync_privacy` keeps it that way. Not a leak; tidy up in Phase 2.
 - Migration 026 was run together with its test inside one rolled-back transaction: 5/5 pass, nothing left behind (trigger/function/test user absent afterwards).
+
+## Local test database
+`/var/tmp/crewpg` (workspace only): plain Postgres 16 with Supabase stand-ins (auth.uid, roles, cron, pg_net), rebuilt from the repo migrations by `rebuild.sh`; `runtests.sh` runs every DB test. 12 of 15 suites match production; 3 are outdated (written for the Oct 7–8 privacy model, replaced since): privacy_test, social_body_test, steps_test → rewrite later.
 
 ## Tests
 - Database: `supabase/tests/*.sql` (run in SQL editor; each undoes itself).

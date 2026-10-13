@@ -552,8 +552,9 @@ function viewYou(){
     }
     $("title").textContent = "Settings";
     main().innerHTML = `<div class="view">${backBtn}
-      <div class="sec" style="margin-top:0"><h2 class="sign">Account</h2><span class="label">${privacySummary(m)}</span></div>
+      <div class="sec" style="margin-top:0"><h2 class="sign">${WORKOUTS ? "Privacy & safety" : "Account"}</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}${spottersNote(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
+      ${blockedCardHtml()}
       ${bodyCard()}
       ${STEPS_ENABLED ? healthCard(m) : ""}
       ${notifCard()}
@@ -561,7 +562,7 @@ function viewYou(){
       <div class="sec"><h2 class="sign">What's new</h2></div>
       <div class="card"><p class="note" style="margin:0 0 10px">See the quick tour of Buds, Profiles, Circles and Chats again.</p><button class="cta ghost" id="wn-replay" style="font-size:18px">Replay the tour</button></div>
       <div class="sec"><h2 class="sign">Invite</h2></div>
-      ${invite}${acct}</div>`;
+      ${invite}${WORKOUTS ? `<div class="sec"><h2 class="sign">Account</h2></div>` : ""}${acct}</div>`;
     $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
     $("wn-replay").onclick = startTour;
     wireNotifCard();
@@ -1429,7 +1430,7 @@ async function loadAll(){
       // keep what we had instead of treating it as "empty" (that kicked people out of circles and caused false banners).
       const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
       const soft = p => p.then(v => v, () => null);           // null = this part failed
-      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows, planRows, swapRows] = await Promise.all([
+      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows, planRows, blockRows, swapRows] = await Promise.all([
         soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
         soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
         soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
@@ -1442,6 +1443,7 @@ async function loadAll(){
         soft(fetchAll("bodyweight", "day,kg", q => q.order("day"))),
         WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at,session_ms,session_run_at,duration_s", q => q.gte("day", key(addDays(today(), -120))))) : null,
         WORKOUTS ? soft(fetchAll("workout_plans", "label,exercises,updated_at")) : null,
+        SAFETY ? soft(fetchAll("blocks", "blocked")) : null,
         WORKOUTS ? soft(fetchAll("day_swaps", "user_id,day,label", q => q.gte("day", key(addDays(today(), -60))))) : null]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
       failed = new Set();
@@ -1478,6 +1480,7 @@ async function loadAll(){
         for (const l of local){ const srv = woRows.find(r => r.user_id === myId && r.day === l.day); if (srv && srv.finished_at && !l.finished_at) l.finished_at = srv.finished_at; }
         workouts = [...woRows.filter(r => !local.some(l => l.user_id === r.user_id && l.day === r.day)), ...local]; }
       if (planRows) plans = planRows;
+      if (blockRows) blockedIds = new Set(blockRows.map(r => r.blocked));
       if (swapRows) swaps = new Map(swapRows.map(r => [r.user_id + "|" + r.day, r.label]));
       if (WORKOUTS && mine.data?.weight_unit) unit = mine.data.weight_unit;
       if (WORKOUTS && mine.data && "rest_s" in mine.data) restPrefs = { s: mine.data.rest_s ?? 90, auto: mine.data.rest_auto !== false };
@@ -2007,6 +2010,89 @@ function woProfileHtml(o, inYou){
       ${woDone(w).map(e => `<div class="wologex"><span>${esc(e.name)}</span><span class="mono note">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>`).join("")}</div>`;
 }
 
+// ================= Safety: block + report (beta, needs migration 027) =================
+// Block: they can't see you, find you, bud, message, nudge or react; Buds are removed both ways; they aren't told.
+// Report: a reason (+ optional words), optionally a specific message; the server copies the message text as evidence.
+// The DATABASE enforces all of it (027); the app just offers the buttons and hides what's already blocked.
+const SAFETY = WORKOUTS && !!window.GYM_SAFETY;        // switched on only once migration 027 is applied
+let blockedIds = new Set(), safetySheet = null, myBlockList = null;
+const REPORT_REASONS = [["spam", "Spam"], ["harassment", "Harassment or bullying"], ["inappropriate", "Inappropriate content"],
+  ["fake", "Fake account"], ["underage", "Might be under 13"], ["other", "Something else"]];
+function openSafety(kind, id, msgId){ safetySheet = { kind, id, msgId: msgId || null, reason: null, alsoBlock: false }; render(); }
+function safetySheetHtml(){
+  const s = safetySheet; if (!s) return "";
+  const o = members.get(s.id), name = esc(o?.name || "this person");
+  let body = "";
+  if (s.kind === "menu") body = `<span class="label">${name}</span><h3 class="sign chgtitle">Safety</h3>
+    <button class="cta ghost" data-sfgo="report">🚩 Report ${name}</button>
+    <button class="cta ghost sfdanger" data-sfgo="block">⛔ Block ${name}</button>`;
+  else if (s.kind === "block") body = `<span class="label">Block</span><h3 class="sign chgtitle">Block ${name}?</h3>
+    <ul class="sflist"><li>They can't see your profile, find you, bud, message, nudge or react to you.</li>
+      <li>You stop being Buds, both ways.</li><li>They won't be told.</li>
+      <li>If you share a circle you both stay in it (it isn't only yours), but you won't see their messages there.</li></ul>
+    <button class="cta sfdanger" id="sf-block">Block</button>`;
+  else body = `<span class="label">Report${s.msgId ? " a message" : ""}</span><h3 class="sign chgtitle">What's wrong?</h3>
+    <div class="sfreasons">${REPORT_REASONS.map(([k, l]) => `<button type="button" class="chip${s.reason === k ? " on" : ""}" data-sfreason="${k}">${l}</button>`).join("")}</div>
+    <textarea id="sf-details" class="woin" rows="3" maxlength="500" placeholder="Anything else? (optional)"></textarea>
+    <label class="rsrow"><span>Also block ${name}</span><input type="checkbox" class="sw" id="sf-alsoblock" ${s.alsoBlock ? "checked" : ""}></label>
+    <p class="note">Reports are private. ${name} isn't told who reported them.${s.msgId ? " A copy of the message is kept with the report." : ""}</p>
+    <button class="cta" id="sf-send" ${s.reason ? "" : "disabled"}>Send report</button>`;
+  return `<div class="chgwrap"><div class="chgdim" data-sfclose></div><div class="chgsheet" role="dialog" aria-label="Safety">
+    <div class="grab"></div>${body}<button type="button" class="linkbtn" data-sfclose style="align-self:center">Cancel</button></div></div>`;
+}
+function wireSafety(){
+  if (!safetySheet) return;
+  const s = safetySheet;
+  main().querySelectorAll("[data-sfclose]").forEach(b => b.onclick = () => { safetySheet = null; render(); });
+  main().querySelectorAll("[data-sfgo]").forEach(b => b.onclick = () => { s.kind = b.dataset.sfgo; render(); });
+  main().querySelectorAll("[data-sfreason]").forEach(b => b.onclick = () => { const d = $("sf-details")?.value; s.reason = b.dataset.sfreason; render(); if (d && $("sf-details")) $("sf-details").value = d; });
+  if ($("sf-alsoblock")) $("sf-alsoblock").onchange = e => { s.alsoBlock = e.target.checked; };
+  if ($("sf-block")) $("sf-block").onclick = () => blockUser(s.id);
+  if ($("sf-send")) $("sf-send").onclick = async () => {
+    const btn = $("sf-send"); btn.disabled = true; btn.textContent = "Sending…";
+    const details = String($("sf-details")?.value || "").trim().slice(0, 500) || null;
+    const { error } = await sb.from("reports").insert({ target_user: s.id, message_id: s.msgId, reason: s.reason, details });
+    if (error){ btn.disabled = false; btn.textContent = "Send report"; return showWarn(oops("send the report", error)); }
+    if (s.alsoBlock) return blockUser(s.id, "Reported and blocked");
+    safetySheet = null; render(); toast("Thanks. We'll look into it.");
+  };
+}
+async function blockUser(id, msg){
+  const o = members.get(id), btn = $("sf-block"); if (btn){ btn.disabled = true; btn.textContent = "Blocking…"; }
+  const { error } = await sb.from("blocks").insert({ blocker: myId, blocked: id });
+  if (error && error.code !== "23505"){ if (btn){ btn.disabled = false; btn.textContent = "Block"; } return showWarn(oops("block them", error)); }
+  blockedIds.add(id); safetySheet = null; myBlockList = null;
+  if (profileId === id) profileId = null;
+  if (chatKey === "d:" + id) chatKey = null;
+  members.delete(id); render(); toast(msg || `Blocked ${o?.name || ""}`.trim());
+  loadAll();
+}
+async function unblockUser(id, name){
+  const { error } = await sb.from("blocks").delete().eq("blocker", myId).eq("blocked", id);
+  if (error) return showWarn(oops("unblock them", error));
+  blockedIds.delete(id); myBlockList = (myBlockList || []).filter(b => b.id !== id); render(); toast(`Unblocked ${name}. Bud them again if you want.`); loadAll();
+}
+// Settings → Privacy & safety → Blocked people
+function blockedCardHtml(){
+  if (!SAFETY) return "";
+  if (myBlockList === null){ sb.rpc("my_blocks").then(({ data, error }) => { myBlockList = error ? [] : (data || []); render(); }); }
+  const list = myBlockList || [];
+  return `<div class="card"><span class="label">Blocked people</span>
+    ${list.length ? `<div class="list" style="margin-top:8px">${list.map(b => `<div class="li"><span class="grow"><b>${esc(b.name)}</b></span>
+      <button type="button" class="chip" data-unblock="${esc(b.id)}" data-name="${esc(b.name)}">Unblock</button></div>`).join("")}</div>`
+      : `<p class="note" style="margin:6px 0 0">${myBlockList === null ? "Loading…" : "No one. Block someone from their profile (⋯)."}</p>`}</div>`;
+}
+document.addEventListener("click", e => {
+  const t = e.target instanceof Element ? e.target : null; if (!t || !SAFETY) return;
+  const ub = t.closest("[data-unblock]"); if (ub) return unblockUser(ub.dataset.unblock, ub.dataset.name);
+  const pm = t.closest("[data-safety]"); if (pm) return openSafety("menu", pm.dataset.safety);
+  const msg = t.closest(".msg[data-msgid]"); if (msg && !msg.classList.contains("me")){
+    document.querySelectorAll(".msgreport").forEach(x => x.remove());
+    const a = document.createElement("button"); a.type = "button"; a.className = "linkbtn msgreport"; a.textContent = "Report this message";
+    a.onclick = () => openSafety("report", msg.dataset.from, Number(msg.dataset.msgid)); msg.after(a); return;
+  }
+});
+
 // ================= How streaks work =================
 let streakHelp = false;
 function streakHelpHtml(){
@@ -2194,7 +2280,7 @@ function wireGuide(){
 // A chat's key from MY side: "d:<their id>" for a 1-on-1, "c:<circle id>" for a circle (same keys as chat_reads).
 let messages = [], chatReads = {}, chatKey = null, chatDrafts = {}, tmpId = 0;
 const keyOfMsg = m => m.circle_id ? "c:" + m.circle_id : "d:" + (m.from_user === myId ? m.to_user : m.from_user);
-const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k && !(blockedIds.size && blockedIds.has(m.from_user))).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 const unreadIn = k => { const r = chatReads[k] || ""; return messages.filter(m => m.from_user !== myId && !m.pending && keyOfMsg(m) === k && m.created_at > r).length; };
 const chatTarget = k => k.startsWith("c:") ? { circle: circleOf(k.slice(2)) } : { person: members.get(k.slice(2)) };
 const chatName = k => { const t = chatTarget(k); return t.circle ? circleLabel(t.circle) : (t.person?.name || "Chat"); };
@@ -2267,7 +2353,7 @@ function chatLogHtml(k){
     const day = dayLabel(m.created_at); if (day !== lastDay){ out += `<div class="chatday">${esc(day)}</div>`; lastDay = day; lastFrom = ""; }
     const mine = m.from_user === myId, o = members.get(m.from_user);
     if (isCircle && !mine && m.from_user !== lastFrom) out += `<div class="msgwho" style="${o ? pc(o) : ""}"><span class="dot"></span>${esc(nameOf(m.from_user))}</div>`;
-    out += `<div class="msg ${mine ? "me" : ""} ${m.pending ? "pending" : ""} ${m.failed ? "failed" : ""}" style="${mine && m0 ? pc(m0) : ""}" ${m.failed ? `data-retry="${esc(m.id)}"` : ""}>${esc(m.body)}</div>`;
+    out += `<div class="msg ${mine ? "me" : ""} ${m.pending ? "pending" : ""} ${m.failed ? "failed" : ""}" style="${mine && m0 ? pc(m0) : ""}" ${m.failed ? `data-retry="${esc(m.id)}"` : ""}${SAFETY && !mine && !m.pending ? ` data-msgid="${esc(m.id)}" data-from="${esc(m.from_user)}"` : ""}>${esc(m.body)}</div>`;
     const next = ms[i + 1];
     if (m.failed) out += `<div class="msgtime me">Didn't send · tap to retry</div>`;
     else if (!next || next.from_user !== m.from_user || dayLabel(next.created_at) !== day)
@@ -2304,7 +2390,7 @@ function viewChat(k){
         <button class="cta" id="chat-send" type="submit" aria-label="Send">Send</button></form>`
     : `<p class="chatnote composer">${t.circle ? "" : `You can message ${esc(o.name)} again once you're Buds (you both bud each other).`}</p>`;
   main().innerHTML = `<div class="chatscreen" id="chatscreen"><div class="chatinner">
-    <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}</div>
+    <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}${SAFETY && o ? `<button type="button" class="pfmore chatmore" data-safety="${esc(o.id)}" aria-label="Report or block ${esc(o.name)}">⋯</button>` : ""}</div>
     <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div></div>`;
   $("chat-back").onclick = () => { chatKey = null; document.documentElement.classList.remove("chat-open"); render(); window.scrollTo(0, 0); };
   const inp = $("chat-input"), form = $("chat-form");
@@ -3198,7 +3284,7 @@ function viewProfile(inYou){
   const back = inYou ? "" : `<button type="button" class="linkbtn pfback" id="pf-back">‹ Back</button>`;
   const badge = o.private ? `${LOCK} Private` : "Public";
   if (!o.visible || !sharesStats(o)){
-    main().innerHTML = `<div class="view">${back}<div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate</span>
+    main().innerHTML = `<div class="view">${back}<div class="card hero" style="${pc(o)}">${SAFETY && !self ? `<button type="button" class="pfmore" data-safety="${esc(o.id)}" aria-label="Report or block ${esc(o.name)}">⋯</button>` : ""}<span class="label">${badge} · ${plateName(o.plate)} plate</span>
       <div class="work sign">${esc(o.name)}</div>
       ${countsRow(o, false)}
       <p class="sub">${o.private ? "This account is private. Send a bud request to see their week and streak." : "Hasn't logged anything yet."}</p>
@@ -3220,7 +3306,7 @@ function viewProfile(inYou){
       <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip" data-accept="${esc(r.id)}">Accept</button><button type="button" class="linkbtn" data-decline="${esc(r.id)}">Decline</button></span></div></div>`).join("")}` : "";
   const youBar = inYou ? `<div class="row2"><button class="cta ghost" id="you-edit" style="font-size:18px">Edit profile</button><button class="cta ghost" id="you-settings" style="font-size:18px">⚙️ Settings</button></div>` : "";
   main().innerHTML = `<div class="view">${back}${mine}${req}${ask}
-    <div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate${self && !inYou ? " · how others see you" : ""}</span>
+    <div class="card hero" style="${pc(o)}">${SAFETY && !self ? `<button type="button" class="pfmore" data-safety="${esc(o.id)}" aria-label="Report or block ${esc(o.name)}">⋯</button>` : ""}<span class="label">${badge} · ${plateName(o.plate)} plate${self && !inYou ? " · how others see you" : ""}</span>
       <div class="work sign">${esc(o.name)}</div>
       ${!self && relation(o) ? `<span class="reltag">${({buds:"🤝 Buds", spotting:"You're spotting them", spotter:"Spots you", requested:"Request sent"})[relation(o)]}</span>` : ""}
       ${countsRow(o, inYou)}${inYou && WORKOUTS ? `<p class="note rellegend"><b>Buds</b> you spot each other · <b>Spotting</b> you follow them · <b>Spotters</b> follow you. Only Buds can message you and see your workout details.</p>` : ""}
@@ -3459,6 +3545,7 @@ function render(){
   maybeShowPushSheet();
 }
 let trophyBack = "you";
+{ const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
 function setTab(t){ if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
@@ -3480,7 +3567,7 @@ let sb = null, session = null, authKnown = false;
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
     if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
-      loadGen++; workouts = []; plans = []; swaps = new Map(); splitOpenDay = null; rest = null; woSummary = null; restSheet = null; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      loadGen++; workouts = []; plans = []; blockedIds = new Set(); myBlockList = null; safetySheet = null; swaps = new Map(); splitOpenDay = null; rest = null; woSummary = null; restSheet = null; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
       messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
       document.documentElement.classList.remove("chat-open");
     }
