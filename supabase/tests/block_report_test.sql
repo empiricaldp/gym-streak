@@ -55,6 +55,26 @@ begin
   begin insert into public.messages (from_user, circle_id, body) values (a, cid, 'circle msg'); out := out || E'\n15 A: can still post in the shared circle: PASS';
   exception when others then out := out || E'\n15 A: can still post in the shared circle: FAIL ' || sqlerrm; end;
 
+  -- shared circle, both directions: A and B each post; C (also in the circle) sees both
+  execute 'reset role';
+  insert into public.circle_members (circle_id, user_id, role) values (cid, c, 'member');
+  insert into public.messages (from_user, circle_id, body) values (b, cid, 'from B in circle');
+  execute 'set local role authenticated';
+  select count(*) into n from public.messages where circle_id = cid and from_user = b;
+  out := out || E'\n15b A (blocker) can''t see B''s circle messages: ' || case when n = 0 then 'PASS' else 'FAIL ' || n end;
+  select count(*) into n from public.messages where circle_id = cid and from_user = a;
+  out := out || E'\n15c A still sees own circle messages: ' || case when n = 1 then 'PASS' else 'FAIL ' || n end;
+  perform set_config('request.jwt.claims', json_build_object('sub', b, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.messages where circle_id = cid and from_user = a;
+  out := out || E'\n15d B (blocked) can''t see A''s circle messages: ' || case when n = 0 then 'PASS' else 'FAIL ' || n end;
+  select count(*) into n from public.messages where circle_id = cid and from_user = b;
+  out := out || E'\n15e B still sees own circle messages: ' || case when n = 1 then 'PASS' else 'FAIL ' || n end;
+  select count(*) into n from public.people where id = a;
+  out := out || E'\n15f B: A off the circle leaderboard (not in people): ' || case when n = 0 then 'PASS' else 'FAIL' end;
+  perform set_config('request.jwt.claims', json_build_object('sub', c, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.messages where circle_id = cid;
+  out := out || E'\n15g C (not involved) sees both A''s and B''s circle messages: ' || case when n = 2 then 'PASS' else 'FAIL ' || n end;
+
   -- C is unaffected
   perform set_config('request.jwt.claims', json_build_object('sub', c, 'role', 'authenticated')::text, true);
   select count(*) into n from public.people where id in (a, b);

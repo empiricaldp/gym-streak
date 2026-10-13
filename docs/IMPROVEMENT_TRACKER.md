@@ -72,3 +72,10 @@ Indexes were already fine; the fix is *what* the app asks for. Open question for
 - 026 test gained check 8: other days' workouts untouched (8/8).
 - Drafts: docs/legal/PRIVACY_POLICY_DRAFT.md, docs/legal/TERMS_DRAFT.md. Release checklist: docs/RELEASE_CHECKLIST.md.
 - Known gap (027): in a shared Circle, the person who was blocked still sees the blocker's circle messages (only the blocker's side is filtered).
+
+## Pre-publish changes (local only)
+- Member count: now in the shared header (date line, top-right) on every signed-in screen, same pill look; removed the duplicate line on Everyone. Tested on Today/Crew/Chats/Split/You/Settings/Delete at 390 and 320 wide: no overlaps, no sideways scroll (t23).
+- Found while testing: a long name ran into big titles (older bug). Fixed: name trimmed with "…", a too-wide title word shrinks to fit.
+- 027 now hides circle messages BOTH ways when blocked (database rule "hide messages if blocked"); test 29/29 incl. both directions + uninvolved member sees both. Gap from Phase 5 closed.
+- Rewrote privacy_test (15), social_body_test (22), steps_test (11) for Public/Private accounts. Cause of old failures: new accounts start Private now; tests assumed the retired share_attendance switches. Checked separately: no leak through the old rules for Private accounts.
+- Full local DB suite: 214 checks, 0 failures (with 026–028 applied locally; also all pass without them).

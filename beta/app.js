@@ -400,7 +400,7 @@ function viewCrew(){
     `<button type="button" role="tab" id="crewtab-${id}" data-crewview="${id}" aria-selected="${crewView===id}" aria-pressed="${crewView===id}" tabindex="${crewView===id ? 0 : -1}">${l}</button>`).join("")}</div>`;
   if (crewView === "circles"){ viewCirclesTab(seg); }
   else if (crewView === "everyone"){
-    const top = seg + (WORKOUTS && memberCount ? `<p class="note membercount"><span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b> people on CREW</p>` : "") + `<input class="field findq" id="find-q" type="search" placeholder="Search people${scoped ? " by name" : ""}" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+    const top = seg + `<input class="field findq" id="find-q" type="search" placeholder="Search people${scoped ? " by name" : ""}" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
       <div class="list peoplelist" id="people">${(scoped ? (searchHits || []) : everyone()).map(personRow).join("")}</div>
       ${scoped && !searchHits ? `<p class="note" style="text-align:center">Type at least 2 letters to search everyone on CREW.</p>` : ""}
       <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
@@ -1481,7 +1481,7 @@ async function loadAll(){
   const before = ready && myId ? { members, reactions, nudges, circles } : null;   // what we had, to spot what's new
   loading = (async () => {
     try {
-      if (WORKOUTS){ const { data } = await sb.rpc("member_count"); if (typeof data === "number"){ memberCount = data; scoped = data > SCALE_LIMIT; } }
+      if (WORKOUTS){ const { data } = await sb.rpc("member_count"); if (typeof data === "number"){ memberCount = data; scoped = data > SCALE_LIMIT; renderHeaderCount(); } }
       const [profiles, checkins] = scoped
         ? await scopedIds().then(ids => Promise.all([fetchIn("people", PEOPLE_COLS, "id", ids),
             fetchIn("checkins", "user_id,day", "user_id", ids, q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))]))
@@ -2670,7 +2670,7 @@ function burst(){
 let memberCount = 0;
 async function loadMemberCount(){
   const { data, error } = await sb.rpc("member_count");
-  if (!error && typeof data === "number"){ memberCount = data; renderOnline(); }
+  if (!error && typeof data === "number"){ memberCount = data; renderOnline(); renderHeaderCount(); }
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
@@ -2678,6 +2678,23 @@ function renderOnline(){
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
+}
+// Big header title: shrink a long word ("ACCOUNT", "SETTINGS") until it fits its column instead of running into the name badge
+function fitTitle(){
+  const h = $("title"); if (!h) return;
+  h.style.fontSize = "";
+  let size = parseFloat(getComputedStyle(h).fontSize);
+  while (h.scrollWidth > h.clientWidth + 1 && size > 26){ size -= 2; h.style.fontSize = size + "px"; }
+}
+if (window.MutationObserver) new MutationObserver(() => requestAnimationFrame(fitTitle)).observe(document.getElementById("title") || document.body, { childList: true, characterData: true, subtree: true });
+addEventListener("resize", () => requestAnimationFrame(fitTitle));
+// Beta: the count lives in the header on every signed-in screen (its own slot, so it never covers anything)
+function renderHeaderCount(){
+  const el = $("hcount"); if (!el) return;
+  const show = WORKOUTS && !!session && authKnown && !ob && !locked && memberCount > 0;
+  el.hidden = !show; if (!show) return;
+  el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person is" : "people are"} on CREW`);
+  el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount.toLocaleString()}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
 }
 
 // ================= Login screens =================
@@ -3625,7 +3642,7 @@ function render(){
   settleKeyboard();
   $("date").textContent = today().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
   const m = me();
-  $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
+  $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span><span class="menm">${esc(m.name)}</span>` : "";
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
   if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && ((me().seenUpdate || 0) < TOUR_V || !tourSeenHere())){
@@ -3633,7 +3650,7 @@ function render(){
   }
   $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
-  renderOnline();
+  renderOnline(); renderHeaderCount();
   if (!sb) return viewSetup();
   if (authMode==="newpass") return viewAuth();
   if (gate) return viewInstall();            // phones in a browser: get it on the Home Screen first
@@ -3695,7 +3712,7 @@ let sb = null, session = null, authKnown = false;
       document.documentElement.classList.remove("chat-open");
     }
     if (myId && myId !== was){ ready = false; loading = null; loadAll(); subscribe(); }
-    if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); }
+    if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); renderHeaderCount(); }
     render();
   });
   render();

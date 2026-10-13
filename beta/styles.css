@@ -968,3 +968,15 @@ html.wn-open header.top{display:none}
 .pbw.now small{color:var(--fg);font-weight:700}
 .freshcard .note{line-height:1.45}
 .whypick .path{border:1.5px solid var(--line2)!important;box-shadow:none!important}.whypick .path.watchpath{border-style:dashed!important}.whypick .path.on{border:2px solid var(--fg)!important;border-style:solid!important}
+
+/* Header member count (beta): its own slot on the date line, top-right. Same pill look, but part of the layout,
+   so it can never sit on top of content, names or buttons. */
+header.top{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"date count" "title me";align-items:end;column-gap:12px}
+header.top .date{grid-area:date;align-self:center}
+header.top .hcount{grid-area:count;justify-self:end;align-self:center}
+header.top h1{grid-area:title;min-width:0}
+header.top .me{grid-area:me;justify-self:end}
+.online.hcount{position:static;transform:none;z-index:auto;box-shadow:none;opacity:1;padding:4px 10px 4px 9px}
+.online.hcount[hidden]{display:none}
+header.top .me{max-width:34vw;min-width:0}
+header.top .me .menm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}

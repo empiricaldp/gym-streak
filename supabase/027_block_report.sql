@@ -4,9 +4,9 @@
 --   * profile/streak/split: hidden (can_see → false)          * Everyone list / search: they disappear from each other
 --   * Buds/Spotting/Spotters: removed both ways at once        * new bud requests: refused
 --   * direct messages: can't send; old DMs hidden both ways    * nudges + reactions: refused
---   * circles: can't add each other; in a SHARED circle you both stay members (the circle isn't yours alone).
---     Their circle messages are hidden for the blocker by the app, and the push function skips notifying the blocker
---     about the blocked person (push function change, separate deploy).
+--   * circles: can't add each other; in a SHARED circle you both stay members (the circle isn't yours alone),
+--     but neither of you can see the other's circle messages (enforced here, both directions), you drop off each
+--     other's circle leaderboard, and the push function skips notifying either of you about the other (separate deploy).
 --   * The blocked person is NOT told. Unblocking does NOT restore old Buds (they'd need to bud again).
 -- REPORT: anyone can report a person (optionally a specific message) with a reason. Max 10 reports a day per person.
 --   Reports are private to the reporter; DP reviews them in the dashboard (open_reports view, admins only).
@@ -86,8 +86,11 @@ drop policy if exists "no DM if blocked" on public.messages;
 create policy "no DM if blocked" on public.messages as restrictive for insert to authenticated
   with check (to_user is null or not blocked_between(auth.uid(), to_user));
 drop policy if exists "hide DMs if blocked" on public.messages;
-create policy "hide DMs if blocked" on public.messages as restrictive for select to authenticated
-  using (to_user is null or not blocked_between(from_user, to_user));
+drop policy if exists "hide messages if blocked" on public.messages;
+-- you never see messages FROM someone you've blocked or who blocked you (DMs and shared circles alike),
+-- and old DMs between the two are hidden for both
+create policy "hide messages if blocked" on public.messages as restrictive for select to authenticated
+  using (not blocked_between(auth.uid(), from_user) and (to_user is null or not blocked_between(from_user, to_user)));
 drop policy if exists "no nudge if blocked" on public.nudges;
 create policy "no nudge if blocked" on public.nudges as restrictive for insert to authenticated
   with check (not blocked_between(from_user, to_user));
@@ -162,7 +165,7 @@ revoke all on public.open_reports from public, anon, authenticated;
 
 -- ROLLBACK:
 --   drop view if exists public.open_reports; drop trigger if exists report_fill on public.reports; drop function if exists public.report_fill();
---   drop policy "no bud if blocked" on public.buds; drop policy "no DM if blocked" on public.messages; drop policy "hide DMs if blocked" on public.messages;
+--   drop policy "no bud if blocked" on public.buds; drop policy "no DM if blocked" on public.messages; drop policy "hide messages if blocked" on public.messages;
 --   drop policy "no nudge if blocked" on public.nudges; drop policy "no reaction if blocked" on public.reactions;
 --   drop policy "hide checkins if blocked" on public.checkins; drop policy "hide freezes if blocked" on public.freezes; drop policy "hide reactions if blocked" on public.reactions;
 --   restore can_see / can_add_to_circle / people from 011, 017 and 020 (they're unchanged apart from the blocked_between check);

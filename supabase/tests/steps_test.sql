@@ -43,10 +43,15 @@ begin
   execute 'reset role';
 
   -- 9. B shares steps -> A can see them
-  update public.profiles set share_steps = true where id = b;
+  update public.profiles set share_steps = true, account = 'public' where id = b;   -- sharing steps only shows them on a Public account
   execute 'set local role authenticated';
   select count(*) into n from public.steps where user_id = b;
   out := out || E'\n9 shared steps visible: ' || case when n = 1 then 'PASS' else 'FAIL' end;
+  execute 'reset role';
+  update public.profiles set account = 'private' where id = b;   -- 9b private account: hidden again even with sharing on
+  execute 'set local role authenticated';
+  select count(*) into n from public.steps where user_id = b;
+  out := out || E'\n9b private account hides steps even if sharing is on: ' || case when n = 0 then 'PASS' else 'FAIL' end;
   execute 'reset role';
 
   -- 10. Resetting a key kills the old one

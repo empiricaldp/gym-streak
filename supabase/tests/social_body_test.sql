@@ -1,4 +1,4 @@
--- Tests for migration 005. Ends with a deliberate error that prints results and undoes everything.
+-- Reactions, nudges, freezes, body weight (005; updated Oct 2026 for Public/Private accounts and Buds-only nudges). Ends with a deliberate error that prints results and undoes everything.
 do $$
 declare
   a uuid := '00000000-0000-0000-0000-00000000000a';
@@ -13,7 +13,10 @@ begin
   values (a, 'TestA', 'red',  '[{"w":"Push","opt":false},null,null,null,null,null,null]', t - 30, t - 7, 'bulk', 180),
          (b, 'TestB', 'blue', '[{"w":"Legs","opt":false},null,null,null,null,null,null]', t - 30, t - 7, 'cut', 170),
          (c, 'TestC', 'green','[{"w":"Core","opt":false},null,null,null,null,null,null]', t - 30, t - 7, null, null);
-  update public.profiles set share_attendance = false where id = c;   -- C keeps attendance private
+  update public.profiles set account = 'public' where id in (a, b);  -- new accounts start Private now
+  update public.profiles set account = 'private' where id = c;        -- C is private (and not a Bud)
+  insert into public.buds (follower, followee) values (a, b), (b, a);  -- nudges need Buds both ways
+  update public.buds set status = 'accepted' where follower in (a, b);
 
   -- act as A
   perform set_config('request.jwt.claims', json_build_object('sub', a, 'role', 'authenticated')::text, true);
@@ -34,8 +37,8 @@ begin
   out := out || E'\n2a react to a friend: PASS';
   begin insert into public.reactions (from_user, to_user, day, emoji) values (a, a, t, 'fire'); out := out || E'\n2b cannot react to self: FAIL';
   exception when others then out := out || E'\n2b cannot react to self: PASS'; end;
-  begin insert into public.reactions (from_user, to_user, day, emoji) values (a, c, t, 'fire'); out := out || E'\n2c cannot react to private person: FAIL';
-  exception when others then out := out || E'\n2c cannot react to private person: PASS'; end;
+  begin insert into public.reactions (from_user, to_user, day, emoji) values (a, c, t, 'fire'); out := out || E'\n2c cannot react to a private stranger: FAIL';
+  exception when others then out := out || E'\n2c cannot react to a private stranger: PASS'; end;
   begin insert into public.reactions (from_user, to_user, day, emoji) values (b, a, t, 'fire'); out := out || E'\n2d cannot react as someone else: FAIL';
   exception when others then out := out || E'\n2d cannot react as someone else: PASS'; end;
   begin insert into public.reactions (from_user, to_user, day, emoji) values (a, b, t - 30, 'clap'); out := out || E'\n2e cannot react to old days: FAIL';
@@ -44,8 +47,8 @@ begin
   -- nudges
   insert into public.nudges (from_user, to_user) values (a, b);
   out := out || E'\n3a nudge a friend: PASS';
-  begin insert into public.nudges (from_user, to_user) values (a, b); out := out || E'\n3b only one nudge per day: FAIL';
-  exception when others then out := out || E'\n3b only one nudge per day: PASS'; end;
+  begin insert into public.nudges (from_user, to_user) values (a, b); out := out || E'\n3b no second nudge within 10 min: FAIL';
+  exception when others then out := out || E'\n3b no second nudge within 10 min: PASS'; end;
   update public.nudges set seen = true where to_user = b;
   get diagnostics n = row_count;
   out := out || E'\n3c sender cannot mark as seen: ' || case when n = 0 then 'PASS' else 'FAIL' end;
