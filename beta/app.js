@@ -1814,6 +1814,7 @@ function startRest(secs, next){
   if (!secs) return;
   unlockAudio();
   rest = { end: nowMs() + secs * 1000, total: secs * 1000, next: next || "Next set. Let's go.", cancelled: false };
+  const rw = myWo(woDay); if (rw) rw._rests = (rw._rests || 0) + 1;
   saveRestLocal(); bookAlarm(); paintTimers();
 }
 function bookAlarm(){
@@ -1846,6 +1847,8 @@ function paintTimers(numbersOnly){
   const w = myWo(woDay), s = $("ses-t"), r = $("rest-t"), bar = $("rest-bar");
   if (s && w) s.textContent = clock(sesMs(w));
   if (r){ if (rest){ r.textContent = clock(rest.end - nowMs()); if (bar) bar.style.width = Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total))) + "%"; } }
+  const ring = $("rest-ring"); if (ring && rest) ring.style.strokeDashoffset = String(RING_C * (1 - Math.max(0, Math.min(1, (rest.end - nowMs()) / rest.total))));
+  if (!numbersOnly && woDay && w && !w.finished_at && WO_V2){ render(); return; }        // new workout screen: going ↔ resting is a different screen
   if (!numbersOnly && woDay && $("timers")) $("timers").innerHTML = timersHtml(w);
   if (!numbersOnly && woDay) wireTimers();
 }
@@ -2024,8 +2027,99 @@ function woExHtml(e, i, w){
       <div class="woexfoot"><span><button type="button" class="linkbtn" data-addset="${i}">+ Set</button>${(e.sets || []).length ? `<button type="button" class="linkbtn" data-rmset="${i}:${e.sets.length - 1}">− Set</button>` : ""}</span>
       <button type="button" class="linkbtn" data-rmex="${i}">Remove</button></div></div>` : ""}</div>`;
 }
+// ---- Workout screen v2 (DP's "H" design): before → going → resting. Finished workouts keep the old view. ----
+const WO_V2 = true, RING_C = 2 * Math.PI * 53;
+const NUM = 'class="sign whnum"';
+function lastSameLabel(w){
+  return workouts.filter(x => x.user_id === myId && x !== w && x.finished_at && x.day < w.day && lc(x.label) === lc(w.label))
+    .sort((a, b) => String(b.day).localeCompare(String(a.day)))[0] || null;
+}
+function whWeekHtml(m, d){
+  const ws = startOfWeek(d), tk = key(today());
+  return `<div class="whweek">${Array.from({ length: 7 }, (_, i) => { const x = addDays(ws, i), k = key(x);
+    const cls = ticked(m, x) ? "done" : k === tk ? "today" : !isGym(m, x) ? "rest" : "";
+    return `<div><i class="${cls}"></i><span class="${k === tk ? "on" : ""}">${"MTWTFSS"[i]}</span></div>`; }).join("")}</div>`;
+}
+function viewWorkoutV2(w){
+  const m = me(), d = parse(w.day), isT = w.day === key(today()), when = isT ? "Today" : DAYS_LONG[dow(d)];
+  const run = !!w.session_run_at, ms = sesMs(w), started = run || ms > 0 || woDone(w).length > 0 || !!rest;
+  const last = lastSameLabel(w), lastMins = last && last.duration_s ? Math.round(last.duration_s / 60) : null;
+  const streakNow = dayStreak(m), streakAfter = streakNow + (ticked(m, d) ? 0 : 1);
+  const hasSets = w.exercises.some(e => (e.sets || []).length);
+  const exList = w.exercises.length ? `<div class="sec whsec"><span class="label">What you did</span>${hasSets ? unitToggle() : ""}</div>${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}` : "";
+  const addBox = woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+      <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
+    : `<button type="button" class="linkbtn whlink" id="wo-add">+ Note an exercise</button>`;
+  let body, foot;
+  if (!started){                                                         // H1 · before you start
+    const ws = startOfWeek(d), plannedN = Array.from({ length: 7 }, (_, i) => isGym(m, addDays(ws, i)) ? 1 : 0).reduce((a, b) => a + b, 0);
+    const doneN = Array.from({ length: 7 }, (_, i) => ticked(m, addDays(ws, i)) ? 1 : 0).reduce((a, b) => a + b, 0);
+    body = `<section class="card whcard" style="${pc(m)}"><span class="label">${esc(when)} · ${esc(DAYS_LONG[dow(d)])}</span>
+        <div class="work sign whbig">${esc(w.label || "Workout")}</div>
+        <div class="whstats"><div><span class="label">Streak</span><b ${NUM} style="color:var(--cti,var(--c))">${streakNow}</b></div>
+          <div><span class="label">Week</span><b ${NUM}>${doneN}/${plannedN || doneN}</b></div>
+          <div><span class="label">Last ${esc(w.label)}</span><b ${NUM}>${lastMins ? lastMins + " MIN" : "–"}</b></div></div></section>
+      <section class="card whblock"><span class="label">This week</span>${whWeekHtml(m, d)}</section>
+      ${last ? `<section class="card whblock whrow"><span class="label">Last ${esc(w.label)}</span><span>${esc(DAYS[dow(parse(last.day))])} ${fmt(parse(last.day))}${lastMins ? ` · ${lastMins} min` : ""}</span></section>` : ""}
+      ${w.exercises.length ? `<section class="card whblock"><span class="label">Today's exercises</span>${w.exercises.map(e => `<div class="stex"><span>${esc(e.name)}</span><span class="mono">${esc(fmtSets(e.sets))}</span></div>`).join("")}</section>` : ""}
+      <div class="whlinks"><button type="button" class="linkbtn" id="wo-plan">${planFor(w.label) ? "Edit exercises" : "+ Add exercises"}</button></div>`;
+    foot = `<button class="whbtn red" id="wo-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start Workout</button>`;
+  } else if (rest){                                                      // H3 · resting
+    const left = rest.end - nowMs(), frac = Math.max(0, Math.min(1, left / rest.total));
+    body = `<div class="whtop"><span><span class="label whstate">● Resting</span><span class="sign whsmall">${esc(w.label)}</span></span>
+        <span class="whright"><span class="label">Workout</span><b ${NUM} id="ses-t">${clock(ms)}</b></span></div>
+      <section class="card whring"><div class="whringbox"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="53" class="trk"/>
+          <circle cx="60" cy="60" r="53" class="val" id="rest-ring" style="stroke-dasharray:${RING_C};stroke-dashoffset:${RING_C * (1 - frac)}"/></svg>
+          <div><b ${NUM} id="rest-t" role="timer" aria-live="off">${clock(left)}</b><span class="label">Rest left</span></div></div>
+        <p class="note">${esc(rest.next || "Your phone buzzes when it's time.")}</p></section>`;
+    foot = `<div class="whrow2"><button class="whbtn soft" data-trest="plus">+30 sec</button><button class="whbtn dark" data-trest="skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l10-7zM16 5h3v14h-3z"/></svg>Skip</button></div>`;
+  } else {                                                               // H2 · going (or paused)
+    body = `<div class="whtop"><span><span class="label whstate${run ? " live" : ""}">● ${run ? "In progress" : "Paused"}</span><span class="sign whsmall">${esc(w.label)}</span></span></div>
+      <section class="card whtime"><b class="sign whnum whclock" id="ses-t">${clock(ms)}</b><span class="label">Workout time</span>
+        <div class="whlist">${last && last.duration_s ? `<div><span>Last ${esc(w.label)}</span><b ${NUM}>${clock(last.duration_s * 1000)}</b></div>` : ""}
+          <div><span>Rests</span><b ${NUM}>${w._rests || 0}</b></div>
+          <div><span>Streak when you finish</span><b ${NUM} style="color:var(--cti,var(--c))">${streakAfter}</b></div></div></section>
+      ${exList}${addBox}
+      <div class="whlinks">${!run && ms > 0 ? `<button type="button" class="linkbtn" data-tses="reset">Reset timer</button>` : ""}<button type="button" class="linkbtn" data-trest="change">Rest time ${esc(restLabel(restPrefs.s))} · Change</button>
+        <button type="button" class="linkbtn" id="wo-discard">${woDiscardAsk ? "Tap again to delete" : "Discard"}</button></div>`;
+    foot = `<button class="whbtn soft" data-trest="${restPrefs.s ? "start" : "change"}"><svg viewBox="0 0 24 24" aria-hidden="true" class="ln"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4"/></svg>${restPrefs.s ? `Rest ${restLabel(restPrefs.s)}` : "Rest"}</button>
+      <div class="whrow2"><button class="whbtn soft" data-tses="${run ? "pause" : "start"}">${run ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4.2" height="14" rx="1.2"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2"/></svg>Pause` : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Resume`}</button>
+        <button class="whbtn red" id="wo-finish"><svg viewBox="0 0 24 24" aria-hidden="true" class="ln"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Finish</button></div>`;
+  }
+  main().innerHTML = `<div class="view wo whv" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>${body}${namesList()}
+    <div class="wofoot whfoot">${foot}</div>${restSheetHtml(w)}</div>`;
+  $("title").textContent = "Workout"; $("tabbar").hidden = true;
+  wireTimers(); wireRestSheet(w);
+  $("wo-back").onclick = closeWorkout;
+  if ($("wo-start")) $("wo-start").onclick = () => { unlockAudio(); sesStart(); };
+  if ($("wo-finish")) $("wo-finish").onclick = finishWorkout;
+  if ($("wo-plan")) $("wo-plan").onclick = () => editPlan(w.label, "workout", w.day);
+  if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
+  wireWorkoutList(w, false);
+}
+// exercise ticks / sets / adding: shared by both workout screens
+function wireWorkoutList(w, fin){
+  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const i = +b.dataset.tick, e = w.exercises[i]; if (!e) return;
+    unlockAudio(); e.done = !e.done; (e.sets || []).forEach(s => s.done = e.done); woDiscardAsk = false; woOpenEx = null;
+    if (e.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, (e.sets || []).length - 1));
+    woChanged(true); });
+  main().querySelectorAll("[data-tickset]").forEach(b => b.onclick = () => { const [i, j] = b.dataset.tickset.split(":").map(Number), e = w.exercises[i], s = e?.sets?.[j]; if (!s) return;
+    unlockAudio(); s.done = !s.done; e.done = e.sets.length > 0 && e.sets.every(x => x.done);
+    if (s.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, j));
+    woChanged(true); });
+  main().querySelectorAll("[data-openex]").forEach(b => b.onclick = () => { const i = +b.dataset.openex; if (!w.exercises[i]?.done) return; woOpenEx = woOpenEx === i ? null : i; render(); });
+  main().querySelectorAll("[data-restex]").forEach(b => b.onclick = () => { restSheet = { ex: +b.dataset.restex }; render(); });
+  wireSets(w.exercises, woChanged);
+  if ($("wo-add")) $("wo-add").onclick = () => { woAdding = true; render(); $("wo-newex")?.focus(); };
+  const addEx = () => { const name = String($("wo-newex")?.value || "").trim().slice(0, 60); if (!name) return $("wo-newex")?.focus();
+    const l = lastFor(name, w.day);
+    w.exercises.push({ name, done: false, sets: l ? copySets(l.sets) : blankEx().sets }); woAdding = false; woChanged(true); };
+  if ($("wo-newex")){ $("wo-addgo").onclick = addEx; $("wo-addcancel").onclick = () => { woAdding = false; render(); };
+    $("wo-newex").onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); addEx(); } }; }
+}
 function viewWorkout(){
   const w = myWo(woDay); if (!w){ woDay = null; return render(); }
+  if (WO_V2 && !w.finished_at) return viewWorkoutV2(w);
   $("title").textContent = "Workout"; $("tabbar").hidden = true;
   const n = woDone(w).length, fin = !!w.finished_at, d = parse(w.day);
   const when = key(d) === key(today()) ? "Today" : DAYS_LONG[dow(d)];
@@ -3777,7 +3871,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b47";   // bump together with version.json on every release
+const APP_VERSION = "b48";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

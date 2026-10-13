@@ -1012,3 +1012,57 @@ header.top .me .menm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;m
 .stex:last-child{border-bottom:0}
 .stex span:first-child{flex:1;min-width:0;font-weight:600;font-size:17px}
 .stex .mono{font-size:13px;color:var(--muted)}
+
+/* ---- Workout screen v2 ("H"): before → going → resting (b48) ---- */
+.whv{gap:14px;padding-bottom:190px}
+.whnum{font-variant-numeric:tabular-nums;line-height:.9}
+.whcard{position:relative;overflow:hidden;padding:20px 20px 18px;display:flex;flex-direction:column;gap:14px;border-radius:24px}
+.whcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--c)}
+.whbig{font-size:84px;line-height:.82;overflow-wrap:anywhere}
+.whstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border-top:1px solid var(--line);padding-top:14px}
+.whstats>div{display:flex;flex-direction:column;gap:6px;min-width:0}
+.whstats b{font-size:34px}
+.whblock{display:flex;flex-direction:column;gap:12px;border-radius:20px}
+.whrow{flex-direction:row;justify-content:space-between;align-items:center}
+.whweek{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.whweek>div{display:flex;flex-direction:column;align-items:center;gap:6px}
+.whweek i{display:block;width:100%;height:34px;border-radius:9px;background:var(--card2)}
+.whweek i.done{background:var(--c)}
+.whweek i.today{background:transparent;box-shadow:inset 0 0 0 2px var(--fg)}
+.whweek i.rest{background:transparent;box-shadow:inset 0 0 0 1px var(--line2)}
+.whweek span{font-size:12px;font-weight:700;color:var(--muted)}.whweek span.on{color:var(--fg)}
+.whlinks{display:flex;justify-content:center;gap:22px;flex-wrap:wrap}
+.whlinks .linkbtn,.whlink{padding:10px 4px;min-height:44px;font-weight:600}
+.whlink{align-self:center}
+.whtop{display:flex;justify-content:space-between;align-items:flex-end;gap:10px}
+.whtop>span{display:flex;flex-direction:column;gap:4px}
+.whstate{color:var(--muted)}.whstate.live{color:var(--cti,var(--c))}
+.whsmall{font-size:36px;line-height:.85}
+.whright{align-items:flex-end}.whright b{font-size:28px}
+.whtime{display:flex;flex-direction:column;align-items:center;gap:8px;padding:24px 20px 10px;border-radius:24px}
+.whclock{font-size:120px}
+.whlist{align-self:stretch;margin-top:8px}
+.whlist>div{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.whlist span{color:var(--muted);font-size:15px}.whlist b{font-size:28px}
+.whsec{margin-top:4px}
+.whring{display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px 18px;border-radius:24px;text-align:center}
+.whringbox{position:relative;width:260px;height:260px;max-width:100%}
+.whringbox svg{width:100%;height:100%;transform:rotate(-90deg)}
+.whringbox circle{fill:none;stroke-width:9}
+.whringbox .trk{stroke:var(--card2)}
+.whringbox .val{stroke:var(--iron);stroke-linecap:round;transition:stroke-dashoffset .5s linear}
+.whringbox>div{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+.whringbox b{font-size:clamp(56px,19vw,80px)}
+.whring .note{margin:0}
+.whfoot{display:flex;flex-direction:column;gap:10px;align-items:stretch}
+.whfoot>*{width:100%;max-width:560px;margin:0 auto}
+.whrow2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.whbtn{border:0;border-radius:14px;min-height:56px;padding:0 16px;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;
+  font:600 19px -apple-system,"SF Pro Text",var(--body);letter-spacing:-.01em;transition:transform .12s ease,filter .15s}
+.whbtn:active{transform:scale(.98);filter:brightness(.95)}
+.whbtn svg{width:20px;height:20px;fill:currentColor}
+.whbtn svg.ln{fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.whbtn.red{background:var(--c,#d65a4f);color:var(--on-c,#fff)}
+.whbtn.soft{background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg)}
+.whbtn.dark{background:var(--iron);color:var(--on-iron)}
+.whbtn[disabled]{opacity:.5}
