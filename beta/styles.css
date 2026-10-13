@@ -922,3 +922,19 @@ html.wn-open header.top{display:none}
 .wostats b{font-size:22px}
 @media (prefers-reduced-motion: reduce){.ldot,.tcard.flash{animation:none}}
 .tlink{margin-left:auto;border:0;background:none;color:var(--fg);font:600 12px var(--body);letter-spacing:0;text-transform:none;text-decoration:underline;text-underline-offset:3px;padding:2px 0;cursor:pointer}
+/* ===== Review fixes (beta) ===== */
+.membercount{display:flex;align-items:center;gap:6px;margin:0}
+.membercount .live{width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block}
+.selfnote{display:flex;gap:6px;align-items:center;margin:-4px 0 0}
+.rellegend{margin:8px 0 0;line-height:1.45}
+.rellegend b{color:var(--fg)}
+.finnote{margin-top:6px;line-height:1.45}
+.tcard.done{border-style:dashed}
+.rday.bonus i{background:transparent;box-shadow:inset 0 0 0 2px var(--c);color:var(--c);font:900 20px var(--display)}
+.rlegend{margin:6px 0 0;font-size:12px;opacity:.75;text-align:center}
+.shlink{align-self:center;font-size:13px;padding:2px 6px}
+.shelp{margin:4px 0 0;display:grid;grid-template-columns:auto 1fr;gap:8px 14px;align-items:baseline}
+.shelp dt{font-family:var(--display);font-stretch:75%;font-weight:900;text-transform:uppercase;font-size:16px;white-space:nowrap}
+.shelp dd{margin:0;font-size:14px;line-height:1.45;color:var(--muted)}
+.seg [role="tab"]:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+.whero .n{font-size:clamp(52px,19vw,104px)!important;overflow-wrap:normal!important;word-break:keep-all;white-space:nowrap}
