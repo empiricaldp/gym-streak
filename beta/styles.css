@@ -783,6 +783,7 @@ html.wn-open header.top{display:none}
 .wa-wotitle{font-size:48px;margin:2px 0 4px}
 .wa-ex{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:600;color:var(--muted)}
 .wa-ex i{width:22px;height:22px;border-radius:50%;box-shadow:inset 0 0 0 2px var(--line2);flex:none}
+.wa-ex em{margin-left:auto;font:700 13px var(--mono);font-style:normal;color:var(--muted)}
 .wa-ex.on{color:var(--fg)}
 .wa-ex.on i{background:var(--c);box-shadow:none}
 .wa-safe .wa-row{gap:10px}

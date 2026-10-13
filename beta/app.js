@@ -3746,10 +3746,10 @@ function wnArt(kind, m){
       <div class="wa-stats"><b class="sign">14</b><span>day streak</span></div></div>`;
   if (kind === "workout") return `<div class="wa-card wa-wo" style="${me}"><div class="wa-row"><span class="wa-live"></span><span class="wa-lab">Going</span><b class="wa-time">25:02</b></div>
       <b class="sign wa-wotitle">Push</b>
-      ${[["Bench press", 1], ["Incline DB", 1], ["Dips", 0]].map(([n, d]) => `<div class="wa-ex ${d ? "on" : ""}"><i></i><span>${n}</span></div>`).join("")}</div>`;
+      ${[["Bench press", 1, "3 × 8"], ["Incline DB", 1, "3 × 10"], ["Dips", 0, "3 × 12"]].map(([n, d, sr]) => `<div class="wa-ex ${d ? "on" : ""}"><i></i><span>${n}</span><em>${sr}</em></div>`).join("")}</div>`;
   if (kind === "rest") return `<div class="wa-rest" style="${me}"><div class="wa-ringwrap"><svg viewBox="0 0 120 120" width="190" height="190" aria-hidden="true"><circle cx="60" cy="60" r="52" class="wr-bg"/><circle cx="60" cy="60" r="52" class="wr-fg"/></svg>
       <span class="wr-mid"><b>1:02</b><span class="wa-lab">Rest left</span></span></div>
-      <div class="wa-strip"><span class="wa-live"></span><span>Rest 1:02</span><span class="wa-lab">Next: Dips</span></div></div>`;
+      <div class="wa-strip"><span class="wa-live"></span><span>Session 25:02</span><span class="wa-lab">Rest 1:02</span></div></div>`;
   if (kind === "safety") return `<div class="wa-card wa-safe"><div class="wa-row"><span class="dot" style="${bud}"></span><b>Someone</b><span class="wa-dots">•••</span></div>
       <div class="wa-acts"><span>Report</span><span class="bad">Block</span></div></div>`;
   if (kind === "health") return `<div class="wa-health"><span class="wa-pill"><span class="wa-pillfill"></span><span class="wa-pillin"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>1,900</span></span>
@@ -3766,7 +3766,7 @@ function wnArt(kind, m){
 const TOUR_V = 4; let wnShort = false;
 // b54: once per ACCOUNT (saved on your profile), not once per app or phone. If you skipped a few updates, you get
 // all of them in one go. The phone also remembers it showed it, in case saving to the profile failed (bad signal).
-const tourKey = () => "gs-tour-acct-" + TOUR_V + "-" + myId;
+const tourKey = () => (BETA ? "gs-tour-beta-" + TOUR_V + "c-" : "gs-tour-acct-" + TOUR_V + "-") + myId;   // beta: "c" = 3rd wording, so testers see the final version once
 // DP: seeing it in the BETA is only a test — it must not count for the account. So the beta never saves update 3/4 to
 // the profile (it only remembers on this phone); the real "once per account" save happens when it's in the main app.
 // (Making the public/private choice still records tour 2, so the main app doesn't ask that again.)
@@ -3777,8 +3777,8 @@ const UPDATES = [
   { v: 2, kind: "profiles", title: "Profiles", line: "Tap anyone to see their week, streak and trophies." },
   { v: 2, kind: "circles",  title: "Circles",  line: "Private groups for your crew, like a WhatsApp group." },
   { v: 2, kind: "chats",    title: "Chats",    line: "Message your Buds and your circles." },
-  { v: 3, kind: "workout",  title: "Workouts", line: "Tap Start workout on Today. Tick off each exercise as you go." },
-  { v: 3, kind: "rest",     title: "Rest timer", line: "Tick a set and your rest starts. It stays at the bottom while you look around." },
+  { v: 3, kind: "workout",  title: "Workouts", line: "Add your exercises, sets and reps. Tick them off as you go." },
+  { v: 3, kind: "rest",     title: "Timers", line: "Times your whole session, plus every rest between sets." },
   { v: 4, kind: "health",   title: "Health",   line: "Log meals in kcal or kJ. Tap the heart on Today." }];
 const tourSeenHere = () => { try { return !!localStorage.getItem(tourKey()); } catch(e){ return true; } };
 const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch(e){} };
@@ -3997,7 +3997,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b55";   // bump together with version.json on every release
+const APP_VERSION = "b56";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
