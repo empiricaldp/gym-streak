@@ -2120,7 +2120,7 @@ function renderMini(){
     el.className = "womini resting";
     el.setAttribute("aria-label", `Resting, ${clock(left)} left. Open ${w.label || "workout"}`);
     el.innerHTML = `<svg class="mring" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="trk"/><circle cx="12" cy="12" r="9" class="val" id="mini-ring" style="stroke-dasharray:${MINI_C};stroke-dashoffset:${MINI_C * (1 - frac)}"/></svg>
-      <span class="mtxt"><b>Rest</b><span>${esc(w.label || "Workout")}</span></span><b class="sign mnum" id="mini-t">${clock(left)}</b><span class="mchev" aria-hidden="true">›</span>`;
+      <span class="mtxt"><b>Resting</b><span>${esc(w.label || "Workout")}</span></span><b class="sign mnum" id="mini-t">${clock(left)}</b><span class="mchev" aria-hidden="true">›</span>`;
   } else {
     const run = !!w.session_run_at;
     el.className = "womini" + (run ? " live" : "");
@@ -3912,7 +3912,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b49";   // bump together with version.json on every release
+const APP_VERSION = "b50";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
