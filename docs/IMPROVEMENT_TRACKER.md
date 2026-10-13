@@ -79,3 +79,10 @@ Indexes were already fine; the fix is *what* the app asks for. Open question for
 - 027 now hides circle messages BOTH ways when blocked (database rule "hide messages if blocked"); test 29/29 incl. both directions + uninvolved member sees both. Gap from Phase 5 closed.
 - Rewrote privacy_test (15), social_body_test (22), steps_test (11) for Public/Private accounts. Cause of old failures: new accounts start Private now; tests assumed the retired share_attendance switches. Checked separately: no leak through the old rules for Private accounts.
 - Full local DB suite: 214 checks, 0 failures (with 026–028 applied locally; also all pass without them).
+
+## Released 2026-10-13 (DP approved each step)
+- 026 applied → test 8/8 on the real DB, nothing left behind. Rollback: supabase/rollback/026_rollback.sql.
+- 027 applied → test 29/29 on the real DB, nothing left behind; all 39 profiles still visible to a real user (0 blocks). Rollback: supabase/rollback/027_rollback.sql (exact live definitions captured before applying; rollback tested locally).
+- Push function: live code matched the b39 deploy exactly before; after deploy matches repo byte for byte; ping 200 OK. Rollback: supabase/rollback/push_index_before_block_filter.ts.
+- Beta b42 published (GYM_SAFETY on, GYM_DELETE off). Normal app still v50, files untouched.
+- On hold: 028 (delete account). Next: separate beta onto its own test database.

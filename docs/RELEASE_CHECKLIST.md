@@ -14,8 +14,8 @@ Rule: **one change at a time, DP approves each database change separately, and e
 ## B. Database changes (one at a time, each with DP's yes)
 | # | What | Status | Turn on in app with |
 |---|---|---|---|
-| 026 | Undo a log also resets that day's workout (with 30-day backup) | Ready, waiting | Remove beta's own client reset afterwards (optional) |
-| 027 | Block + report | Ready, waiting | `GYM_SAFETY` flag, then deploy push function's block filter |
+| 026 | Undo a log also resets that day's workout (with 30-day backup) | **Live 2026-10-13** (test 8/8 on prod; rollback: supabase/rollback/026_rollback.sql) | Remove beta's own client reset afterwards (optional) |
+| 027 | Block + report | **Live 2026-10-13** (test 29/29 on prod; rollback: supabase/rollback/027_rollback.sql, exact pre-027 definitions) | `GYM_SAFETY` flag, then deploy push function's block filter |
 | 028 | Delete my account | Ready, waiting | `GYM_DELETE` flag |
 
 For each one:
