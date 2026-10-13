@@ -41,7 +41,8 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 
 // ================= Member maths =================
 // A member doc: {name, plate, plan:[{w,opt}|null x7], since, trackStart, days:{date:1}}
-const slot = (m,d) => (m.plan||[])[dow(d)] || null;
+let swaps = new Map();   // one-day swaps: "userId|2026-10-13" → "Push" (beta). Your split stays as it is.
+const slot = (m,d) => { const sw = m && swaps.size && swaps.get(m.id + "|" + key(d)); return sw ? { w: sw, opt: false, swapped: true } : (m.plan||[])[dow(d)] || null; };
 const isGym = (m,d) => { const s = slot(m,d); return !!s && !s.opt; };
 const credited = (m,d) => d < parse(m.trackStart) && d >= parse(m.since) && isGym(m,d);
 const ticked = (m,d) => !!(m.days && m.days[key(d)]);
@@ -242,9 +243,9 @@ function viewToday(){
     ${barbell(m,w)}
     <div class="plates-cap"><span>${w.hit}/${w.target} PLATES LOADED</span><span>${w.left ? w.left+" TO GO" : "FULL BAR"}</span></div>`;
   if (gym) hero += `<button class="cta ${done?"done":""}" id="logbtn" ${db?"":"disabled"}>${done?CHECK+" Session logged":"Log today's session"}</button>
-      <p class="note" style="text-align:center">${done?"Tap again to undo.":"Tap after you've trained."}</p>`;
+      <p class="note" style="text-align:center">${done?"Tap again to undo.":"Tap after you've trained."}</p>${woTodayHtml(m,t)}`;
   else hero += `<button class="cta ghost ${done?"done":""}" id="logbtn" ${db?"":"disabled"}>${done?CHECK+" Bonus logged":"+ Log a bonus session"}</button>
-      <p class="note" style="text-align:center">Rest days never break your streak.</p>`;
+      <p class="note" style="text-align:center">Rest days never break your streak.</p>${woTodayHtml(m,t)}`;
   if (receivedLine(t)) hero += `<p class="recv">${receivedLine(t)}</p>`;
   hero += `</div>`;
   const tiles = `<div class="tiles" style="${pc(m)}">
@@ -257,10 +258,12 @@ function viewToday(){
       <p class="note" style="margin:6px 0 12px">Cheer them on, nudge them and react to their sessions.</p>
       <button class="cta ghost" id="watch-train" style="font-size:18px">Start training</button></div>`;
   }
-  const crew = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o) && !o.watcher);   // just your buds (who train)
+  const crewAll = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o) && !o.watcher);   // just your buds (who train)
+  // Beta: a short preview, people who still need to train first (that's who a nudge helps), then See all
+  const PREVIEW = 5, crew = WORKOUTS ? [...crewAll].sort((a, b) => (isGym(a,t) && !has(a,t) ? 0 : 1) - (isGym(b,t) && !has(b,t) ? 0 : 1)).slice(0, PREVIEW) : crewAll;
   let crewHtml = "";
   if (crew.length){
-    crewHtml = `<div class="sec"><h2 class="sign">Your crew today</h2><span class="label">${crew.length} ${crew.length===1?"person":"people"}</span></div><div class="list">` +
+    crewHtml = `<div class="sec"><h2 class="sign">Your crew today</h2><span class="label">${crewAll.length} ${crewAll.length===1?"person":"people"}</span></div><div class="list">` +
       crew.map(o=>{
         if (!sharesStats(o)) return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · keeps stats private</span></div><span class="status rest">${LOCK}</span></div>`;
@@ -269,8 +272,12 @@ function viewToday(){
           : st === "todo" ? nudgeCtl(o, "data-nudge") : "";
         return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span>${action ? `<span class="rowact">${action}</span>` : ""}</div>
-          <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>`;
-  } else crewHtml = `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">Your buds' sessions show up here.</p>
+          <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>` +
+      (crewAll.length > crew.length ? `<button type="button" class="cta ghost ssm" id="crew-all">See all ${crewAll.length}</button>` : "");
+  } else crewHtml = WORKOUTS ? `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">CREW works solo too.</p>
+      <p class="note">Your streak, week and workouts are yours either way. It's better with friends: you see who's trained, nudge them, and they keep you honest.</p>
+      <div class="row2" style="margin-top:10px"><button class="cta ghost ssm" data-goto-find>Find people</button><button class="cta ssm" id="invite-friend">Invite a friend</button></div></div>`
+    : `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">Your buds' sessions show up here.</p>
       <p class="note">Bud your gym mates to see who's trained today and nudge them. Bud each other and you're Buds.</p>
       <button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find your buds</button></div>`;
 
@@ -317,6 +324,7 @@ function viewToday(){
     topHtml += `<div class="card banner"><span class="big-emoji">📊</span><div class="grow"><b>Your weekly recap is ready</b>
       <span class="note">${lastWk.hit}/${lastWk.target} last week. See it and share it.</span></div>
       <button type="button" class="chip" id="recap-open">See it</button></div>`;
+  if (!topHtml.includes('id="recap-open"')) topHtml += freshStartHtml(m, t);    // one "about last week" card at a time
 
   let stepsHtml = "";
   if (!STEPS_ENABLED){ /* steps hidden */ }
@@ -336,8 +344,11 @@ function viewToday(){
       <button class="linkbtn" id="steps-setup" style="padding-left:0">Set it up</button></div></div>`;
   }
   const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
-  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${m.watcher ? "" : tiles + stepsHtml + q}${crewHtml}${circleRow}</div>`;
+  main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${m.watcher ? "" : tiles + streakHelpLink() + stepsHtml + q}${WORKOUTS ? circleRow + crewHtml : crewHtml + circleRow}${streakHelpHtml()}</div>`;
   if ($("watch-train")) $("watch-train").onclick = () => startOnboarding(true, "split");
+  if ($("crew-all")) $("crew-all").onclick = () => { crewView = "buds"; setTab("crew"); };
+  if ($("invite-friend")) $("invite-friend").onclick = inviteFriend;
+  if ($("wo-go")) $("wo-go").onclick = () => startWorkout(t);
   if ($("logbtn")) $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
   main().querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => { b.disabled = true; sendNudge(b.dataset.nudge); });
@@ -386,13 +397,16 @@ function cellBtn(o,d){
 
 function viewCrew(){
   const seg = `<div class="seg levelseg crewseg" role="tablist">${[["buds","My crew"],["circles","Circles"],["everyone","Everyone"]].map(([id,l]) =>
-    `<button type="button" role="tab" data-crewview="${id}" aria-pressed="${crewView===id}">${l}</button>`).join("")}</div>`;
+    `<button type="button" role="tab" id="crewtab-${id}" data-crewview="${id}" aria-selected="${crewView===id}" aria-pressed="${crewView===id}" tabindex="${crewView===id ? 0 : -1}">${l}</button>`).join("")}</div>`;
   if (crewView === "circles"){ viewCirclesTab(seg); }
   else if (crewView === "everyone"){
-    const top = seg + `<input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
-      <div class="list peoplelist" id="people">${everyone().map(personRow).join("")}</div>
+    const top = seg + `<input class="field findq" id="find-q" type="search" placeholder="Search people${scoped ? " by name" : ""}" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="list peoplelist" id="people">${(scoped ? (searchHits || []) : everyone()).map(personRow).join("")}</div>
+      ${scoped && !searchHits ? `<p class="note" style="text-align:center">Type at least 2 letters to search everyone on CREW.</p>` : ""}
       <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
-    crewBoard(statsCrew().filter(o => o.id === myId || !o.private), [], top, { title: "Public leaderboard", weekBoard: false });
+    if (WORKOUTS) crewBoard([], [], top + `<p class="note boardhint">Leaderboards are in <b>My crew</b> (your Buds) and inside each <b>Circle</b>.</p>`, {});   // DP: Buds + Circles only, no global board
+    else crewBoard(statsCrew().filter(o => o.id === myId || !o.private), [], top, { title: scoped ? "Leaderboard · people you know" : "Public leaderboard", weekBoard: false,
+      note: me()?.private ? `<p class="note selfnote">${LOCK} Your account is private, so you're only on this list for yourself. Others don't see you here.</p>` : "" });
     wireFind();
   } else {
     const list = budsCrew();
@@ -401,6 +415,7 @@ function viewCrew(){
     crewBoard(list, [], seg + empty, { title: "My crew", weekBoard: list.length > 1 });
   }
   main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
+  { const v = main().querySelector(".view"); if (v){ v.setAttribute("role", "tabpanel"); v.setAttribute("aria-labelledby", "crewtab-" + crewView); } }
 }
 // One row in "Find people": plate, name, streak (or Private), bud button
 function personRow(o){
@@ -411,11 +426,33 @@ function personRow(o){
 }
 function wireFind(){
   const q = $("find-q"); if (!q) return;
+  if (scoped){                                              // big CREW: ask the server, 30 at a time
+    q.oninput = () => { findQ = q.value; clearTimeout(searchT); const term = tidyName(q.value);
+      if (term.length < 2){ if (searchHits){ searchHits = null; render(); } return; }
+      const seq = ++searchSeq;
+      searchT = setTimeout(async () => {
+        const safe = term.replace(/[%_,()*]/g, "");
+        const { data, error } = await sb.from("people").select(PEOPLE_COLS).ilike("name", `%${safe}%`).order("name").limit(30);
+        if (seq !== searchSeq) return;
+        if (error) return showWarn(oops("search", error));
+        searchHits = (data || []).filter(p => p.id !== myId).map(p => members.get(p.id) || memberFrom(p)); render();
+        const f = $("find-q"); if (f){ f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+        if ($("find-none")) $("find-none").hidden = searchHits.length > 0;
+      }, 300); };
+    return;
+  }
   const apply = () => { findQ = q.value; const n = tidyName(q.value).toLowerCase(); let shown = 0;
     main().querySelectorAll("#people [data-name]").forEach(r => { const hit = !n || r.dataset.name.includes(n); r.hidden = !hit; if (hit) shown++; });
     $("find-none").hidden = shown > 0; };
   q.oninput = apply; apply();
 }
+// Tab lists: arrow keys move between tabs (screen-reader / keyboard users), like native tabs
+document.addEventListener("keydown", e => {
+  const t = e.target; if (!(t instanceof HTMLElement) || t.getAttribute("role") !== "tab" || !["ArrowLeft","ArrowRight","Home","End"].includes(e.key)) return;
+  const tabs = [...t.closest('[role="tablist"]').querySelectorAll('[role="tab"]')], i = tabs.indexOf(t);
+  const n = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+  e.preventDefault(); tabs[n].click(); setTimeout(() => { const again = document.querySelectorAll('[role="tab"]')[n]; again && again.focus(); }, 30);
+});
 function crewBoard(list, quiet, top, opts){
   const t = today(), ws = startOfWeek(t);
   const watching = list.filter(o => o.watcher); list = list.filter(o => !o.watcher);   // watchers cheer, they don't compete
@@ -444,7 +481,7 @@ function crewBoard(list, quiet, top, opts){
     const tag = (w.over||!w.left) ? (w.hit>=w.target?["done","Target hit"]:["todo","Missed "+(w.target-w.hit)]) : w.missed?["todo","Missed "+w.missed]:["todo",w.left+" to go"];
     return `<div class="li" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span><span class="note">${w.hit} of ${w.target} gym days${w.bonus?` · +${w.bonus} bonus`:""}</span></div><span class="status ${tag[0]}">${tag[1]}</span></div>`; }).join("");
   main().innerHTML = `<div class="view">
-    ${top}<div class="sec"><h2 class="sign">${opts.title}</h2><span class="label">By day streak</span></div>
+    ${top}<div class="sec"><h2 class="sign">${opts.title}</h2><span class="label">By day streak</span></div>${opts.note || ""}
     <div class="crewkey" aria-hidden="true"><span><span class="week7"><i class="d"></i></span>Trained</span><span><span class="week7"><i class="m"></i></span>Missed</span><span><span class="week7"><i class="f"></i></span>Freeze</span><span><span class="week7"><i class="g"></i></span>To come</span></div>${board}
     ${(() => { if (!STEPS_ENABLED) return "";
       const sharers = roster().filter(seesSteps);
@@ -489,10 +526,10 @@ function viewTrophies(){
     const w = weekStats(m,s);
     hist += `<div class="li hist"><span>Week of ${fmt(s)}</span><span class="mono">${w.hit}/${w.target}</span><span class="status ${w.hit>=w.target?"done":"todo"}">${w.hit>=w.target?"Hit":"Missed"}</span></div>`;
   }
-  main().innerHTML = `<div class="view">
+  main().innerHTML = `<div class="view">${WORKOUTS ? `<button type="button" class="linkbtn pfback" id="tp-back">‹ Back</button>` : ""}
     <div class="chips" role="group" aria-label="Whose trophies">${list.map(o=>`<button class="chip" data-tp="${esc(o.id)}" aria-pressed="${o.id===m.id}" style="${pc(o)}"><span class="dot"></span>${esc(o.name)}</button>`).join("")}</div>
     ${m.id === myId ? `<div class="sec" style="margin-top:4px"><h2 class="sign">Weekly recap</h2></div>${recapCard(m)}<div class="sec"><h2 class="sign">Trophies</h2></div>` : ""}
-    <div class="whero" style="${pc(m)}"><span class="ring"></span><span class="label">${esc(m.name)} is on</span>
+    ${streakHelpLink()}${streakHelpHtml()}<div class="whero" style="${pc(m)}"><span class="ring"></span><span class="label">${esc(m.name)} is on</span>
       <span class="n sign">Week ${weekNo(m)}</span>
       <span class="s">${done} week${done===1?"":"s"} in a row · ${dayStreak(m)} day streak · best run ${bestStreak(m)}</span>
       ${next?`<span class="label" style="margin-top:10px">Next: ${next.name} in ${next.n-done} week${next.n-done===1?"":"s"}</span><div class="pg"><i style="width:${Math.round(frac*100)}%"></i></div>`:`<span class="label" style="margin-top:10px">Every milestone unlocked. Legend.</span>`}
@@ -503,6 +540,7 @@ function viewTrophies(){
     <div class="list">${hist || `<div class="li"><span class="note">The first finished week lands here next Monday.</span></div>`}</div></div>`;
   main().querySelectorAll("[data-tp]").forEach(b => b.onclick = () => { trophyFor = b.dataset.tp; render(); });
   if (m.id === myId) wireRecap(m);
+  if ($("tp-back")) $("tp-back").onclick = () => setTab(TITLES[trophyBack] ? trophyBack : "you");
 }
 
 function viewYou(){
@@ -517,10 +555,11 @@ function viewYou(){
       <li>They open it from there, tap <b>Create account</b> and answer 6 quick questions.</li></ol>
     <button class="cta ghost" id="copylink" style="margin-top:12px;font-size:18px">Copy link</button></div>`;
   const acct = `<p class="note" style="text-align:center">Signed in as ${esc(session?.user?.email || "")}</p>
-    <button class="cta ghost" id="logout">Log out</button>`;
+    <button class="cta ghost" id="logout">Log out</button>${DELETE_ON ? `<button type="button" class="linkbtn sfdanger" id="del-open" style="align-self:center;margin-top:14px">Delete my account</button>` : ""}`;
   if (!m){ main().innerHTML = `<div class="view"><div class="card"><p style="margin:0;font-weight:600">You haven't set up your plan yet.</p><p class="note">Go to Today and tap Get started.</p></div>${invite}${acct}</div>`; }
   else {
     const backBtn = `<button type="button" class="linkbtn pfback" id="you-back">‹ Profile</button>`;
+    if (youView === "delete") return viewDelete();
     if (youView === "edit"){
       $("title").textContent = "Edit profile";
       main().innerHTML = `<div class="view">${backBtn}
@@ -536,8 +575,9 @@ function viewYou(){
     }
     $("title").textContent = "Settings";
     main().innerHTML = `<div class="view">${backBtn}
-      <div class="sec" style="margin-top:0"><h2 class="sign">Account</h2><span class="label">${privacySummary(m)}</span></div>
+      <div class="sec" style="margin-top:0"><h2 class="sign">${WORKOUTS ? "Privacy & safety" : "Account"}</h2><span class="label">${privacySummary(m)}</span></div>
       <div class="card">${privacyPicker(pvFrom(m))}${spottersNote(pvFrom(m))}<p class="note" id="pv-status" style="margin-top:10px">Changes save straight away.</p></div>
+      ${blockedCardHtml()}
       ${bodyCard()}
       ${STEPS_ENABLED ? healthCard(m) : ""}
       ${notifCard()}
@@ -545,7 +585,7 @@ function viewYou(){
       <div class="sec"><h2 class="sign">What's new</h2></div>
       <div class="card"><p class="note" style="margin:0 0 10px">See the quick tour of Buds, Profiles, Circles and Chats again.</p><button class="cta ghost" id="wn-replay" style="font-size:18px">Replay the tour</button></div>
       <div class="sec"><h2 class="sign">Invite</h2></div>
-      ${invite}${acct}</div>`;
+      ${invite}${WORKOUTS ? `<div class="sec"><h2 class="sign">Account</h2></div>` : ""}${acct}</div>`;
     $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
     $("wn-replay").onclick = startTour;
     wireNotifCard();
@@ -559,6 +599,7 @@ function viewYou(){
     });
   }
   $("copylink").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied"); } catch(e){ toast("Copy failed"); } };
+  if ($("del-open")) $("del-open").onclick = () => { youView = "delete"; render(); window.scrollTo(0,0); };
   $("logout").onclick = async () => {
     // stop this device getting your notifications once you've logged out
     try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager?.getSubscription();
@@ -800,7 +841,8 @@ function recapData(m, start){
   const end = addDays(start, 6), t = today(), upTo = end < t ? end : t;
   const w = weekStats(m, start);
   const days = Array.from({length:7}, (_,i) => { const d = addDays(start,i);
-    return { d, state: has(m,d) ? "done" : frozen(m,d) ? "froze" : isGym(m,d) ? (d < t ? "missed" : "todo") : (ticked(m,d) ? "bonus" : "rest") }; });
+    // planned day first: a session on a rest/optional day is a BONUS, not one of the planned sessions
+    return { d, state: isGym(m,d) ? (has(m,d) ? "done" : frozen(m,d) ? "froze" : d < t ? "missed" : "todo") : (ticked(m,d) ? "bonus" : "rest") }; });
   const got = reactions.filter(r => r.to_user === myId && r.day >= key(start) && r.day <= key(end)).length;
   // which week number this was: weeks completed before it, +1
   let before = 0; const floor = startOfWeek(parse(m.since));
@@ -818,7 +860,7 @@ function recapCard(m){
   const ws = startOfWeek(today()), start = recapWhich === "last" ? addDays(ws,-7) : ws;
   if (start < startOfWeek(parse(m.since))) return "";
   const r = recapData(m, start);
-  const strip = r.days.map((x,i) => `<span class="rday ${x.state}"><i>${x.state==="done"||x.state==="bonus"?CHECK:x.state==="froze"?"❄️":""}</i><small>${DAYS[i][0]}</small></span>`).join("");
+  const strip = r.days.map((x,i) => `<span class="rday ${x.state}"><i aria-label="${({done:"trained",bonus:"bonus session",froze:"freeze used",missed:"missed",todo:"still to come"})[x.state] || "rest"}">${x.state==="done"?CHECK:x.state==="bonus"?"+":x.state==="froze"?"❄️":""}</i><small>${DAYS[i][0]}</small></span>`).join("");
   return `<div class="recap" style="${pc(m)}">
     <div class="chips" role="group" aria-label="Which week" style="margin-bottom:2px">
       <button class="chip" data-recap="last" aria-pressed="${recapWhich==="last"}">Last week</button>
@@ -827,7 +869,7 @@ function recapCard(m){
       <span class="label">Week ${r.weekNo} recap · ${fmt(r.start)} – ${fmt(r.end)}</span>
       <b class="sign rhead">${recapHeadline(r)}</b>
       <div class="rbig"><b class="sign">${r.w.hit - r.w.froze}<small>/${r.w.target}</small></b><span class="label">sessions</span></div>
-      <div class="rstrip">${strip}</div>
+      <div class="rstrip">${strip}</div>${r.w.bonus ? `<p class="rlegend">✓ planned session · + bonus (an extra day, not in your split)</p>` : ""}
       <div class="rstats">
         <div><b class="sign">${r.streak}</b><span class="label">day streak</span></div>
         <div><b class="sign">${r.w.bonus}</b><span class="label">bonus</span></div>
@@ -907,10 +949,10 @@ function privacyPicker(p){
   return `<div class="privacy">
     <button type="button" class="popt ${p.priv === true ? "on" : ""}" data-pv="priv" aria-pressed="${p.priv === true}">
       <span class="pt">${LOCK} Private</span>
-      <span class="pd">People send a bud request. Only buds you approve see your profile and streak.</span></button>
+      <span class="pd">New people send a bud request you approve. People already spotting you keep seeing you until you remove them.</span></button>
     <button type="button" class="popt ${p.priv === false ? "on" : ""}" data-pv="pub" aria-pressed="${p.priv === false}">
       <span class="pt">🔓 Public</span>
-      <span class="pd">Anyone can see your profile and bud you straight away.</span></button>
+      <span class="pd">Anyone on CREW can see your profile and streak, and spot you straight away.</span></button>
     <div class="toggles"><label class="tg" for="pv-hide"><span><b>Hide my split</b><small>Show that you trained, not what you trained</small></span>
       <input type="checkbox" class="sw" id="pv-hide" ${p.hide?"checked":""}></label></div>
   </div>`;
@@ -1123,6 +1165,7 @@ function startOnboarding(edit, only){
 function viewOnboarding(){
   // Steps by name, so adding a question is just adding a word here
   const STEPS = ob.only ? [ob.only] : ob.edit ? ["name","goal","plate","split","review"]
+    : WORKOUTS ? (ob.watch ? ["name","why","plate","privacy","review"] : ["name","why","goal","plate","split","experience","streak","privacy","review"])
     : ob.watch ? ["name","goal","plate","split","privacy","review"] : ["name","goal","plate","split","experience","streak","privacy","review"];
   const total = STEPS.length, s = ob.step, k = STEPS[s], qn = s + 1;
   const ql = ob.only ? "Edit" : "Question " + qn;      // label above each question
@@ -1132,6 +1175,11 @@ function viewOnboarding(){
       <input class="field" id="f-name" type="text" maxlength="20" placeholder="e.g. DP" value="${esc(ob.name)}" autocomplete="nickname" autocapitalize="words" spellcheck="false">
       <p class="note namemsg ${ob.nameState === "taken" || ob.nameState === "bad" ? "bad" : ob.nameState === "ok" ? "ok" : ""}" id="name-msg">${esc(ob.nameMsg || "Letters and numbers only, no emoji. Each name can only be used once.")}</p>`;
     canNext = ob.nameState === "ok"; }
+  if (k==="why"){ body = `<span class="label">${ql}</span><h2 class="sign">What brings you to CREW?</h2>
+      <div class="whypick">
+        <button type="button" class="path${ob.why === "train" ? " on" : ""}" data-why="train" aria-pressed="${ob.why === "train"}"><b>🏋️ I train</b><small>Log gym days, keep a streak, show up with your crew.</small></button>
+        <button type="button" class="path watchpath${ob.why === "watch" ? " on" : ""}" data-why="watch" aria-pressed="${ob.why === "watch"}"><b>👀 I'm here for my friends</b><small>No split, no gym questions. Cheer them on and keep them honest. You can start training any time.</small></button></div>`;
+    canNext = !!ob.why; }
   if (k==="goal"){ body = `<span class="label">${ql}</span><h2 class="sign">What are your goals?</h2>
       <p class="note">Only you see this. It tunes your motivation messages and your weight trend.</p>${goalPicker(ob.goals)}`;
     canNext = ob.goals.length > 0; }
@@ -1151,10 +1199,10 @@ function viewOnboarding(){
       <p class="note">You can change this any time in the You tab.</p>${privacyPicker(ob.pv)}`; }
   const isReview = k === "review", last = isReview || !!ob.only;
   if (isReview){ const gym = ob.plan.filter((w,i)=>normalizeWorkout(w)&&!ob.opt[i]).length;
-    body = `<span class="label">Check it</span><h2 class="sign">${ob.edit?"Save changes":"Ready to lift"}</h2>
+    body = `<span class="label">Check it</span><h2 class="sign">${ob.edit?"Save changes":ob.watch?"Ready to cheer":"Ready to lift"}</h2>
       <div class="review" style="--c:var(--p-${ob.plate})">
         <div><span>Name</span><b>${esc(ob.name)}</b></div>
-        <div><span>Goals</span><b>${esc(goalsText(ob.goals) || "Not set")}</b></div>
+        ${ob.watch ? "" : `<div><span>Goals</span><b>${esc(goalsText(ob.goals) || "Not set")}</b></div>`}
         <div><span>Plate</span><b style="display:flex;align-items:center;gap:6px">${plateSvg(ob.plate, 22)}${plateName(ob.plate)}</b></div>
         <div><span>Gym days a week</span><b>${ob.watch ? "Just watching 👀" : gym}</b></div>
         ${ob.edit?"":`${ob.watch ? "" : `<div><span>Gym experience</span><b>${esc(durText(ob.exp))}</b></div>
@@ -1166,6 +1214,7 @@ function viewOnboarding(){
     <div class="row2"><button class="cta ghost" id="ob-back">${s===0 && !(k==="split" && (ob.splitMode==="ready" || ob.splitMode==="custom" || (ob.splitMode==="review" && !ob.edit))) ? "Cancel" : "Back"}</button>
     <button class="cta" id="ob-next" ${canNext?"":"disabled"} ${k==="split" && (ob.splitMode===null || ob.splitMode==="ready") ? "hidden" : ""}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
   const nextBtn = $("ob-next");
+  main().querySelectorAll("[data-why]").forEach(b => b.onclick = () => { ob.why = b.dataset.why; ob.watch = ob.why === "watch"; render(); });
   const refresh = () => { const ok = k==="name" ? ob.nameState === "ok" : k==="goal" ? ob.goals.length > 0 : k==="split" ? splitReady() : true; nextBtn.disabled = !ok; };
   if (k==="name"){
     const f = $("f-name"), msg = $("name-msg");
@@ -1241,7 +1290,7 @@ function splitStepHtml(ql){
         <span class="sc-top"><b>${esc(x.name)}</b><span class="sc-days">${gymDays(x.days)} days</span></span>
         <small>${esc(x.desc)}</small>${weekStrip(x.days)}</button>`).join("");
     return head("Pick a split") + `<div class="seg levelseg" role="tablist">${LEVELS.map(([id,l]) =>
-        `<button type="button" role="tab" data-level="${id}" aria-pressed="${id===lvl}">${l}</button>`).join("")}</div>
+        `<button type="button" role="tab" data-level="${id}" aria-selected="${id===lvl}" aria-pressed="${id===lvl}" tabindex="${id===lvl ? 0 : -1}">${l}</button>`).join("")}</div>
       <div class="splitcards">${cards}
         <button type="button" class="splitcard buildown" data-path="custom"><span class="sc-top"><b>Build my own</b><span class="sc-days">Custom</span></span>
           <small>None of these fit? Choose what you train each day.</small></button></div>`;
@@ -1378,6 +1427,53 @@ function saveTimeZone(saved){
   const tz = phoneTZ();
   if (tz && saved !== undefined && saved !== tz) sb.from("profiles").update({ tz }).eq("id", myId).then(() => {}, () => {});
 }
+// ---- Delete my account (beta, needs migration 028; switched on with GYM_DELETE once 028 is applied) ----
+function viewDelete(){
+  $("title").textContent = "Delete account";
+  main().innerHTML = `<div class="view"><button type="button" class="linkbtn pfback" id="del-back">‹ Settings</button>
+    <div class="card"><h3 class="sign" style="margin:0 0 8px">This removes you from CREW for good.</h3>
+      <ul class="sflist"><li>Your profile, streak, gym days, workouts and plans</li><li>Your Buds, Spotting and Spotters</li>
+        <li>Messages you sent and received, nudges and reactions</li><li>You leave every Circle (if you were the only admin, the longest member takes over)</li></ul>
+      <p class="note" style="margin-top:10px">It can't be undone. Want a break instead? Log out, or set your account to Private.</p>
+      <label class="label" for="del-word" style="display:block;margin-top:12px">Type DELETE to confirm</label>
+      <input class="field" id="del-word" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="DELETE">
+      <button class="cta sfdanger" id="del-go" disabled style="margin-top:12px">Delete my account</button></div></div>`;
+  $("del-back").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); };
+  $("del-word").oninput = e => { $("del-go").disabled = e.target.value.trim() !== "DELETE"; };
+  $("del-go").onclick = async () => {
+    const btn = $("del-go"); btn.disabled = true; btn.textContent = "Deleting…";
+    try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager?.getSubscription(); if (sub) await sub.unsubscribe(); } catch(_) {}
+    const { error } = await sb.rpc("delete_my_account", { confirm: "DELETE" });
+    if (error){ btn.disabled = false; btn.textContent = "Delete my account"; return showWarn(oops("delete your account", error)); }
+    try { Object.keys(localStorage).filter(k => k.startsWith("gs-")).forEach(k => localStorage.removeItem(k)); } catch(_) {}
+    youView = "profile"; await sb.auth.signOut(); toast("Your account has been deleted.");
+  };
+}
+
+// ---- Scale: once CREW is big, load only the people you know (you, anyone you bud / who buds you, your circles) ----
+// Measured on a 10,000-member test database: loading every check-in = 480,000 rows / 70 s (unusable);
+// scoped = ~1,000 rows / 0.2 s. Below the limit nothing changes. Everyone else is found by SEARCH (server-side).
+const SCALE_LIMIT = Number(window.GYM_SCALE_LIMIT) || 400, PEOPLE_COLS = "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters,watcher";
+let scoped = false, extraIds = new Set(), searchHits = null, searchT = null, searchSeq = 0;
+const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
+const memberFrom = p => ({ id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
+  isPublic:!p.private, shareAtt:p.visible, shareSplit:!p.split_hidden, privacyChosen:true, shareSteps:false,
+  private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0, watcher:!!p.watcher,
+  days:{}, steps:{}, stepsAt:null });
+async function fetchIn(table, cols, col, ids, extra){
+  const out = [];
+  for (let i = 0; i < ids.length; i += 100){                 // 100 ids per request keeps the web address short
+    let q = sb.from(table).select(cols).in(col, ids.slice(i, i + 100)); if (extra) q = extra(q);
+    const { data, error } = await q.range(0, 9999); if (error) throw error; out.push(...data);
+  }
+  return out;
+}
+async function scopedIds(){
+  const [b, cm] = await Promise.all([fetchAll("buds", "follower,followee"), fetchAll("circle_members", "user_id")]);   // the database returns only YOUR rows
+  const ids = new Set([myId, ...extraIds]); b.forEach(r => { ids.add(r.follower); ids.add(r.followee); }); cm.forEach(r => ids.add(r.user_id));
+  return [...ids];
+}
+const SINCE_DAYS = 400;   // scoped mode keeps ~13 months of history per person (streaks longer than that show as 400+)
 let editSeq = 0, reloadAgain = false, loadGen = 0, failed = new Set();   // loadGen: bumped on sign-out so old loads are thrown away   // editSeq goes up every time I tick/untick a day
 async function loadAll(){
   if (loading){ reloadAgain = true; return loading; }   // a change arrived mid-load: load again afterwards
@@ -1385,10 +1481,13 @@ async function loadAll(){
   const before = ready && myId ? { members, reactions, nudges, circles } : null;   // what we had, to spot what's new
   loading = (async () => {
     try {
-      const [profiles, checkins] = await Promise.all([
-        // "crew" is a database view that already strips out whatever each person keeps private
+      if (WORKOUTS){ const { data } = await sb.rpc("member_count"); if (typeof data === "number"){ memberCount = data; scoped = data > SCALE_LIMIT; renderHeaderCount(); } }
+      const [profiles, checkins] = scoped
+        ? await scopedIds().then(ids => Promise.all([fetchIn("people", PEOPLE_COLS, "id", ids),
+            fetchIn("checkins", "user_id,day", "user_id", ids, q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))]))
+        : await Promise.all([
         // "people" (database view) = everyone, with only what I'm allowed to see about each person
-        fetchAll("people", "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters,watcher"),
+        fetchAll("people", PEOPLE_COLS),
         fetchAll("checkins", "user_id,day")
       ]);
       // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
@@ -1399,12 +1498,7 @@ async function loadAll(){
         stepsKey = own.data?.steps_token || null;
       }
       const next = new Map();
-      // tidy older, hand-typed split names on the way in ("back bicep" -> "Back + Biceps")
-      const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
-      for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
-        isPublic:!p.private, shareAtt:p.visible, shareSplit:!p.split_hidden, privacyChosen:true, shareSteps:false,
-        private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0, watcher:!!p.watcher,
-        days:{}, steps:{}, stepsAt:null });
+      for (const p of profiles) next.set(p.id, memberFrom(p));
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       // Streak freezes (the database only returns your own + people who share attendance)
@@ -1412,17 +1506,21 @@ async function loadAll(){
       // keep what we had instead of treating it as "empty" (that kicked people out of circles and caused false banners).
       const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
       const soft = p => p.then(v => v, () => null);           // null = this part failed
-      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows] = await Promise.all([
+      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows, planRows, blockRows, swapRows] = await Promise.all([
         soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
         soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
         soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
-        soft(fetchAll("chat_reads", "chat,read_at")),
+        soft(CHATDEL ? fetchAll("chat_reads", "chat,read_at,cleared_at").then(r => { chatDelOk = true; return r; }, () => { chatDelOk = false; return fetchAll("chat_reads", "chat,read_at"); }) : fetchAll("chat_reads", "chat,read_at")),
         soft(fetchAll("freezes", "user_id,day")),
         soft(fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8))))),
         soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
         soft(fetchAll("nudges", "to_user", q => q.eq("from_user", myId))),
-        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz").eq("id", myId).maybeSingle(),
-        soft(fetchAll("bodyweight", "day,kg", q => q.order("day")))]);
+        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz" + (WORKOUTS ? ",weight_unit,rest_s,rest_auto" : "")).eq("id", myId).maybeSingle(),
+        soft(fetchAll("bodyweight", "day,kg", q => q.order("day"))),
+        WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at,session_ms,session_run_at,duration_s", q => q.gte("day", key(addDays(today(), -120))))) : null,
+        WORKOUTS ? soft(fetchAll("workout_plans", "label,exercises,updated_at")) : null,
+        SAFETY ? soft(fetchAll("blocks", "blocked")) : null,
+        WORKOUTS ? soft(fetchAll("day_swaps", "user_id,day,label", q => q.gte("day", key(addDays(today(), -60))))) : null]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
       failed = new Set();
       // Circles I'm in (the database only returns those) and their members
@@ -1434,6 +1532,7 @@ async function loadAll(){
       if (msgRows){ const got = new Set(msgRows.map(m => m.id));
         messages = [...msgRows, ...messages.filter(m => !got.has(m.id) && (m.pending || m.failed || m.created_at > fetchedAt))]; }
       for (const r of readRows || []) if (!chatReads[r.chat] || r.read_at > chatReads[r.chat]) chatReads[r.chat] = r.read_at;
+      if (readRows) for (const r of readRows) if (r.cleared_at && (!chatCleared[r.chat] || r.cleared_at > chatCleared[r.chat])) chatCleared[r.chat] = r.cleared_at;
       if (freezeRows) for (const f of freezeRows){ const m = next.get(f.user_id); if (m){ (m.frozen = m.frozen || {})[f.day] = 1; } }
       else for (const [id, m] of next){ const old = members.get(id); if (old?.frozen) m.frozen = old.frozen; }
       // Reactions from the last week, nudges to/from me from the last 2 days
@@ -1453,11 +1552,22 @@ async function loadAll(){
         body.height = mine.data.height_cm ? Number(mine.data.height_cm) : null;
       }
       if (wRows) body.weights = wRows.map(r => ({ day: r.day, kg: Number(r.kg) }));
+      // Workouts (mine + my Buds'). Never overwrite the one I'm editing or one that hasn't saved yet.
+      if (woRows){ const local = workouts.filter(w => w.user_id === myId && (w.day === woDay || w.dirty));
+        for (const l of local){ const srv = woRows.find(r => r.user_id === myId && r.day === l.day); if (srv && srv.finished_at && !l.finished_at) l.finished_at = srv.finished_at; }
+        workouts = [...woRows.filter(r => !local.some(l => l.user_id === r.user_id && l.day === r.day)), ...local]; }
+      if (planRows) plans = planRows;
+      if (blockRows) blockedIds = new Set(blockRows.map(r => r.blocked));
+      if (swapRows) swaps = new Map(swapRows.map(r => [r.user_id + "|" + r.day, r.label]));
+      if (WORKOUTS && mine.data?.weight_unit) unit = mine.data.weight_unit;
+      if (WORKOUTS && mine.data && "rest_s" in mine.data) restPrefs = { s: mine.data.rest_s ?? 90, auto: mine.data.rest_auto !== false };
+      if (WORKOUTS && !rest) loadRestLocal();
       // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
       if (gen !== loadGen) return;
       members = next; ready = true; $("warn").hidden = true;
+      try { reconcileWorkouts(); } catch(e){ console.warn("reconcile", e); }
       if (before) try { announce(before, failed); } catch(e){ console.warn("banner", e); }
     } catch(e){ showWarn(oops("load the crew", e)); ready = true; }
     finally { loading = null; if (gen === loadGen){ renderSoft(); loadMemberCount(); } if (reloadAgain){ reloadAgain = false; reloadSoon(); } }
@@ -1479,8 +1589,10 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"buds" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"circles" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"circle_members" }, reloadSoon)
-    .on("postgres_changes", { event:"*", schema:"public", table:"messages" }, onMessageLive)
-    .subscribe();
+    .on("postgres_changes", { event:"*", schema:"public", table:"messages" }, onMessageLive);
+  if (WORKOUTS) channel.on("postgres_changes", { event:"*", schema:"public", table:"day_swaps" }, p => { if ((p.new?.user_id || p.old?.user_id) !== myId) reloadSoon(); });
+  if (WORKOUTS) channel.on("postgres_changes", { event:"*", schema:"public", table:"workouts" }, p => { if ((p.new?.user_id || p.old?.user_id) !== myId) reloadSoon(); });
+  channel.subscribe();
 }
 
 // ================= Writes =================
@@ -1489,6 +1601,7 @@ async function toggleDay(d){
   const m = me(); if (!m || !db) return;
   const k = key(d); if (busy.has(k)) return; busy.add(k); editSeq++;
   const was = !!(m.days && m.days[k]), before = weekStats(m,startOfWeek(d));
+  if (was && WORKOUTS) resetWorkoutFor(k);         // unlogged = "I didn't train": the workout goes back to a fresh start
   const days = {...(m.days||{})}; if (was) delete days[k]; else days[k] = 1;
   members.set(myId, {...m, days});
   if (!was && isGym(m,d) && key(startOfWeek(d)) === key(startOfWeek(today()))){   // the new plate slides on
@@ -1519,23 +1632,1002 @@ async function toggleDay(d){
   }
 }
 
+// ================= Workout details (beta) =================
+// You write your workout ONCE per split day (your plan: exercises, sets, reps, weight). "Start workout" opens it
+// already filled in, so there's nothing to type mid-set: just tick ✓ each exercise as you finish it. If a number
+// changed, it's a scroll wheel. Finishing logs the day (→ the ONE notification your crew gets) and updates your plan
+// to today's numbers, so next time is ready too. Forgot to finish? The server finishes it after 2 quiet hours.
+// Buds see your workouts (the database enforces that). Plans are private. Weights are stored in kg, shown in kg or lb.
+const WORKOUTS = !!window.GYM_BETA || !!window.GYM_WORKOUTS;   // the new app (workouts, split tab, header count…): beta, and the main app from v51
+const DELETE_ON = WORKOUTS && !!window.GYM_DELETE;   // 'Delete my account' — switched on once migration 028 is applied
+// Health (b52): calories, BMI, height & weight. Also needs migration 029 — until it's applied the heart button stays hidden.
+const HEALTH = WORKOUTS && !!window.GYM_HEALTH;
+let meals = [], hp = { goal: null, unit: "kcal", notify: false, at: "22:00" }, healthOk = false, healthView = null, healthBack = "today";
+let mealSheet = null, bodySheet = null;   // the "Add meal" sheet and the height / weight / goal sheet
+// Chats (b53): a new-chat button, delete a chat (just for you), admins delete a circle. Deleting needs migration 030.
+const CHATDEL = WORKOUTS && !!window.GYM_CHATDEL;
+let chatCleared = {}, chatDelOk = false, chatEdit = false, chatAsk = null, newChat = null;   // newChat = search text while picking who to message
+let workouts = [], plans = [], unit = "kg", woDay = null, woSaveT = null, woErr = null, woAdding = false, woDiscardAsk = false, woOpenEx = null;
+let woPlan = null;                                       // the plan being written: { label, exercises, then: "start"|"back"|"workout", day }
+const lc = s => String(s || "").trim().toLowerCase();
+const myWo = k => workouts.find(w => w.user_id === myId && w.day === k) || null;
+const woOf = id => workouts.filter(w => w.user_id === id).sort((a, b) => b.day.localeCompare(a.day));
+const woDone = w => (w.exercises || []).filter(e => e.done);
+const woLabelFor = (m, d) => isGym(m, d) ? (slot(m, d)?.w || "Gym day") : "Bonus session";
+const planFor = label => plans.find(p => lc(p.label) === lc(label)) || null;
+const myNames = () => [...new Set([...plans.flatMap(p => p.exercises || []), ...woOf(myId).flatMap(w => w.exercises || [])].map(e => e.name).filter(Boolean))].sort();
+
+// ---- kg / lb. Stored in kg; shown in whichever you picked. ----
+const LB = 0.45359237;
+const showW = kg => kg == null ? null : unit === "lb" ? Math.round(kg / LB * 2) / 2 : Math.round(kg * 100) / 100;
+const toKg = v => v === "" || v == null ? null : unit === "lb" ? Math.round(+v * LB * 1000) / 1000 : +v;
+const fmtW = kg => kg == null ? "" : `${showW(kg)}${unit}`;
+const range = (a, b, s) => { const o = []; for (let v = a; v <= b + 1e-9; v += s) o.push(Math.round(v * 100) / 100); return o; };
+const REPS = [...range(1, 30, 1), 35, 40, 45, 50, 60, 75, 100];
+const W_OPTS = { kg: [...range(0.5, 20, 0.5), ...range(21, 100, 1), ...range(102.5, 400, 2.5)], lb: [...range(2.5, 100, 2.5), ...range(105, 900, 5)] };
+function setUnit(u){
+  if (u === unit || !["kg", "lb"].includes(u)) return;
+  unit = u; render();
+  sb.from("profiles").update({ weight_unit: u }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save kg/lb", error)); });
+}
+const unitToggle = () => `<div class="woseg" role="group" aria-label="Weight unit">${["kg", "lb"].map(u =>
+  `<button type="button" data-unit="${u}" class="${unit === u ? "on" : ""}" aria-pressed="${unit === u}">${u}</button>`).join("")}</div>`;
+
+// "3×8 @ 60kg", "8, 8, 6 @ 60kg" or "8×60kg, 6×55kg" (in the viewer's unit)
+function fmtSets(sets){
+  const s = (sets || []).filter(x => x && (x.reps != null || x.kg != null));
+  if (!s.length) return "";
+  const r = s.map(x => x.reps ?? "–"), kg = s.map(x => x.kg), sameR = r.every(v => v === r[0]), sameK = kg.every(v => v === kg[0]);
+  if (sameR && sameK) return `${s.length}×${r[0]}${kg[0] != null ? " @ " + fmtW(kg[0]) : ""}`;
+  if (sameK) return `${r.join(", ")}${kg[0] != null ? " @ " + fmtW(kg[0]) : ""}`;
+  return s.map(x => `${x.reps ?? "–"}×${fmtW(x.kg) || "–"}`).join(", ");
+}
+// What you did for this exercise last time (before this day)
+function lastFor(name, beforeDay){
+  for (const w of woOf(myId)) if (w.day < beforeDay){
+    const e = (w.exercises || []).find(x => x.done && lc(x.name) === lc(name) && (x.sets || []).some(s => s.reps != null || s.kg != null));
+    if (e) return { day: w.day, sets: e.sets };
+  }
+  return null;
+}
+const numIn = (v, dec) => { const n = dec ? parseFloat(String(v).replace(",", ".")) : parseInt(v, 10); return Number.isFinite(n) && n >= 0 && n < 1000 ? (dec ? Math.round(n * 1000) / 1000 : n) : null; };
+const cleanEx = ex => (ex || []).slice(0, 30).map(e => ({ name: String(e.name || "").trim().slice(0, 60) || "Exercise", done: !!e.done,
+  ...(Number.isFinite(e.rest) && e.rest >= 0 && e.rest <= 600 ? { rest: e.rest } : {}),
+  sets: (e.sets || []).slice(0, 20).map(s => ({ reps: numIn(s.reps), kg: numIn(s.kg, true), ...(s.done ? { done: true } : {}) })) }));
+const copySets = sets => (sets || []).map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null }));
+const blankEx = () => ({ name: "", done: false, sets: [] });   // just a name; sets & weights are optional (DP: "keep that optional")
+
+// ---- The scroll wheels (a <select> opens the iPhone's own picker wheel) ----
+function repSel(at, v){
+  const opts = v != null && !REPS.includes(v) ? [...REPS, v].sort((a, b) => a - b) : REPS;
+  return `<select class="wosel mono" data-reps="${at}" aria-label="Reps"><option value=""${v == null ? " selected" : ""}>–</option>${opts.map(n => `<option value="${n}"${n === v ? " selected" : ""}>${n}</option>`).join("")}</select>`;
+}
+function wSel(at, kg){
+  const v = showW(kg), base = W_OPTS[unit], opts = v != null && !base.includes(v) ? [...base, v].sort((a, b) => a - b) : base;
+  return `<select class="wosel mono" data-kg="${at}" aria-label="Weight in ${unit}"><option value=""${v == null ? " selected" : ""}>–</option>${opts.map(n => `<option value="${n}"${n === v ? " selected" : ""}>${n}</option>`).join("")}</select>`;
+}
+function setRows(e, i){
+  return (e.sets || []).map((s, j) => `<div class="wosrow"><span class="won mono">${j + 1}</span>
+    <label class="wopick">${repSel(i + ":" + j, s.reps)}<span>reps</span></label>
+    <label class="wopick">${wSel(i + ":" + j, s.kg)}<span>${unit}</span></label>
+    <button type="button" class="worm" data-rmset="${i}:${j}" aria-label="Remove set ${j + 1}">×</button></div>`).join("");
+}
+// Wire the wheels + set buttons for a list of exercises (plan editor and workout share this). onChange(structural)
+function wireSets(list, onChange){
+  const at = s => s.split(":").map(Number);
+  // Change a set → the sets below it that still had the old number follow (set 1 to 8 × 60 and sets 2-3 come too)
+  const pick = (f, field, val) => { const [i, j] = at(f.dataset[field === "reps" ? "reps" : "kg"]), e = list[i], s = e?.sets?.[j]; if (!s) return;
+    const old = s[field]; s[field] = val; let spread = false;
+    for (let k = j + 1; k < e.sets.length; k++){ if (e.sets[k][field] !== old) break; e.sets[k][field] = val; spread = true; }
+    onChange(spread); };
+  main().querySelectorAll("[data-reps]").forEach(f => f.onchange = () => pick(f, "reps", numIn(f.value)));
+  main().querySelectorAll("[data-kg]").forEach(f => f.onchange = () => pick(f, "kg", toKg(f.value)));
+  main().querySelectorAll("[data-addset]").forEach(b => b.onclick = () => { const e = list[+b.dataset.addset]; if (!e) return;
+    const prev = e.sets[e.sets.length - 1]; e.sets.push(prev ? { ...prev } : { reps: 10, kg: null }); onChange(true); });
+  main().querySelectorAll("[data-rmset]").forEach(b => b.onclick = () => { const [i, j] = at(b.dataset.rmset); list[i]?.sets.splice(j, 1); onChange(true); });
+  main().querySelectorAll("[data-rmex]").forEach(b => b.onclick = () => { list.splice(+b.dataset.rmex, 1); woOpenEx = null; onChange(true); });
+  main().querySelectorAll("[data-unit]").forEach(b => b.onclick = () => setUnit(b.dataset.unit));
+}
+const namesList = () => `<datalist id="wo-names">${myNames().map(n => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+
+// ================= Plans: write it once =================
+function editPlan(label, then, day){
+  const p = planFor(label);
+  woPlan = { label, then, day, exercises: p ? p.exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })) : [blankEx()] };
+  woDay = then === "workout" ? woDay : null; render(); window.scrollTo(0, 0);
+  if (!p) setTimeout(() => { const f = main().querySelector("[data-name]"); if (f) f.focus(); }, 50);
+}
+function viewPlan(){
+  const p = woPlan; $("title").textContent = "Plan"; $("tabbar").hidden = true;
+  const ok = () => p.exercises.some(e => e.name.trim());
+  main().innerHTML = `<div class="view wo plan" style="${pc(me())}">
+    <button type="button" class="linkbtn pfback" id="pl-back">‹ ${p.then === "start" ? "Today" : "Back"}</button>
+    <div class="wohead"><span class="label">Your plan</span><div class="work sign">${esc(p.label)}</div>
+      <p class="note">Just the names is fine. Add sets and weights only if you want them.</p></div>
+    ${p.exercises.some(e => (e.sets || []).length) ? `<div class="worow">${unitToggle()}<span class="note">Weights in ${unit}</span></div>` : ""}
+    ${p.exercises.map((e, i) => `<div class="card woex open">
+      <input class="woin woexname" data-name="${i}" value="${esc(e.name)}" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="next">
+      <div class="wosets">${setRows(e, i)}
+        <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">${(e.sets || []).length ? "+ Add set" : "+ Add sets &amp; weights"}</button>
+        <button type="button" class="linkbtn" data-rmex="${i}">Remove</button></div></div></div>`).join("")}
+    <button type="button" class="cta ghost woadd" id="pl-add">+ Add exercise</button>${namesList()}
+    <p class="note wopriv">${LOCK} Your plan is private. Buds only see workouts you finish.</p>
+    <div class="wofoot"><button class="cta" id="pl-save" ${ok() ? "" : "disabled"}>${p.then === "start" ? "Save & start" : "Save plan"}</button></div></div>`;
+  $("pl-back").onclick = () => { const back = p.then === "workout"; woPlan = null; if (!back) woDay = null; render(); window.scrollTo(0, 0); };
+  $("pl-add").onclick = () => { p.exercises.push(blankEx()); render(); const f = main().querySelectorAll("[data-name]"); f[f.length - 1]?.focus(); };
+  $("pl-save").onclick = savePlan;
+  main().querySelectorAll("[data-name]").forEach(f => f.oninput = () => { const e = p.exercises[+f.dataset.name]; if (e) e.name = f.value; $("pl-save").disabled = !ok(); });
+  // Enter after a name → straight on to the next one (type a quick list: Bench, Incline, Dips…)
+  main().querySelectorAll("[data-name]").forEach(f => f.onkeydown = ev => { if (ev.key !== "Enter") return; ev.preventDefault();
+    const i = +f.dataset.name; if (!f.value.trim()) return f.blur();
+    if (i === p.exercises.length - 1) p.exercises.push(blankEx());
+    render(); const next = main().querySelector(`[data-name="${i + 1}"]`); if (next) next.focus(); });
+  wireSets(p.exercises, structural => { if (structural) render(); });
+}
+async function putPlan(label, exercises){
+  const ex = cleanEx(exercises.filter(e => String(e.name || "").trim())).map(e => ({ name: e.name, ...(e.rest != null ? { rest: e.rest } : {}), sets: e.sets.map(s => ({ reps: s.reps, kg: s.kg })) }));
+  if (!ex.length) return { error: null, ex };
+  const { error } = await sb.from("workout_plans").upsert({ user_id: myId, label, exercises: ex }, { onConflict: "user_id,key" });
+  if (!error){ plans = plans.filter(x => lc(x.label) !== lc(label)); plans.push({ label, exercises: ex, updated_at: new Date().toISOString() }); }
+  return { error, ex };
+}
+async function savePlan(){
+  const p = woPlan; if (!p) return;
+  const btn = $("pl-save"); btn.disabled = true; btn.textContent = "Saving…";
+  const { error } = await putPlan(p.label, p.exercises);
+  if (error){ btn.disabled = false; btn.textContent = "Save plan"; return showWarn(oops("save your plan", error)); }
+  woPlan = null;
+  if (p.then === "start") return startWorkout(parse(p.day));
+  if (p.then === "workout"){ const w = myWo(woDay);
+    if (w && !woDone(w).length && !w.finished_at){ w.exercises = planFor(p.label).exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })); woChanged(false); }
+    toast("Plan saved"); render(); return; }
+  toast("Plan saved"); render(); window.scrollTo(0, 0);
+}
+
+// ================= The workout =================
+// Two timers, separate, and neither starts by itself:
+//  * Session: how long you're in the gym. ▶ Start / ❚❚ Pause. Saved on the workout as "time banked" + "running since".
+//  * Rest: between sets. Ticking a set starts it (if that's switched on), or tap ▶ Start yourself. +30s / Skip.
+//    When it ends: a banner + beep in the app; if the phone's locked, the server sends "REST'S UP · Next: …".
+// Timers are timestamps, not counters: "started at 6:41:05", so a sleeping phone still shows the right time.
+let restPrefs = { s: 90, auto: true }, rest = null, restSheet = null, woSummary = null, audioCtx = null;
+const nowMs = () => Date.now();
+const sesMs = w => (w?.session_ms || 0) + (w?.session_run_at ? Math.max(0, nowMs() - Date.parse(w.session_run_at)) : 0);
+const clock = ms => { const s = Math.max(0, Math.round(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
+const restLabel = s => !s ? "Off" : clock(s * 1000);
+const restFor = e => e && e.rest != null ? e.rest : restPrefs.s;
+const restKey = () => "gs-rest-" + myId;
+function saveRestLocal(){ try { rest ? localStorage.setItem(restKey(), JSON.stringify(rest)) : localStorage.removeItem(restKey()); } catch(_){} }
+function loadRestLocal(){ try { const r = JSON.parse(localStorage.getItem(restKey()) || "null"); if (r && r.end > nowMs() - 60000) rest = r; } catch(_){} }
+// A short beep. iPhones only allow sound after a tap, so the context is unlocked on the tap that started the rest.
+function unlockAudio(){ try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch(_){} }
+function beep(){ try { if (!audioCtx) return; const t = audioCtx.currentTime;
+  [0, .22].forEach(d => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(.0001, t + d); g.gain.exponentialRampToValueAtTime(.35, t + d + .02); g.gain.exponentialRampToValueAtTime(.0001, t + d + .18); o.start(t + d); o.stop(t + d + .2); }); } catch(_){} }
+
+// What's next after set j of exercise i (for the "rest's up" message)
+function nextUp(w, i, j){
+  const ex = w?.exercises || [];
+  const fmtSet = s => s ? [s.reps != null ? `${s.reps} reps` : "", s.kg != null ? fmtW(s.kg) : ""].filter(Boolean).join(" × ") : "";
+  const order = [];
+  for (let a = 0; a < ex.length; a++){ const ii = (i + a) % ex.length; (ex[ii].sets || []).forEach((s, jj) => { if (!(a === 0 && jj <= j && ii === i)) order.push([ii, jj]); }); }
+  const hit = order.find(([a, b]) => !ex[a].done && !ex[a].sets[b].done);
+  if (!hit) return ex.length ? "That's every set. Tap Finish 💪" : "Next set. Let's go.";
+  const [a, b] = hit, s = ex[a].sets[b], f = fmtSet(s);
+  return `Next: ${ex[a].name}, set ${b + 1}${f ? " · " + f : ""}`;
+}
+// ---- rest timer ----
+function startRest(secs, next){
+  if (!secs) return;
+  unlockAudio();
+  rest = { end: nowMs() + secs * 1000, total: secs * 1000, next: next || "Next set. Let's go.", cancelled: false };
+  const rw = myWo(woDay); if (rw) rw._rests = (rw._rests || 0) + 1;
+  saveRestLocal(); bookAlarm(); paintTimers();
+}
+function bookAlarm(){
+  if (!rest || !sb) return;
+  sb.from("rest_alarms").upsert({ user_id: myId, due_at: new Date(rest.end).toISOString(), title: "REST'S UP", body: String(rest.next).slice(0, 140), fired_at: null }, { onConflict: "user_id" })
+    .then(() => {}, () => {});
+}
+function cancelAlarm(){ if (sb && myId) sb.from("rest_alarms").delete().eq("user_id", myId).then(() => {}, () => {}); }
+function restPlus(){ if (!rest) return; rest.end += 30000; rest.total += 30000; rest.cancelled = false; saveRestLocal(); bookAlarm(); paintTimers(); }
+function restSkip(){ rest = null; saveRestLocal(); cancelAlarm(); paintTimers(); }
+// ---- session timer ----
+function sesStart(){ const w = myWo(woDay); if (!w || w.finished_at) return; unlockAudio(); w.session_run_at = new Date().toISOString(); woChanged(true); }
+function sesPause(){ const w = myWo(woDay); if (!w || !w.session_run_at) return; w.session_ms = sesMs(w); w.session_run_at = null; woChanged(true); }
+
+// Every half second: update the numbers on screen (no full redraw) and catch the end of a rest.
+setInterval(() => {
+  if (rest){
+    const left = rest.end - nowMs();
+    if (left < 3500 && !rest.cancelled && document.visibilityState === "visible"){ rest.cancelled = true; cancelAlarm(); }   // app is open: the app tells you, not the server
+    if (left <= 0){
+      const late = -left, next = rest.next; rest = null; saveRestLocal();
+      if (late < 5000 && document.visibilityState === "visible"){ beep(); showBanner({ style: me() ? pc(me()) : "", title: "REST'S UP", sub: next });
+        const c = $("t-rest"); if (c){ c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 1600); } }
+      paintTimers();
+    }
+  }
+  paintTimers(true); paintMini();
+}, 500);
+function paintTimers(numbersOnly){
+  const w = myWo(woDay), s = $("ses-t"), r = $("rest-t"), bar = $("rest-bar");
+  if (s && w) s.textContent = clock(sesMs(w));
+  if (r){ if (rest){ r.textContent = clock(rest.end - nowMs()); if (bar) bar.style.width = Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total))) + "%"; } }
+  const ring = $("rest-ring"); if (ring && rest) ring.style.strokeDashoffset = String(RING_C * (1 - Math.max(0, Math.min(1, (rest.end - nowMs()) / rest.total))));
+  if (!numbersOnly && !woDay) renderMini();
+  if (!numbersOnly && woDay && w && !w.finished_at && WO_V2){ render(); return; }        // new workout screen: going ↔ resting is a different screen
+  if (!numbersOnly && woDay && $("timers")) $("timers").innerHTML = timersHtml(w);
+  if (!numbersOnly && woDay) wireTimers();
+}
+function timersHtml(w){
+  const run = !!w?.session_run_at, ms = sesMs(w), fin = !!w?.finished_at;
+  if (fin) return `<div class="tcard ses done" style="grid-column:1/-1"><span class="label">Session</span><span class="tnum mono${ms >= 60000 ? "" : " mut"}">${ms >= 60000 ? clock(ms) : "Not timed"}</span></div>`;
+  const ses = `<div class="tcard ses${run ? " live" : ""}" id="t-ses"><span class="label">${run ? '<i class="ldot"></i>Session' : ms ? "Paused" : "Session"}${!run && ms && !fin ? `<button type="button" class="tlink" data-tses="reset">Reset</button>` : ""}</span>
+    <span class="tnum mono${run || ms ? "" : " mut"}" id="ses-t">${clock(ms)}</span>
+    <div class="tacts">${fin ? `<span class="note">${ms ? "Done" : "Not timed"}</span>` : run ? `<button type="button" class="tbtn" data-tses="pause">❚❚ Pause</button>`
+      : `<button type="button" class="tbtn go" data-tses="start">▶ ${ms ? "Resume" : "Start"}</button>`}</div></div>`;
+  const on = restPrefs.s > 0;
+  const rst = rest ? `<div class="tcard rest live" id="t-rest"><span class="label">Resting</span><span class="tnum mono" id="rest-t">${clock(rest.end - nowMs())}</span>
+      <div class="tbar"><i id="rest-bar" style="width:${Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total)))}%"></i></div>
+      <div class="tacts"><button type="button" class="tbtn" data-trest="plus">+30s</button><button type="button" class="tbtn" data-trest="skip">Skip</button></div></div>`
+    : `<div class="tcard rest" id="t-rest"><span class="label">Rest${on ? `<button type="button" class="tlink" data-trest="change">Change</button>` : ""}</span><span class="tnum mono mut">${restLabel(restPrefs.s)}</span>
+      <div class="tacts">${on ? `<button type="button" class="tbtn go" data-trest="start">▶ Start</button>` : `<button type="button" class="tbtn" data-trest="change">Turn on</button>`}</div></div>`;
+  return ses + rst;
+}
+function wireTimers(){
+  main().querySelectorAll("[data-tses]").forEach(b => b.onclick = () => b.dataset.tses === "start" ? sesStart() : b.dataset.tses === "reset" ? sesReset() : sesPause());
+  main().querySelectorAll("[data-trest]").forEach(b => b.onclick = () => { const a = b.dataset.trest, w = myWo(woDay);
+    if (a === "plus") restPlus(); else if (a === "skip") restSkip();
+    else if (a === "start") startRest(restPrefs.s || 90, nextUp(w, 0, -1));
+    else { restSheet = { ex: null }; render(); } });
+}
+
+// ---- the rest sheet: one place to change it ----
+function restSheetHtml(w){
+  if (!restSheet) return "";
+  const e = restSheet.ex != null ? w?.exercises?.[restSheet.ex] : null, cur = e ? restFor(e) : restPrefs.s;
+  const chips = [0, 45, 60, 90, 120, 180];
+  return `<div class="chgwrap"><div class="chgdim" data-rsclose></div><div class="chgsheet" role="dialog" aria-label="Rest timer">
+    <div class="grab"></div><span class="label">${e ? esc(e.name) : "Rest timer"}</span><h3 class="sign chgtitle">Rest between sets</h3>
+    <div class="chgchips">${chips.map(c => `<button type="button" class="chip${cur === c ? " on" : ""}" data-rspick="${c}">${c ? restLabel(c) : "Off"}</button>`).join("")}
+      ${e && e.rest != null ? `<button type="button" class="chip add" data-rspick="default">Use my default (${restLabel(restPrefs.s)})</button>` : ""}</div>
+    ${e ? `<p class="note">Just for ${esc(e.name)}. Saved to your plan, so it's set next time.</p>`
+        : `<label class="rsrow"><span>Start rest when I tick a set</span><input type="checkbox" class="sw" id="rs-auto" ${restPrefs.auto ? "checked" : ""}></label>
+           <p class="note">Your default for every exercise. Tap an exercise's REST tag to give it its own.</p>`}
+    <button class="cta" data-rsclose>Done</button></div></div>`;
+}
+function wireRestSheet(w){
+  if (!restSheet) return;
+  main().querySelectorAll("[data-rsclose]").forEach(b => b.onclick = () => { restSheet = null; render(); });
+  main().querySelectorAll("[data-rspick]").forEach(b => b.onclick = () => {
+    const v = b.dataset.rspick, e = restSheet.ex != null ? w?.exercises?.[restSheet.ex] : null;
+    if (e){ e.rest = v === "default" ? null : +v; if (e.rest == null) delete e.rest; woChanged(false); render(); return; }
+    restPrefs.s = +v; render();
+    sb.from("profiles").update({ rest_s: restPrefs.s }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save your rest time", error)); });
+  });
+  const a = $("rs-auto"); if (a) a.onchange = () => { restPrefs.auto = a.checked;
+    sb.from("profiles").update({ rest_auto: restPrefs.auto }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save that", error)); }); };
+}
+
+function woStatus(){
+  const el = $("wo-status"), w = myWo(woDay); if (!el || !w) return;
+  const n = woDone(w).length, tot = w.exercises.length;
+  el.textContent = (tot ? `${n}/${tot} exercises done` : "") + (woErr ? `${tot ? " · " : ""}not saved yet, will retry` : w.dirty ? `${tot ? " · " : ""}saving…` : "");
+  el.classList.toggle("bad", !!woErr);
+}
+function woChanged(structural){
+  const w = myWo(woDay); if (!w) return;
+  w.dirty = true; clearTimeout(woSaveT); woSaveT = setTimeout(woSave, 700);
+  if (structural) render(); else woStatus();
+}
+// Save the open workout. Safe to repeat (one row per day: insert or update). Times are stamped by the server.
+async function woSave(finish){
+  clearTimeout(woSaveT);
+  const w = myWo(woDay) || (finish && finish.w); if (!w) return true;
+  const row = { user_id: myId, day: w.day, label: w.label, exercises: cleanEx(w.exercises),
+    session_ms: Math.min(86400000, Math.round(w.session_ms || 0)), session_run_at: w.session_run_at || null };
+  if (finish){ row.finished_at = new Date().toISOString(); row.duration_s = finish.duration_s ?? null; }
+  const { error } = await sb.from("workouts").upsert(row, { onConflict: "user_id,day" });
+  if (error){ woErr = error; woSaveT = setTimeout(woSave, 5000); woStatus(); return false; }   // keep it on the phone, try again soon
+  woErr = null; w.dirty = false; woStatus(); return true;
+}
+// Start always starts: your plan if you've written one, otherwise an empty session (timers + add as you go).
+function startWorkout(d){
+  const m = me(); if (!m || !WORKOUTS) return;
+  const k = key(d); let w = myWo(k);
+  if (!w){
+    const label = woLabelFor(m, d), plan = planFor(label);
+    w = { user_id: myId, day: k, label, session_ms: 0, session_run_at: null, started_at: new Date().toISOString(), finished_at: null,
+      exercises: plan ? plan.exercises.map(e => ({ name: e.name, done: false, ...(e.rest != null ? { rest: e.rest } : {}), sets: copySets(e.sets) })) : [] };
+    workouts.push(w); woDay = k; woChanged(false);
+  }
+  woDay = k; woAdding = false; woDiscardAsk = false; woOpenEx = null; woSummary = null;
+  render(); window.scrollTo(0, 0);
+}
+function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; restSheet = null; render(); window.scrollTo(0, 0); }
+async function finishWorkout(){
+  const w = myWo(woDay); if (!w) return;
+  if (w.finished_at) return closeWorkout();                          // already finished: "Done" just closes (edits are saved)
+  const btn = $("wo-finish"); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  const ms = sesMs(w); w.session_ms = ms; w.session_run_at = null;
+  const duration_s = ms >= 60000 ? Math.round(ms / 1000) : null;
+  const ok = await woSave({ w, duration_s });
+  if (!ok){ if (btn){ btn.disabled = false; btn.textContent = "Finish workout"; } return showWarn(oops("finish the workout", woErr)); }
+  w.finished_at = new Date().toISOString(); w.duration_s = duration_s;
+  if (rest){ rest = null; saveRestLocal(); cancelAlarm(); }
+  const named = w.exercises.filter(e => e.name), had = planFor(w.label);
+  if (named.length && had) putPlan(w.label, w.exercises).catch(() => {});      // plan follows today's numbers
+  const sets = w.exercises.reduce((n, e) => n + (e.sets || []).filter(s => s.done || e.done).length, 0);
+  woSummary = { label: w.label, day: w.day, mins: duration_s ? Math.round(duration_s / 60) : 0, ex: woDone(w).length, sets, askPlan: named.length > 0 && !had, exercises: w.exercises };
+  const d = parse(w.day); woDay = null; woAdding = false; restSheet = null;
+  if (!ticked(me(), d)) await toggleDay(d);                          // logs the day → streak + the one notification
+  render(); window.scrollTo(0, 0);
+}
+async function discardWorkout(){
+  const w = myWo(woDay); if (!w) return;
+  if (!woDiscardAsk){ woDiscardAsk = true; return render(); }
+  const k = w.day; workouts = workouts.filter(x => x !== w); clearTimeout(woSaveT); woErr = null; woDay = null; woDiscardAsk = false;
+  if (rest){ rest = null; saveRestLocal(); cancelAlarm(); } render();
+  const { error } = await sb.from("workouts").delete().eq("user_id", myId).eq("day", k);
+  if (error) showWarn(oops("delete the workout", error)); else toast("Workout deleted");
+}
+// Undo the log → the workout is fresh again: timer 0:00, no ticks, finished cleared. Exercises + numbers stay.
+function resetWorkoutFor(k, quiet){
+  const w = myWo(k); if (!w) return;
+  w.finished_at = null; w.duration_s = null; w.session_ms = 0; w.session_run_at = null;
+  (w.exercises || []).forEach(e => { e.done = false; (e.sets || []).forEach(s => { delete s.done; }); });
+  if (rest){ rest = null; saveRestLocal(); cancelAlarm(); }
+  sb.from("workouts").update({ finished_at: null, duration_s: null, session_ms: 0, session_run_at: null, exercises: cleanEx(w.exercises) })
+    .eq("user_id", myId).eq("day", k).then(({ error }) => { if (error) showWarn(oops("reset the workout", error)); });
+  if (!quiet) setTimeout(() => toast("Unlogged. Workout reset, ready when you are"), 2300);
+}
+// After every load: if a day was unlogged somewhere else (the main app, another phone), its workout can't stay
+// "finished". Skip anything finished in the last 2 minutes: Finish saves the workout a moment before it logs the day.
+function reconcileWorkouts(){
+  if (!WORKOUTS) return; const m = members.get(myId); if (!m) return;
+  for (const w of workouts) if (w.user_id === myId && w.finished_at && !m.days[w.day] && w.day !== woDay && !busy.has(w.day)
+      && Date.now() - Date.parse(w.finished_at) > 120000) resetWorkoutFor(w.day, true);
+}
+function sesReset(){ const w = myWo(woDay); if (!w || w.session_run_at) return; w.session_ms = 0; woChanged(true); }
+// After Finish: a small summary, and (first time for this day) "save as your plan?"
+function viewSummary(){
+  const s = woSummary; $("title").textContent = "Done"; $("tabbar").hidden = true;
+  main().innerHTML = `<div class="view wo" style="${pc(me())}">
+    <div class="card wosum"><span class="label">Workout done</span><div class="work sign">${esc(s.label)} ✓</div>
+      <div class="wostats"><div><b class="mono">${s.mins ? s.mins + "m" : "–"}</b><span class="label">Session</span></div>
+        <div><b class="mono">${s.ex}</b><span class="label">Exercises</span></div><div><b class="mono">${s.sets}</b><span class="label">Sets</span></div></div></div>
+    ${s.askPlan ? `<div class="card" id="sum-ask"><b>Save as your ${esc(s.label)} plan?</b><p class="note" style="margin:4px 0 10px">Next ${esc(s.label)} opens with these exercises and today's numbers.</p>
+      <div class="row2"><button class="cta ghost ssm" id="sum-no">Not now</button><button class="cta ssm" id="sum-yes">Save</button></div></div>` : ""}
+    <p class="note" style="text-align:center">Your crew got one notification. Nice work.</p>
+    <button class="cta" id="sum-done">Done</button></div>`;
+  $("sum-done").onclick = () => { woSummary = null; render(); window.scrollTo(0, 0); };
+  if ($("sum-no")) $("sum-no").onclick = () => { s.askPlan = false; render(); };
+  if ($("sum-yes")) $("sum-yes").onclick = async () => { $("sum-yes").disabled = true;
+    const { error } = await putPlan(s.label, s.exercises); if (error) { $("sum-yes").disabled = false; return showWarn(oops("save your plan", error)); }
+    s.askPlan = false; toast(`Saved as your ${s.label} plan`); render(); };
+}
+
+// The Today card's workout button (under "Log today's session")
+function woTodayHtml(m, t){
+  if (!WORKOUTS || !m || m.watcher) return "";
+  const w = myWo(key(t)), done = ticked(m, t);
+  if (w && !w.finished_at){ const n = woDone(w).length;
+    return `<button class="cta wo-go" id="wo-go">Continue workout${w.exercises.length ? ` · ${n}/${w.exercises.length}` : ""}</button>`; }
+  if (w && w.finished_at) return `<button type="button" class="linkbtn wo-link" id="wo-go">See today's workout${woDone(w).length ? ` · ${woDone(w).length} exercise${woDone(w).length === 1 ? "" : "s"}` : ""}${w.duration_s ? ` · ${Math.round(w.duration_s / 60)} min` : ""}</button>`;
+  if (done) return `<button type="button" class="linkbtn wo-link" id="wo-go">+ Add workout details</button>`;
+  return `<button class="cta ghost wo-go" id="wo-go">🏋️ Start workout</button>`;
+}
+
+function woExHtml(e, i, w){
+  const open = !e.done || woOpenEx === i, last = lastFor(e.name, w.day), sum = fmtSets(e.sets);
+  const sub = e.done ? (sum || "Done") : last ? `Last: ${fmtSets(last.sets)}` : `${(e.sets || []).length} set${(e.sets || []).length === 1 ? "" : "s"}`;
+  const rs = restFor(e);
+  const rows = (e.sets || []).map((s, j) => `<div class="wosrow${s.done ? " sdone" : ""}"><span class="won mono">${j + 1}</span>
+    <label class="wopick">${repSel(i + ":" + j, s.reps)}<span>reps</span></label>
+    <label class="wopick">${wSel(i + ":" + j, s.kg)}<span>${unit}</span></label>
+    <button type="button" class="setck${s.done ? " on" : ""}" data-tickset="${i}:${j}" aria-label="Set ${j + 1} ${s.done ? "done" : "not done"}">${s.done ? CHECK : ""}</button></div>`).join("");
+  return `<div class="card woex${e.done ? " done" : ""}${open ? " open" : ""}">
+    <div class="woexhead"><button type="button" class="wotick" data-tick="${i}" aria-label="${e.done ? "Not done" : "Done"}: ${esc(e.name)}">${e.done ? CHECK : ""}</button>
+      <button type="button" class="woname" data-openex="${i}"><b>${esc(e.name)}</b><span class="note">${esc(sub)}</span></button>
+      ${open && !w.finished_at ? `<button type="button" class="restpill mono" data-restex="${i}">REST ${restLabel(rs).toUpperCase()}</button>` : ""}</div>
+    ${open ? `<div class="wosets">${rows}
+      <div class="woexfoot"><span><button type="button" class="linkbtn" data-addset="${i}">+ Set</button>${(e.sets || []).length ? `<button type="button" class="linkbtn" data-rmset="${i}:${e.sets.length - 1}">− Set</button>` : ""}</span>
+      <button type="button" class="linkbtn" data-rmex="${i}">Remove</button></div></div>` : ""}</div>`;
+}
+// ---- Workout screen v2 (DP's "H" design): before → going → resting. Finished workouts keep the old view. ----
+const WO_V2 = true, RING_C = 2 * Math.PI * 53;
+const NUM = 'class="sign whnum"';
+function lastSameLabel(w){
+  return workouts.filter(x => x.user_id === myId && x !== w && x.finished_at && x.day < w.day && lc(x.label) === lc(w.label))
+    .sort((a, b) => String(b.day).localeCompare(String(a.day)))[0] || null;
+}
+function whWeekHtml(m, d){
+  const ws = startOfWeek(d), tk = key(today());
+  return `<div class="whweek">${Array.from({ length: 7 }, (_, i) => { const x = addDays(ws, i), k = key(x);
+    const cls = ticked(m, x) ? "done" : k === tk ? "today" : !isGym(m, x) ? "rest" : "";
+    return `<div><i class="${cls}"></i><span class="${k === tk ? "on" : ""}">${"MTWTFSS"[i]}</span></div>`; }).join("")}</div>`;
+}
+function viewWorkoutV2(w){
+  const m = me(), d = parse(w.day), isT = w.day === key(today()), when = isT ? "Today" : DAYS_LONG[dow(d)];
+  const run = !!w.session_run_at, ms = sesMs(w), started = run || ms > 0 || woDone(w).length > 0 || !!rest;
+  const last = lastSameLabel(w), lastMins = last && last.duration_s ? Math.round(last.duration_s / 60) : null;
+  const streakNow = dayStreak(m), streakAfter = streakNow + (ticked(m, d) ? 0 : 1);
+  const hasSets = w.exercises.some(e => (e.sets || []).length);
+  const exList = w.exercises.length ? `<div class="sec whsec"><span class="label">What you did</span>${hasSets ? unitToggle() : ""}</div>${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}` : "";
+  const addBox = woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+      <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
+    : `<button type="button" class="linkbtn whlink" id="wo-add">+ Note an exercise</button>`;
+  let body, foot;
+  if (!started){                                                         // H1 · before you start
+    const ws = startOfWeek(d), plannedN = Array.from({ length: 7 }, (_, i) => isGym(m, addDays(ws, i)) ? 1 : 0).reduce((a, b) => a + b, 0);
+    const doneN = Array.from({ length: 7 }, (_, i) => ticked(m, addDays(ws, i)) ? 1 : 0).reduce((a, b) => a + b, 0);
+    body = `<section class="card whcard" style="${pc(m)}"><span class="label">${esc(when)} · ${esc(DAYS_LONG[dow(d)])}</span>
+        <div class="work sign whbig">${esc(w.label || "Workout")}</div>
+        <div class="whstats"><div><span class="label">Streak</span><b ${NUM} style="color:var(--cti,var(--c))">${streakNow}</b></div>
+          <div><span class="label">Week</span><b ${NUM}>${doneN}/${plannedN || doneN}</b></div>
+          <div><span class="label">Last ${esc(w.label)}</span><b ${NUM}>${lastMins ? lastMins + " MIN" : "–"}</b></div></div></section>
+      <section class="card whblock"><span class="label">This week</span>${whWeekHtml(m, d)}</section>
+      ${last ? `<section class="card whblock whrow"><span class="label">Last ${esc(w.label)}</span><span>${esc(DAYS[dow(parse(last.day))])} ${fmt(parse(last.day))}${lastMins ? ` · ${lastMins} min` : ""}</span></section>` : ""}
+      ${w.exercises.length ? `<section class="card whblock"><span class="label">Today's exercises</span>${w.exercises.map(e => `<div class="stex"><span>${esc(e.name)}</span><span class="mono">${esc(fmtSets(e.sets))}</span></div>`).join("")}</section>` : ""}
+      <div class="whlinks"><button type="button" class="linkbtn" id="wo-plan">${planFor(w.label) ? "Edit exercises" : "+ Add exercises"}</button></div>`;
+    foot = `<button class="whbtn red" id="wo-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start Workout</button>`;
+  } else if (rest){                                                      // H3 · resting
+    const left = rest.end - nowMs(), frac = Math.max(0, Math.min(1, left / rest.total));
+    body = `<div class="whtop"><span><span class="label whstate">● Resting</span><span class="sign whsmall">${esc(w.label)}</span></span>
+        <span class="whright"><span class="label">Workout</span><b ${NUM} id="ses-t">${clock(ms)}</b></span></div>
+      <section class="card whring"><div class="whringbox"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="53" class="trk"/>
+          <circle cx="60" cy="60" r="53" class="val" id="rest-ring" style="stroke-dasharray:${RING_C};stroke-dashoffset:${RING_C * (1 - frac)}"/></svg>
+          <div><b ${NUM} id="rest-t" role="timer" aria-live="off">${clock(left)}</b><span class="label">Rest left</span></div></div>
+        <p class="note">${esc(rest.next || "Your phone buzzes when it's time.")}</p></section>`;
+    foot = `<div class="whrow2"><button class="whbtn soft" data-trest="plus">+30 sec</button><button class="whbtn dark" data-trest="skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l10-7zM16 5h3v14h-3z"/></svg>Skip</button></div>`;
+  } else {                                                               // H2 · going (or paused)
+    body = `<div class="whtop"><span><span class="label whstate${run ? " live" : ""}">● ${run ? "In progress" : "Paused"}</span><span class="sign whsmall">${esc(w.label)}</span></span></div>
+      <section class="card whtime"><b class="sign whnum whclock" id="ses-t">${clock(ms)}</b><span class="label">Workout time</span>
+        <div class="whlist">${last && last.duration_s ? `<div><span>Last ${esc(w.label)}</span><b ${NUM}>${clock(last.duration_s * 1000)}</b></div>` : ""}
+          <div><span>Rests</span><b ${NUM}>${w._rests || 0}</b></div>
+          <div><span>Streak when you finish</span><b ${NUM} style="color:var(--cti,var(--c))">${streakAfter}</b></div></div></section>
+      ${exList}${addBox}
+      <div class="whlinks">${!run && ms > 0 ? `<button type="button" class="linkbtn" data-tses="reset">Reset timer</button>` : ""}<button type="button" class="linkbtn" data-trest="change">Rest time ${esc(restLabel(restPrefs.s))} · Change</button>
+        <button type="button" class="linkbtn" id="wo-discard">${woDiscardAsk ? "Tap again to delete" : "Discard"}</button></div>`;
+    foot = `<button class="whbtn soft" data-trest="${restPrefs.s ? "start" : "change"}"><svg viewBox="0 0 24 24" aria-hidden="true" class="ln"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M10 2h4"/></svg>${restPrefs.s ? `Rest ${restLabel(restPrefs.s)}` : "Rest"}</button>
+      <div class="whrow2"><button class="whbtn soft" data-tses="${run ? "pause" : "start"}">${run ? `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4.2" height="14" rx="1.2"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2"/></svg>Pause` : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Resume`}</button>
+        <button class="whbtn red" id="wo-finish"><svg viewBox="0 0 24 24" aria-hidden="true" class="ln"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Finish</button></div>`;
+  }
+  main().innerHTML = `<div class="view wo whv" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>${body}${namesList()}
+    <div class="wofoot whfoot">${foot}</div>${restSheetHtml(w)}</div>`;
+  $("title").textContent = "Workout"; $("tabbar").hidden = true;
+  wireTimers(); wireRestSheet(w);
+  $("wo-back").onclick = closeWorkout;
+  if ($("wo-start")) $("wo-start").onclick = () => { unlockAudio(); sesStart(); };
+  if ($("wo-finish")) $("wo-finish").onclick = finishWorkout;
+  if ($("wo-plan")) $("wo-plan").onclick = () => editPlan(w.label, "workout", w.day);
+  if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
+  wireWorkoutList(w, false);
+}
+// ---- Mini workout bar (like Apple Music's mini player): while a workout is going and you leave its screen,
+// a small bar above the tabs keeps the timer (or the rest countdown) in view. Tap it to go back. ----
+const MINI_C = 2 * Math.PI * 9;
+function activeWo(){
+  if (!WORKOUTS || !myId) return null;
+  const tk = key(today());
+  return workouts.find(w => w.user_id === myId && w.day === tk && !w.finished_at && (w.session_run_at || (w.session_ms || 0) > 0 || woDone(w).length)) || null;
+}
+function renderMini(){
+  const el = $("womini"); if (!el) return;
+  const w = activeWo(), onWeekGo = tab === "split" && splitView === "week";
+  const show = !!w && !!session && authKnown && !ob && !locked && !woDay && !woSummary && !woPlan && !wnActive && !onWeekGo
+    && !(chatKey && !profileId && !circleId) && !$("tabbar").hidden;
+  el.hidden = !show; document.documentElement.classList.toggle("has-mini", show);
+  if (!show) return;
+  el.setAttribute("style", pc(me()));
+  try { const h = $("tabbar").offsetHeight; if (h) document.documentElement.style.setProperty("--tabh", h + "px"); } catch(_){}
+  if (rest){
+    const left = rest.end - nowMs(), frac = Math.max(0, Math.min(1, left / rest.total));
+    el.className = "womini resting";
+    el.setAttribute("aria-label", `Resting, ${clock(left)} left. Open ${w.label || "workout"}`);
+    el.innerHTML = `<svg class="mring" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="trk"/><circle cx="12" cy="12" r="9" class="val" id="mini-ring" style="stroke-dasharray:${MINI_C};stroke-dashoffset:${MINI_C * (1 - frac)}"/></svg>
+      <span class="mtxt"><b>Resting</b><span>${esc(w.label || "Workout")}</span></span><b class="sign mnum" id="mini-t">${clock(left)}</b><span class="mchev" aria-hidden="true">›</span>`;
+  } else {
+    const run = !!w.session_run_at;
+    el.className = "womini" + (run ? " live" : "");
+    el.setAttribute("aria-label", `${w.label || "Workout"} ${run ? "in progress" : "paused"}, ${clock(sesMs(w))}. Open workout`);
+    el.innerHTML = `<span class="mdot" aria-hidden="true"></span><span class="mtxt"><b>${esc(w.label || "Workout")}</b><span>${run ? "In progress" : "Paused"}</span></span>
+      <b class="sign mnum" id="mini-t">${clock(sesMs(w))}</b><span class="mchev" aria-hidden="true">›</span>`;
+  }
+  el.onclick = () => startWorkout(parse(w.day));
+}
+function paintMini(){
+  const t = $("mini-t"); if (!t || $("womini").hidden) return;
+  const w = activeWo(); if (!w) return renderMini();
+  if (rest){ const left = rest.end - nowMs(); t.textContent = clock(left);
+    const r = $("mini-ring"); if (r) r.style.strokeDashoffset = String(MINI_C * (1 - Math.max(0, Math.min(1, left / rest.total)))); }
+  else t.textContent = clock(sesMs(w));
+}
+
+// exercise ticks / sets / adding: shared by both workout screens
+function wireWorkoutList(w, fin){
+  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const i = +b.dataset.tick, e = w.exercises[i]; if (!e) return;
+    unlockAudio(); e.done = !e.done; (e.sets || []).forEach(s => s.done = e.done); woDiscardAsk = false; woOpenEx = null;
+    if (e.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, (e.sets || []).length - 1));
+    woChanged(true); });
+  main().querySelectorAll("[data-tickset]").forEach(b => b.onclick = () => { const [i, j] = b.dataset.tickset.split(":").map(Number), e = w.exercises[i], s = e?.sets?.[j]; if (!s) return;
+    unlockAudio(); s.done = !s.done; e.done = e.sets.length > 0 && e.sets.every(x => x.done);
+    if (s.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, j));
+    woChanged(true); });
+  main().querySelectorAll("[data-openex]").forEach(b => b.onclick = () => { const i = +b.dataset.openex; if (!w.exercises[i]?.done) return; woOpenEx = woOpenEx === i ? null : i; render(); });
+  main().querySelectorAll("[data-restex]").forEach(b => b.onclick = () => { restSheet = { ex: +b.dataset.restex }; render(); });
+  wireSets(w.exercises, woChanged);
+  if ($("wo-add")) $("wo-add").onclick = () => { woAdding = true; render(); $("wo-newex")?.focus(); };
+  const addEx = () => { const name = String($("wo-newex")?.value || "").trim().slice(0, 60); if (!name) return $("wo-newex")?.focus();
+    const l = lastFor(name, w.day);
+    w.exercises.push({ name, done: false, sets: l ? copySets(l.sets) : blankEx().sets }); woAdding = false; woChanged(true); };
+  if ($("wo-newex")){ $("wo-addgo").onclick = addEx; $("wo-addcancel").onclick = () => { woAdding = false; render(); };
+    $("wo-newex").onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); addEx(); } }; }
+}
+// Finished workout ("See today's workout") — DP's I3: summary on top, a short receipt, exercises optional
+function viewWorkoutDone(w){
+  const m = me(), d = parse(w.day), when = w.day === key(today()) ? "Today" : DAYS_LONG[dow(d)];
+  const secs = w.duration_s || (sesMs(w) >= 60000 ? Math.round(sesMs(w) / 1000) : 0);
+  const at = w.finished_at ? new Date(w.finished_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase() : "";
+  const hasSets = w.exercises.some(e => (e.sets || []).length);
+  main().innerHTML = `<div class="view wo whv wdone" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>
+    <section class="card wdhero"><span class="wdtick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+      <span class="label">Finished · ${esc(when)}</span><div class="work sign wdname">${esc(w.label || "Workout")} done</div>
+      <span class="note">Logged · your crew was told</span></section>
+    <section class="card wdlist">
+      <div><span>Workout time</span><b class="sign whnum">${secs ? clock(secs * 1000) : "–"}</b></div>
+      ${at ? `<div><span>Finished</span><b class="wdat">${esc(at)}</b></div>` : ""}
+      <div><span>Day streak</span><b class="sign whnum" style="color:var(--cti,var(--c))">${dayStreak(m)}</b></div></section>
+    ${w.exercises.length ? `<div class="sec whsec"><span class="label">What you did</span>${hasSets ? unitToggle() : ""}</div>${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}` : ""}
+    ${woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+        <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
+      : `<button type="button" class="card wdadd" id="wo-add">+ Add what you did <span class="note">(optional)</span></button>`}${namesList()}
+    <p class="note wdnote">${LOCK} Only you and your Buds see this. Undo the log on Today to redo it.</p>
+    <div class="wofoot whfoot"><button class="whbtn dark" id="wo-finish">Done</button></div>${restSheetHtml(w)}</div>`;
+  $("title").textContent = "Workout"; $("tabbar").hidden = true;
+  $("wo-back").onclick = closeWorkout; $("wo-finish").onclick = finishWorkout;
+  wireRestSheet(w); wireWorkoutList(w, true);
+}
+function viewWorkout(){
+  const w = myWo(woDay); if (!w){ woDay = null; return render(); }
+  if (WO_V2 && w.finished_at) return viewWorkoutDone(w);
+  if (WO_V2 && !w.finished_at) return viewWorkoutV2(w);
+  $("title").textContent = "Workout"; $("tabbar").hidden = true;
+  const n = woDone(w).length, fin = !!w.finished_at, d = parse(w.day);
+  const when = key(d) === key(today()) ? "Today" : DAYS_LONG[dow(d)];
+  const empty = !w.exercises.length;
+  main().innerHTML = `<div class="view wo" style="${pc(me())}">
+    <button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>
+    <div class="wohead"><span class="label">${fin ? "Finished" : w.session_run_at || n ? "In progress" : "Ready"} · ${when}</span>
+      <div class="work sign">${esc(w.label || "Workout")}</div><p class="note" id="wo-status"></p>
+      ${fin ? `<p class="note finnote">✓ Logged. You can still fix numbers or ticks; it saves by itself and your crew isn't notified again. To redo it, undo the log on Today.</p>` : ""}</div>
+    <div class="timers" id="timers">${timersHtml(w)}</div>
+    <div class="worow">${unitToggle()}<button type="button" class="linkbtn" id="wo-plan">${planFor(w.label) ? "Edit plan" : "Write a plan"}</button></div>
+    ${empty && !woAdding ? (fin ? `<div class="ssoft"><b>Logged without exercise details</b><span class="note">That's fine. Add them below if you want a record.</span></div>`
+      : `<div class="ssoft"><b>No details for ${esc(w.label)} yet</b><span class="note">That's fine. Start the timer and go, or add exercises as you do them.</span></div>`) : ""}
+    ${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}
+    ${woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise name" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+        <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
+      : `<button type="button" class="cta ghost woadd" id="wo-add">+ Add exercise</button>`}${namesList()}
+    <p class="note wopriv">${LOCK} Only you and your Buds see this.${fin ? "" : " Your crew gets one notification when you finish."}</p>
+    ${fin ? "" : `<button type="button" class="linkbtn wodiscard" id="wo-discard">${woDiscardAsk ? "Tap again to delete this workout" : "Discard workout"}</button>`}
+    <div class="wofoot"><button class="cta" id="wo-finish">${fin ? "Done" : "Finish workout"}</button></div>${restSheetHtml(w)}</div>`;
+  woStatus(); wireTimers(); wireRestSheet(w);
+  $("wo-back").onclick = closeWorkout;
+  $("wo-finish").onclick = finishWorkout;
+  $("wo-plan").onclick = () => editPlan(w.label, "workout", w.day);
+  if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
+  // whole exercise ✓ (simple) — ticks every set; set ✓ (detailed) — starts the rest timer
+  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const i = +b.dataset.tick, e = w.exercises[i]; if (!e) return;
+    unlockAudio(); e.done = !e.done; (e.sets || []).forEach(s => s.done = e.done); woDiscardAsk = false; woOpenEx = null;
+    if (e.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, (e.sets || []).length - 1));
+    woChanged(true); });
+  main().querySelectorAll("[data-tickset]").forEach(b => b.onclick = () => { const [i, j] = b.dataset.tickset.split(":").map(Number), e = w.exercises[i], s = e?.sets?.[j]; if (!s) return;
+    unlockAudio(); s.done = !s.done; e.done = e.sets.length > 0 && e.sets.every(x => x.done);
+    if (s.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, j));
+    woChanged(true); });
+  main().querySelectorAll("[data-openex]").forEach(b => b.onclick = () => { const i = +b.dataset.openex; if (!w.exercises[i]?.done) return; woOpenEx = woOpenEx === i ? null : i; render(); });
+  main().querySelectorAll("[data-restex]").forEach(b => b.onclick = () => { restSheet = { ex: +b.dataset.restex }; render(); });
+  wireSets(w.exercises, woChanged);
+  if ($("wo-add")) $("wo-add").onclick = () => { woAdding = true; render(); $("wo-newex")?.focus(); };
+  const addEx = () => { const name = String($("wo-newex")?.value || "").trim().slice(0, 60); if (!name) return $("wo-newex")?.focus();
+    const l = lastFor(name, w.day);
+    w.exercises.push({ name, done: false, sets: l ? copySets(l.sets) : blankEx().sets }); woAdding = false; woChanged(true); };
+  if ($("wo-newex")){ $("wo-addgo").onclick = addEx; $("wo-addcancel").onclick = () => { woAdding = false; render(); };
+    $("wo-newex").onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); addEx(); } }; }
+}
+
+// Profile: recent workouts (you, or a Bud). On your own You tab: your plans too.
+function woProfileHtml(o, inYou){
+  if (!WORKOUTS || !o) return "";
+  const self = o.id === myId; if (!self && !isMutual(o)) return "";
+  let out = "";
+  if (self && inYou && false){                       // moved to the Split tab
+    const labels = [...new Set([...(o.plan || []).filter(s => s && s.w).map(s => s.w), ...plans.map(p => p.label)])];
+    if (labels.length) out += `<div class="sec"><h2 class="sign">Workout plans</h2><span class="label">Only you</span></div>
+      <div class="list">${labels.map(l => { const p = planFor(l);
+        return `<button type="button" class="li tappable woplanrow" data-editplan="${esc(l)}"><span class="grow"><b>${esc(l)}</b>
+          <span class="note">${p ? `${p.exercises.length} exercise${p.exercises.length === 1 ? "" : "s"}` : "Not written yet"}</span></span><span class="note">${p ? "Edit" : "Write it"} ›</span></button>`; }).join("")}</div>`;
+  }
+  const list = woOf(o.id).filter(w => woDone(w).length).slice(0, 3);
+  if (!list.length) return out;
+  const when = k => { const d = parse(k), diff = Math.round((today() - d) / 864e5);
+    return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : diff < 7 ? DAYS_LONG[dow(d)] : d.toLocaleDateString("en-AU", { day: "numeric", month: "short" }); };
+  return out + `<div class="sec"><h2 class="sign">Workouts</h2><span class="label">${self ? "You + your Buds see this" : "Buds only"}</span></div>
+    <div class="card wolist">${list.map(w => `<div class="wolog"><div class="wologhead"><b>${esc(w.label || "Workout")}</b><span class="note">${when(w.day)}${w.duration_s ? ` · ${Math.round(w.duration_s / 60)} min` : ""}${w.finished_at ? "" : " · in progress"}</span></div>
+      ${woDone(w).map(e => `<div class="wologex"><span>${esc(e.name)}</span><span class="mono note">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>`).join("")}</div>`;
+}
+
+// ================= Safety: block + report (beta, needs migration 027) =================
+// Block: they can't see you, find you, bud, message, nudge or react; Buds are removed both ways; they aren't told.
+// Report: a reason (+ optional words), optionally a specific message; the server copies the message text as evidence.
+// The DATABASE enforces all of it (027); the app just offers the buttons and hides what's already blocked.
+const SAFETY = WORKOUTS && !!window.GYM_SAFETY;        // switched on only once migration 027 is applied
+let blockedIds = new Set(), safetySheet = null, myBlockList = null;
+const REPORT_REASONS = [["spam", "Spam"], ["harassment", "Harassment or bullying"], ["inappropriate", "Inappropriate content"],
+  ["fake", "Fake account"], ["underage", "Might be under 13"], ["other", "Something else"]];
+// "⋯" button (profile + chat): plain horizontal dots in the muted text colour, 44×44 tap area, labelled for screen readers
+const DOTS = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`;
+const moreBtn = (o, extra) => `<button type="button" class="pfmore${extra ? " " + extra : ""}" data-safety="${esc(o.id)}" aria-label="More options for ${esc(o.name)}: report or block" title="Report or block">${DOTS}</button>`;
+function openSafety(kind, id, msgId){ safetySheet = { kind, id, msgId: msgId || null, reason: null, alsoBlock: false }; render(); }
+function safetySheetHtml(){
+  const s = safetySheet; if (!s) return "";
+  const o = members.get(s.id), name = esc(o?.name || "this person");
+  let body = "";
+  if (s.kind === "menu") body = `<span class="label">${name}</span><h3 class="sign chgtitle">Safety</h3>
+    <button class="cta ghost" data-sfgo="report">🚩 Report ${name}</button>
+    <button class="cta ghost sfdanger" data-sfgo="block">⛔ Block ${name}</button>`;
+  else if (s.kind === "block") body = `<span class="label">Block</span><h3 class="sign chgtitle">Block ${name}?</h3>
+    <ul class="sflist"><li>They can't see your profile, find you, bud, message, nudge or react to you.</li>
+      <li>You stop being Buds, both ways.</li><li>They won't be told.</li>
+      <li>If you share a circle you both stay in it (it isn't only yours), but you won't see their messages there.</li></ul>
+    <button class="cta sfdanger" id="sf-block">Block</button>`;
+  else body = `<span class="label">Report${s.msgId ? " a message" : ""}</span><h3 class="sign chgtitle">What's wrong?</h3>
+    <div class="sfreasons">${REPORT_REASONS.map(([k, l]) => `<button type="button" class="chip${s.reason === k ? " on" : ""}" data-sfreason="${k}">${l}</button>`).join("")}</div>
+    <textarea id="sf-details" class="woin" rows="3" maxlength="500" placeholder="Anything else? (optional)"></textarea>
+    <label class="rsrow"><span>Also block ${name}</span><input type="checkbox" class="sw" id="sf-alsoblock" ${s.alsoBlock ? "checked" : ""}></label>
+    <p class="note">Reports are private. ${name} isn't told who reported them.${s.msgId ? " A copy of the message is kept with the report." : ""}</p>
+    <button class="cta" id="sf-send" ${s.reason ? "" : "disabled"}>Send report</button>`;
+  return `<div class="chgwrap"><div class="chgdim" data-sfclose></div><div class="chgsheet" role="dialog" aria-label="Safety">
+    <div class="grab"></div>${body}<button type="button" class="linkbtn" data-sfclose style="align-self:center">Cancel</button></div></div>`;
+}
+function wireSafety(){
+  if (!safetySheet) return;
+  const s = safetySheet;
+  main().querySelectorAll("[data-sfclose]").forEach(b => b.onclick = () => { safetySheet = null; render(); });
+  main().querySelectorAll("[data-sfgo]").forEach(b => b.onclick = () => { s.kind = b.dataset.sfgo; render(); });
+  main().querySelectorAll("[data-sfreason]").forEach(b => b.onclick = () => { const d = $("sf-details")?.value; s.reason = b.dataset.sfreason; render(); if (d && $("sf-details")) $("sf-details").value = d; });
+  if ($("sf-alsoblock")) $("sf-alsoblock").onchange = e => { s.alsoBlock = e.target.checked; };
+  if ($("sf-block")) $("sf-block").onclick = () => blockUser(s.id);
+  if ($("sf-send")) $("sf-send").onclick = async () => {
+    const btn = $("sf-send"); btn.disabled = true; btn.textContent = "Sending…";
+    const details = String($("sf-details")?.value || "").trim().slice(0, 500) || null;
+    const { error } = await sb.from("reports").insert({ target_user: s.id, message_id: s.msgId, reason: s.reason, details });
+    if (error){ btn.disabled = false; btn.textContent = "Send report"; return showWarn(oops("send the report", error)); }
+    if (s.alsoBlock) return blockUser(s.id, "Reported and blocked");
+    safetySheet = null; render(); toast("Thanks. We'll look into it.");
+  };
+}
+async function blockUser(id, msg){
+  const o = members.get(id), btn = $("sf-block"); if (btn){ btn.disabled = true; btn.textContent = "Blocking…"; }
+  const { error } = await sb.from("blocks").insert({ blocker: myId, blocked: id });
+  if (error && error.code !== "23505"){ if (btn){ btn.disabled = false; btn.textContent = "Block"; } return showWarn(oops("block them", error)); }
+  blockedIds.add(id); safetySheet = null; myBlockList = null;
+  if (profileId === id) profileId = null;
+  if (chatKey === "d:" + id) chatKey = null;
+  members.delete(id); render(); toast(msg || `Blocked ${o?.name || ""}`.trim());
+  loadAll();
+}
+async function unblockUser(id, name){
+  const { error } = await sb.from("blocks").delete().eq("blocker", myId).eq("blocked", id);
+  if (error) return showWarn(oops("unblock them", error));
+  blockedIds.delete(id); myBlockList = (myBlockList || []).filter(b => b.id !== id); render(); toast(`Unblocked ${name}. Bud them again if you want.`); loadAll();
+}
+// Settings → Privacy & safety → Blocked people
+function blockedCardHtml(){
+  if (!SAFETY) return "";
+  if (myBlockList === null){ sb.rpc("my_blocks").then(({ data, error }) => { myBlockList = error ? [] : (data || []); render(); }); }
+  const list = myBlockList || [];
+  return `<div class="card"><span class="label">Blocked people</span>
+    ${list.length ? `<div class="list" style="margin-top:8px">${list.map(b => `<div class="li"><span class="grow"><b>${esc(b.name)}</b></span>
+      <button type="button" class="chip" data-unblock="${esc(b.id)}" data-name="${esc(b.name)}">Unblock</button></div>`).join("")}</div>`
+      : `<p class="note" style="margin:6px 0 0">${myBlockList === null ? "Loading…" : "No one. Block someone from their profile (⋯)."}</p>`}</div>`;
+}
+document.addEventListener("click", e => {
+  const t = e.target instanceof Element ? e.target : null; if (!t || !SAFETY) return;
+  const ub = t.closest("[data-unblock]"); if (ub) return unblockUser(ub.dataset.unblock, ub.dataset.name);
+  const pm = t.closest("[data-safety]"); if (pm) return openSafety("menu", pm.dataset.safety);
+  const msg = t.closest(".msg[data-msgid]"); if (msg && !msg.classList.contains("me")){
+    document.querySelectorAll(".msgreport").forEach(x => x.remove());
+    const a = document.createElement("button"); a.type = "button"; a.className = "linkbtn msgreport"; a.textContent = "Report this message";
+    a.onclick = () => openSafety("report", msg.dataset.from, Number(msg.dataset.msgid)); msg.after(a); return;
+  }
+});
+
+// Invite: the phone's own share sheet if it has one (Messages, WhatsApp…), else copy the link
+async function inviteFriend(){
+  const link = location.origin + location.pathname.replace(/beta\/(index\.html)?$/, "");     // invites always go to the main app
+  const text = "Join my crew on CREW, the gym streak app. Open this on your phone:";
+  try { if (navigator.share){ await navigator.share({ title: "CREW", text, url: link }); return; } } catch(e){ if (e && e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(text + " " + link); toast("Invite link copied"); } catch(e){ toast("Couldn't copy. The link is in You → Settings → Invite"); }
+}
+// Your last 8 weeks: planned sessions hit (solid) vs planned (outline), plus bonus days. Personal progress, no friends needed.
+function progressHtml(m){
+  if (!WORKOUTS || !m || m.watcher) return "";
+  const ws = startOfWeek(today()), floor = startOfWeek(parse(m.since)), weeks = [];
+  for (let i = 7; i >= 0; i--){ const s = addDays(ws, -7 * i); if (s < floor) continue; weeks.push({ s, w: weekStats(m, s), now: i === 0 }); }
+  if (weeks.length < 2) return "";
+  const max = Math.max(1, ...weeks.map(x => Math.max(x.w.target, x.w.hit - x.w.froze + x.w.bonus)));
+  const done = weeks.filter(x => !x.now), total = done.reduce((n, x) => n + (x.w.hit - x.w.froze) + x.w.bonus, 0), full = done.filter(x => x.w.target && x.w.hit >= x.w.target).length;
+  return `<div class="sec"><h2 class="sign">Last ${weeks.length} weeks</h2><span class="label">${full}/${done.length} full weeks</span></div>
+    <div class="card progcard" style="${pc(m)}"><div class="progbars" role="img" aria-label="Sessions per week for the last ${weeks.length} weeks">
+      ${weeks.map(x => { const got = x.w.hit - x.w.froze; return `<div class="pbw${x.now ? " now" : ""}"><div class="pbcol">
+        <i class="pbt" style="height:${100 * x.w.target / max}%"></i><i class="pbh" style="height:${100 * got / max}%"></i>${x.w.bonus ? `<i class="pbb" style="bottom:${100 * got / max}%;height:${100 * x.w.bonus / max}%"></i>` : ""}</div>
+        <small class="mono">${got + x.w.bonus}</small></div>`; }).join("")}</div>
+      <p class="note" style="margin:8px 0 0">${total} session${total === 1 ? "" : "s"} in ${done.length} week${done.length === 1 ? "" : "s"}, about ${Math.round(10 * total / Math.max(1, done.length)) / 10} a week. Solid = planned days hit · outline = your plan · light = bonus.</p></div>`;
+}
+// A missed week shouldn't feel like the end: a calm fresh-start card, until you've logged this week
+function freshStartHtml(m, t){
+  if (!WORKOUTS || !m || m.watcher) return "";
+  const ws = startOfWeek(t), last = weekStats(m, addDays(ws, -7)), now = weekStats(m, ws);
+  if (!last.target || last.hit >= last.target || now.missed || addDays(ws, -7) < startOfWeek(parse(m.since))) return "";
+  const got = last.hit - last.froze;
+  const said = got ? `Last week you got ${got} of ${last.target}. That still counts.` : "Last week didn't happen. It happens to everyone.";
+  return `<div class="card banner freshcard"><span class="big-emoji">🌱</span><div class="grow"><b>${now.hit ? "You're back" : "Fresh week"}</b>
+    <span class="note">${now.hit ? `${now.hit} of ${now.target} this week so far. ${said}` : `${said} This week is ${now.target} gym day${now.target === 1 ? "" : "s"}. Start with today.`}</span></div></div>`;
+}
+
+// ================= How streaks work =================
+let streakHelp = false;
+function streakHelpHtml(){
+  if (!streakHelp) return "";
+  const rows = [
+    ["Day streak", "Your planned gym days in a row that you logged. Rest days never break it, and today can't count against you until the day's over."],
+    ["Week", "The week you're on. Every week you hit all your planned gym days, the number goes up. Miss one and it starts again at Week 1."],
+    ["Best run", "Your longest day streak ever."],
+    ["Bonus", "Training on a rest or optional day. It shows in your week, but it doesn't add to the streak, so rest days stay rest days."],
+    ["Missed", "A planned gym day that ended without a log. It resets the day streak and the week."],
+    ["Freeze ❄️", "Once a month you can cover one missed day. Your streak and week carry on as if you'd trained."]];
+  return `<div class="chgwrap"><div class="chgdim" data-shclose></div><div class="chgsheet" role="dialog" aria-label="How streaks work">
+    <div class="grab"></div><h3 class="sign chgtitle">How streaks work</h3>
+    <p class="note">CREW follows <b>your</b> split. Rest days are part of the plan, not a failure.</p>
+    <dl class="shelp">${rows.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>
+    <button class="cta" data-shclose>Got it</button></div></div>`;
+}
+const streakHelpLink = () => WORKOUTS ? `<button type="button" class="linkbtn shlink" data-streakhelp>How streaks work</button>` : "";
+document.addEventListener("click", e => {
+  const t = e.target instanceof Element ? e.target.closest("[data-streakhelp],[data-shclose]") : null; if (!t) return;
+  streakHelp = t.hasAttribute("data-streakhelp"); render();
+});
+
+// ================= Split tab (beta) =================
+// Your week, simplest first: just the days. Nothing opens by itself; tap a day to see it; exercises are optional.
+// Today opens by itself and moves on at midnight. "Change" swaps a day: just today (a one-off, saved as a
+// day_swap) or every week (your split changes). Start workout sits at the bottom. The ⓘ replays a 3-step guide.
+let splitOpen = null, splitOpenDay = null, chg = null, guideStep = -1, lastDayKey = null;
+let splitView = "today";   // Split tab: "today" (default: just today's workout) | "details" (today's exercises) | "week" (the whole week)
+const splitLabels = m => [...new Set([...(m.plan || []).filter(s => s && s.w).map(s => s.w), ...plans.map(p => p.label)])];
+const planLabel = (m, d) => { const s = (m.plan || [])[dow(d)]; return s ? (s.w || "Gym day") : null; };   // the split, ignoring swaps
+// Real time: when the date changes (midnight, or opening the app the next morning), redraw so "today" moves on
+setInterval(() => { const k = key(today()); if (lastDayKey && k !== lastDayKey && ready && session) renderSoft(); lastDayKey = k; }, 30000);
+
+function splitDayHtml(m, d, tk){
+  const k = key(d), s = slot(m, d), isT = k === tk, past = k < tk, done = ticked(m, d), open = splitOpen === k;
+  const swapped = swaps.has(myId + "|" + k), lab = s ? (s.w || "Gym day") : "Rest", rest = !s;
+  const tag = swapped ? `<span class="swaptag">${isT ? "swapped today" : "swapped"}</span>` : s?.opt ? `<span class="swaptag opt">optional</span>` : "";
+  const right = done ? `<span class="sdot"></span>` : isT ? `<span class="spill">Today</span>` : open || rest ? "" : `<span class="schev">›</span>`;
+  const head = `<button type="button" class="sdhead" data-sday="${k}" aria-expanded="${open}"><span class="sdn">${DAYS[dow(d)]}</span><span class="slab">${esc(lab)}${tag}</span>${right}</button>`;
+  const chgBtn = past ? "" : `<button type="button" class="schg" data-chg="${k}">Change</button>`;
+  if (!open) return `<div class="sday${isT ? " today" : ""}${rest ? " rest" : ""}${done ? " done" : ""}">${isT && !done ? `<div class="sdheadrow">${head}${chgBtn}</div>` : head}</div>`;
+  let body = "";
+  const w = myWo(k);
+  if (past && w && woDone(w).length) body = woDone(w).map(e => `<div class="sex"><span>${esc(e.name)}</span><span>${esc(fmtSets(e.sets))}</span></div>`).join("");
+  else if (rest) body = `<p class="note" style="margin:0">Rest day.${past ? "" : " Training anyway? Tap Change."}</p>`;
+  else { const p = planFor(lab);
+    body = p ? p.exercises.map(e => `<div class="sex"><span>${esc(e.name)}</span><span>${esc(fmtSets(e.sets))}</span></div>`).join("") +
+               `<button type="button" class="linkbtn slink" data-editplan="${esc(lab)}">Edit details</button>`
+             : `<p class="note" style="margin:0">Just show up and log it. That's all you need.</p>
+                <button type="button" class="linkbtn slink sadd" data-editplan="${esc(lab)}">+ Add exercises (optional)</button>`; }
+  if (swapped && !past) body += `<button type="button" class="linkbtn slink" data-unswap="${k}">Undo swap (back to ${esc(planLabel(m, d) || "Rest")})</button>`;
+  return `<div class="sday open${isT ? " today" : ""}${done ? " done" : ""}"><div class="sdheadrow">${head}${chgBtn}</div><div class="sbody">${body}</div></div>`;
+}
+function splitGoHtml(m, t){
+  if (m.watcher || !slot(m, t)) return "";
+  const w = myWo(key(t)), lab = slot(m, t)?.w || "Gym day";
+  const txt = w && !w.finished_at ? `Continue workout${w.exercises.length ? ` · ${woDone(w).length}/${w.exercises.length}` : ""}`
+    : w && w.finished_at ? "See today's workout" : `🏋️ Start ${lab} workout`;
+  return `<div class="splitgo"><button class="cta" id="split-go">${esc(txt)}</button></div>`;
+}
+function viewSplit(){
+  const m = me(); if (!m) return viewJoin();
+  const t = today(), tk = key(t), ws = startOfWeek(t);
+  if (splitOpenDay !== tk){ splitOpen = null; splitOpenDay = tk; }             // simple first: nothing opens by itself (today is just highlighted)
+  try { document.documentElement.style.setProperty("--tabh", ($("tabbar").offsetHeight || 70) + "px"); } catch(_){}
+  const info = `<div class="shead"><span class="label">Week of ${fmt(ws)}</span><button type="button" class="sinfo" id="split-info" aria-label="How Split works">i</button></div>`;
+  if (m.watcher){
+    main().innerHTML = `<div class="view">${info}<div class="card"><b>👀 You're here to watch</b><p class="note" style="margin:6px 0 12px">No split needed. If you start training, set one up and it lives here.</p>
+      <button class="cta" id="split-start">Start training</button></div></div>`;
+    $("split-start").onclick = () => startOnboarding(true, "split"); $("split-info").onclick = () => { guideStep = 0; render(); }; return;
+  }
+  if (splitView === "today" || splitView === "details") return viewSplitToday(m, t, splitView === "details");
+  const days = Array.from({ length: 7 }, (_, i) => splitDayHtml(m, addDays(ws, i), tk)).join("");
+  const go = splitGoHtml(m, t);
+  main().innerHTML = `<div class="view split${go ? " hasgo" : ""}" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="split-back">‹ Today</button>${info}<div class="sweek">${days}</div>
+    <button type="button" class="cta ghost ssm" id="split-edit">✏️ Edit split</button>
+    <p class="note" style="text-align:center">Tap a day to see it. Exercises are optional.</p>${go}${chgSheetHtml(m)}${guideHtml()}</div>`;
+  main().querySelectorAll("[data-sday]").forEach(b => b.onclick = () => { const k = b.dataset.sday; splitOpen = splitOpen === k ? null : k; render(); });
+  main().querySelectorAll("[data-editplan]").forEach(b => b.onclick = () => editPlan(b.dataset.editplan, "back"));
+  main().querySelectorAll("[data-chg]").forEach(b => b.onclick = () => openChange(b.dataset.chg));
+  main().querySelectorAll("[data-unswap]").forEach(b => b.onclick = () => unswap(b.dataset.unswap));
+  $("split-edit").onclick = () => startOnboarding(true, "split");
+  $("split-back").onclick = () => { splitView = "today"; render(); window.scrollTo(0, 0); };
+  $("split-info").onclick = () => { guideStep = 0; render(); };
+  if ($("split-go")) $("split-go").onclick = () => startWorkout(t);
+  wireChgSheet(m); wireGuide();
+  // First time here: show the guide once by itself
+  if (guideStep < 0){ let seen = true; try { seen = !!localStorage.getItem("gs-split-guide-" + myId); } catch(_){}
+    if (!seen){ try { localStorage.setItem("gs-split-guide-" + myId, "1"); } catch(_){} guideStep = 0; render(); } }
+}
+
+// Split tab, simple first (DP's design): just today's workout and one big button. Someone who has written
+// exercises for this workout also gets a "Details" row; nobody picks a "mode": it follows whether a plan exists.
+function viewSplitToday(m, t, details){
+  const tk = key(t), s = slot(m, t), lab = s ? (s.w || "Gym day") : null, p = lab ? planFor(lab) : null;
+  const w = myWo(tk), done = ticked(m, t), swapped = swaps.has(myId + "|" + tk);
+  if (details && !p) details = false;                                       // plan was removed: back to the card
+  const goTxt = w && !w.finished_at ? `Continue workout${w.exercises.length ? ` · ${woDone(w).length}/${w.exercises.length}` : ""}`
+    : w && w.finished_at ? "See today's workout" : "Start workout";
+  const goBtn = lab ? `<button class="cta stgo" id="split-go">${esc(goTxt)}</button>` : "";
+  const nEx = p ? p.exercises.length : 0;
+  if (details){
+    main().innerHTML = `<div class="view split stoday" style="${pc(m)}">
+      <div class="stnav"><button type="button" class="linkbtn" id="split-back">‹ Split</button><button type="button" class="linkbtn" id="split-editplan">Edit</button></div>
+      <div><span class="label">Today · ${nEx} exercise${nEx === 1 ? "" : "s"}</span><div class="work sign stname">${esc(lab)}</div></div>
+      <div class="stlist">${p.exercises.map(e => `<div class="stex"><span>${esc(e.name)}</span><span class="mono">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>
+      <p class="note" style="margin:0">Tap Edit to change exercises, sets or weights.</p>
+      ${goBtn}${guideHtml()}</div>`;
+    $("split-back").onclick = () => { splitView = "today"; render(); window.scrollTo(0, 0); };
+    $("split-editplan").onclick = () => editPlan(lab, "back");
+  } else {
+    const sub = swapped ? `<span class="note stsub">Swapped from ${esc(planLabel(m, t) || "Rest")} · <button type="button" class="linkbtn stundo" id="split-unswap">Undo</button></span>`
+      : done ? `<span class="note stsub">Logged ✓ Nice.</span>` : "";
+    const detailsRow = p ? `<button type="button" class="stdet" id="split-details"><span class="grow"><b>Details</b><span class="note">${nEx} exercise${nEx === 1 ? "" : "s"}</span></span><span class="schev" aria-hidden="true">›</span></button>` : "";
+    const restBits = !lab ? `<span class="note stsub">Rest day. Training anyway?</span>` : "";
+    main().innerHTML = `<div class="view split stoday" style="${pc(m)}">
+      <section class="card stcard" aria-label="Today's split"><span class="label">Today</span>
+        <div class="work sign stbig">${esc(lab || "Rest")}</div>${sub}${restBits}
+        ${detailsRow}${goBtn}
+        <button type="button" class="linkbtn stchg" id="split-change">${lab ? "Change today's workout" : "Change"}</button></section>
+      <div class="stlinks">${lab && !p ? `<button type="button" class="linkbtn" id="split-add">+ Add exercises</button>` : ""}<button type="button" class="linkbtn" id="split-week">See my week</button></div>
+      ${chgSheetHtml(m)}${guideHtml()}</div>`;
+    if ($("split-details")) $("split-details").onclick = () => { splitView = "details"; render(); window.scrollTo(0, 0); };
+    if ($("split-unswap")) $("split-unswap").onclick = () => unswap(tk);
+    if ($("split-add")) $("split-add").onclick = () => editPlan(lab, "back");
+    $("split-week").onclick = () => { splitView = "week"; render(); window.scrollTo(0, 0); };
+    $("split-change").onclick = () => openChange(tk);
+    wireChgSheet(m);
+  }
+  if ($("split-go")) $("split-go").onclick = () => startWorkout(t);
+  wireGuide();
+  // the big name: shrink until its longest word fits on one line ("SHOULDERS" must never split mid-word)
+  const big = main().querySelector(".stbig, .stname");
+  if (big){ let px = parseFloat(getComputedStyle(big).fontSize); while (big.scrollWidth > big.clientWidth + 1 && px > 34){ px -= 4; big.style.fontSize = px + "px"; } }
+}
+
+// ---- Change a day ----
+function openChange(k){
+  const d = parse(k), isT = k === key(today());
+  chg = { k, scope: isT ? "day" : "every", label: null, custom: false }; render();
+}
+function chgSheetHtml(m){
+  if (!chg) return "";
+  const d = parse(chg.k), isT = chg.k === key(today()), cur = slot(m, d), curLab = cur ? (cur.w || "Gym day") : "Rest";
+  const dayName = DAYS_LONG[dow(d)], restNow = !planLabel(m, d);
+  const opts = splitLabels(m).filter(l => lc(l) !== lc(curLab));
+  if (chg.scope === "every" && curLab !== "Rest") opts.push("Rest");
+  if (chg.label && !opts.includes(chg.label) && !chg.custom) chg.label = null;
+  const pick = chg.label;
+  const scopeDay = isT ? "Just today" : `Just this ${dayName}`;
+  const note = chg.scope === "day"
+    ? `${isT ? "Just today" : "Just this " + dayName}: ${esc(planLabel(m, d) || "Rest")} is back next week. Your split doesn't change.${pick && pick !== "Rest" ? ` ${esc(pick)}'s details come with it.` : ""}`
+    : `Every ${dayName} becomes ${esc(pick || "…")} in your split.`;
+  const go = !pick ? "Pick one" : chg.scope === "day" ? `Swap to ${pick}` : `Every ${dayName}: ${pick}`;
+  return `<div class="chgwrap" id="chgwrap"><div class="chgdim" data-chgclose></div><div class="chgsheet" role="dialog" aria-label="Change ${dayName}">
+    <div class="grab"></div><span class="label">${dayName} · was ${esc(curLab)}</span>
+    <h3 class="sign chgtitle">Change to</h3>
+    <div class="chgchips">${opts.map(l => `<button type="button" class="chip${pick === l && !chg.custom ? " on" : ""}" data-chgpick="${esc(l)}">${esc(l)}</button>`).join("")}
+      <button type="button" class="chip add${chg.custom ? " on" : ""}" data-chgcustom>+ Something else</button></div>
+    ${chg.custom ? `<input id="chg-custom" class="woin" placeholder="e.g. Arms, Cardio, Chest + Back" maxlength="40" value="${esc(pick || "")}" autocomplete="off" enterkeyhint="done">` : ""}
+    <div class="chgscope" role="group"><button type="button" class="${chg.scope === "day" ? "on" : ""}" data-chgscope="day">${scopeDay}</button><button type="button" class="${chg.scope === "every" ? "on" : ""}" data-chgscope="every">Every ${dayName}</button></div>
+    <p class="note chgnote">${note}${restNow && chg.scope === "day" ? " Training on a rest day counts as a bonus." : ""}</p>
+    <button class="cta" id="chg-go" ${pick ? "" : "disabled"}>${esc(go)}</button>
+    <button type="button" class="linkbtn" data-chgclose style="align-self:center">Cancel</button></div></div>`;
+}
+function wireChgSheet(m){
+  if (!chg) return;
+  main().querySelectorAll("[data-chgclose]").forEach(b => b.onclick = () => { chg = null; render(); });
+  main().querySelectorAll("[data-chgpick]").forEach(b => b.onclick = () => { chg.label = b.dataset.chgpick; chg.custom = false; render(); });
+  main().querySelectorAll("[data-chgscope]").forEach(b => b.onclick = () => { chg.scope = b.dataset.chgscope; if (chg.scope === "day" && chg.label === "Rest") chg.label = null; render(); });
+  const c = main().querySelector("[data-chgcustom]"); if (c) c.onclick = () => { chg.custom = true; chg.label = null; render(); $("chg-custom")?.focus(); };
+  const f = $("chg-custom");
+  if (f){ f.oninput = () => { const v = normalizeWorkout(f.value) || f.value.trim(); chg.label = v || null; const g = $("chg-go"); g.disabled = !v;
+      g.textContent = !v ? "Pick one" : chg.scope === "day" ? `Swap to ${v}` : `Every ${DAYS_LONG[dow(parse(chg.k))]}: ${v}`; };
+    f.onkeydown = ev => { if (ev.key === "Enter" && chg.label){ ev.preventDefault(); applyChange(); } }; }
+  $("chg-go").onclick = applyChange;
+}
+async function applyChange(){
+  const m = me(); if (!m || !chg || !chg.label) return;
+  const { k, scope } = chg, label = String(chg.label).trim().slice(0, 40), d = parse(k), dayName = DAYS_LONG[dow(d)], isT = k === key(today());
+  const btn = $("chg-go"); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  // An untouched workout for that day was for the old plan: drop it so Start opens the new one
+  const w = myWo(k); if (w && !w.finished_at && !woDone(w).length){ workouts = workouts.filter(x => x !== w); sb.from("workouts").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); }
+  let error;
+  if (scope === "day"){
+    if (lc(label) === lc(planLabel(m, d) || "")) ({ error } = await sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k));   // same as the split = no swap
+    else ({ error } = await sb.from("day_swaps").upsert({ user_id: myId, day: k, label }, { onConflict: "user_id,day" }));
+    if (!error){ if (lc(label) === lc(planLabel(m, d) || "")) swaps.delete(myId + "|" + k); else swaps.set(myId + "|" + k, label); }
+  } else {
+    const plan = [...(m.plan || [null, null, null, null, null, null, null])], i = dow(d), old = plan[i];
+    plan[i] = label === "Rest" ? null : { w: normalizeWorkout(label) || label, opt: !!old?.opt };
+    ({ error } = await sb.from("profiles").update({ plan }).eq("id", myId));
+    if (!error){ members.set(myId, { ...m, plan });
+      if (swaps.has(myId + "|" + k)){ swaps.delete(myId + "|" + k); sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); } }
+  }
+  if (error){ if (btn){ btn.disabled = false; btn.textContent = "Try again"; } return showWarn(oops("change that day", error)); }
+  chg = null; splitOpen = k; render();
+  toast(scope === "day" ? `${isT ? "Today" : dayName}: ${label}` : `Every ${dayName} is now ${label}`);
+}
+async function unswap(k){
+  const had = swaps.get(myId + "|" + k); swaps.delete(myId + "|" + k); render();
+  const { error } = await sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k);
+  if (error){ swaps.set(myId + "|" + k, had); render(); return showWarn(oops("undo the swap", error)); }
+  toast("Back to your split");
+}
+
+// ---- The ⓘ guide: 3 short slides ----
+const GUIDE = [
+  ["Today's workout", "Split shows what you're training today. Tap See my week for the rest.", "week"],
+  ["Exercises are optional", "Just show up and log it. If you want, tap a day, then + Add exercises to write your sets and weights once.", "details"],
+  ["At the gym", "Tap Start workout at the bottom and tick ✓ as you go. Your crew hears once, when you finish. Doing something else today? Tap Change.", "gym"]];
+function guideHtml(){
+  if (guideStep < 0) return "";
+  const [h, p, art] = GUIDE[guideStep], last = guideStep === GUIDE.length - 1;
+  const ill = art === "week" ? `<div class="gmini"><span>Mon</span>Push</div><div class="gmini hl"><span>Tue</span>Pull<i>TODAY</i></div><div class="gmini"><span>Wed</span>Legs</div>`
+    : art === "details" ? `<div class="gmini hl"><span>Wed</span>Legs</div><div class="gsoft">Just show up and log it.<b>+ Add exercises (optional)</b></div>`
+    : `<div class="gmini done"><span>✓</span>Lat pulldown<em>3×10</em></div><div class="gmini"><span>○</span>Barbell row<em>3×8</em></div><div class="gbtn">Finish workout</div>`;
+  return `<div class="chgwrap"><div class="chgdim" data-gclose></div><div class="chgsheet guide" role="dialog" aria-label="How Split works">
+    <div class="grab"></div><span class="label">How Split works · ${guideStep + 1} of ${GUIDE.length}</span>
+    <h3 class="sign chgtitle">${h}</h3><div class="gill">${ill}</div><p class="gtext">${p}</p>
+    <div class="gdots">${GUIDE.map((_, i) => `<i class="${i === guideStep ? "on" : ""}"></i>`).join("")}</div>
+    <button class="cta" id="g-next">${last ? "Got it" : "Next"}</button>${last ? "" : `<button type="button" class="linkbtn" data-gclose style="align-self:center">Skip</button>`}</div></div>`;
+}
+function wireGuide(){
+  if (guideStep < 0) return;
+  main().querySelectorAll("[data-gclose]").forEach(b => b.onclick = () => { guideStep = -1; render(); });
+  $("g-next").onclick = () => { guideStep = guideStep >= GUIDE.length - 1 ? -1 : guideStep + 1; render(); };
+}
+
 // ================= Chats =================
 // Buds (both ways) can message 1-on-1; every circle has one group chat. Text + emoji.
 // A chat's key from MY side: "d:<their id>" for a 1-on-1, "c:<circle id>" for a circle (same keys as chat_reads).
 let messages = [], chatReads = {}, chatKey = null, chatDrafts = {}, tmpId = 0;
 const keyOfMsg = m => m.circle_id ? "c:" + m.circle_id : "d:" + (m.from_user === myId ? m.to_user : m.from_user);
-const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-const unreadIn = k => { const r = chatReads[k] || ""; return messages.filter(m => m.from_user !== myId && !m.pending && keyOfMsg(m) === k && m.created_at > r).length; };
+const gone = (m, k) => !!chatCleared[k] && !m.pending && m.created_at <= chatCleared[k];   // deleted (for me) before this point
+const chatMsgs = k => messages.filter(m => keyOfMsg(m) === k && !gone(m, k) && !(blockedIds.size && blockedIds.has(m.from_user))).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+const unreadIn = k => { const r = chatReads[k] || ""; return messages.filter(m => m.from_user !== myId && !m.pending && keyOfMsg(m) === k && m.created_at > r && !gone(m, k)).length; };
 const chatTarget = k => k.startsWith("c:") ? { circle: circleOf(k.slice(2)) } : { person: members.get(k.slice(2)) };
 const chatName = k => { const t = chatTarget(k); return t.circle ? circleLabel(t.circle) : (t.person?.name || "Chat"); };
 const canSend = k => { const t = chatTarget(k); return t.circle ? !!t.circle : isMutual(t.person); };
 // Every chat I can see: all my circles, every Bud, plus old 1-on-1s (e.g. someone who isn't a Bud any more)
 function chatList(){
-  const keys = new Set([...circles.map(c => "c:" + c.id), ...[...members.values()].filter(o => o.id !== myId && isMutual(o)).map(o => "d:" + o.id)]);
+  // (b53: Buds you haven't messaged no longer fill the list — the new-chat button finds them, like WhatsApp)
+  const keys = new Set([...circles.map(c => "c:" + c.id), ...(CHATDEL ? [] : [...members.values()].filter(o => o.id !== myId && isMutual(o)).map(o => "d:" + o.id))]);
   // one pass over all messages (was: a filter + sort per chat, on every redraw)
   const sum = new Map();
   for (const m of messages){
-    const k = keyOfMsg(m); keys.add(k);
+    const k = keyOfMsg(m); if (gone(m, k)) continue; keys.add(k);
     const e = sum.get(k) || { last: null, unread: 0 }; sum.set(k, e);
     if (!e.last || m.created_at > e.last.created_at) e.last = m;
     if (m.from_user !== myId && !m.pending && m.created_at > (chatReads[k] || "")) e.unread++;
@@ -1562,6 +2654,7 @@ async function markRead(k){
   await sb.from("chat_reads").upsert({ user_id: myId, chat: k, read_at: last.created_at }, { onConflict: "user_id,chat" }).then(() => {}, () => {});
 }
 function openChat(k){
+  newChat = null; chatEdit = false; chatAsk = null;
   chatKey = k; profileId = null; circleId = null; circleMode = "view"; tab = "chats";
   try { localStorage.setItem("gs-tab", "chats"); } catch(e){}
   render();
@@ -1573,6 +2666,7 @@ document.addEventListener("click", e => {
 
 function viewChats(){
   $("title").textContent = "Chats";
+  if (CHATDEL) return viewChats2();
   const list = chatList();
   if (!list.length){
     main().innerHTML = `<div class="view"><div class="card"><b>No chats yet</b><p class="note" style="margin:6px 0 0">You can message your Buds (people you bud who bud you back) and chat in your circles. Find people in Crew → Everyone, or start a circle.</p></div></div>`;
@@ -1597,7 +2691,7 @@ function chatLogHtml(k){
     const day = dayLabel(m.created_at); if (day !== lastDay){ out += `<div class="chatday">${esc(day)}</div>`; lastDay = day; lastFrom = ""; }
     const mine = m.from_user === myId, o = members.get(m.from_user);
     if (isCircle && !mine && m.from_user !== lastFrom) out += `<div class="msgwho" style="${o ? pc(o) : ""}"><span class="dot"></span>${esc(nameOf(m.from_user))}</div>`;
-    out += `<div class="msg ${mine ? "me" : ""} ${m.pending ? "pending" : ""} ${m.failed ? "failed" : ""}" style="${mine && m0 ? pc(m0) : ""}" ${m.failed ? `data-retry="${esc(m.id)}"` : ""}>${esc(m.body)}</div>`;
+    out += `<div class="msg ${mine ? "me" : ""} ${m.pending ? "pending" : ""} ${m.failed ? "failed" : ""}" style="${mine && m0 ? pc(m0) : ""}" ${m.failed ? `data-retry="${esc(m.id)}"` : ""}${SAFETY && !mine && !m.pending ? ` data-msgid="${esc(m.id)}" data-from="${esc(m.from_user)}"` : ""}>${esc(m.body)}</div>`;
     const next = ms[i + 1];
     if (m.failed) out += `<div class="msgtime me">Didn't send · tap to retry</div>`;
     else if (!next || next.from_user !== m.from_user || dayLabel(next.created_at) !== day)
@@ -1634,7 +2728,7 @@ function viewChat(k){
         <button class="cta" id="chat-send" type="submit" aria-label="Send">Send</button></form>`
     : `<p class="chatnote composer">${t.circle ? "" : `You can message ${esc(o.name)} again once you're Buds (you both bud each other).`}</p>`;
   main().innerHTML = `<div class="chatscreen" id="chatscreen"><div class="chatinner">
-    <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}</div>
+    <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}${SAFETY && o ? moreBtn(o, "chatmore") : ""}</div>
     <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div></div>`;
   $("chat-back").onclick = () => { chatKey = null; document.documentElement.classList.remove("chat-open"); render(); window.scrollTo(0, 0); };
   const inp = $("chat-input"), form = $("chat-form");
@@ -1804,14 +2898,31 @@ function burst(){
 let memberCount = 0;
 async function loadMemberCount(){
   const { data, error } = await sb.rpc("member_count");
-  if (!error && typeof data === "number"){ memberCount = data; renderOnline(); }
+  if (!error && typeof data === "number"){ memberCount = data; renderOnline(); renderHeaderCount(); }
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId);
+  const show = !WORKOUTS && !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay && !woPlan && !woSummary && !(tab === "split" && !profileId && !circleId && !chatKey);
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
+}
+// Big header title: shrink a long word ("ACCOUNT", "SETTINGS") until it fits its column instead of running into the name badge
+function fitTitle(){
+  const h = $("title"); if (!h) return;
+  h.style.fontSize = "";
+  let size = parseFloat(getComputedStyle(h).fontSize);
+  while (h.scrollWidth > h.clientWidth + 1 && size > 26){ size -= 2; h.style.fontSize = size + "px"; }
+}
+if (window.MutationObserver) new MutationObserver(() => requestAnimationFrame(fitTitle)).observe(document.getElementById("title") || document.body, { childList: true, characterData: true, subtree: true });
+addEventListener("resize", () => requestAnimationFrame(fitTitle));
+// Beta: the count lives in the header on every signed-in screen (its own slot, so it never covers anything)
+function renderHeaderCount(){
+  const el = $("hcount"); if (!el) return;
+  const show = WORKOUTS && !!session && authKnown && !ob && !locked && memberCount > 0;
+  el.hidden = !show; if (!show) return;
+  el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person is" : "people are"} on CREW`);
+  el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount.toLocaleString()}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
 }
 
 // ================= Login screens =================
@@ -1839,7 +2950,12 @@ function viewAuth(){
       <button class="linkbtn" id="a-switch">${isUp ? "Already have an account? Sign in" : "New here? Create an account"}</button>
       ${isUp ? "" : `<button class="linkbtn" id="a-forgot">Forgot password?</button>`}`;
   }
-  main().innerHTML = `<div class="card auth">${body}<div class="err" id="a-err">${esc(authErr)}</div>${authMsg?`<div class="okmsg">${esc(authMsg)}</div>`:""}</div>`;
+  const pitch = WORKOUTS && (authMode === "signup" || authMode === "signin") ? `<div class="pitch"><span class="label">CREW</span>
+      <h2 class="sign">Show up to the gym, with your crew.</h2>
+      <ul><li><b>✓</b>Tick off your gym days. Rest days never break your streak.</li>
+        <li><b>👥</b>See your friends show up, and let them see you. Nudge, react, chat.</li>
+        <li><b>🏋️</b>Log sets and weights only if you want to.</li></ul></div>` : "";
+  main().innerHTML = `${pitch}<div class="card auth">${body}<div class="err" id="a-err">${esc(authErr)}</div>${authMsg?`<div class="okmsg">${esc(authMsg)}</div>`:""}</div>`;
   const go = $("a-go"), email = $("a-email"), pass = $("a-pass");
   const submit = async () => {
     authErr = ""; authMsg = ""; go.disabled = true;
@@ -2271,6 +3387,7 @@ function viewCirclesTab(seg){
     if (!m) return toast("That code doesn't look right"); pendingJoin = m[1].toLowerCase(); render(); };
   $("circle-new").onclick = () => { circleDraft = { name: "", emoji: "🔥", picked: new Set() }; circleMode = "new"; circleId = null; render(); window.scrollTo(0,0); };
   main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
+  { const v = main().querySelector(".view"); if (v){ v.setAttribute("role", "tabpanel"); v.setAttribute("aria-labelledby", "crewtab-" + crewView); } }
 }
 // People picker with search (used to create a circle and to add people). Buds first.
 // Private people can only be added by their Buds (database rule) — everyone else can join with the invite link
@@ -2323,7 +3440,7 @@ function viewCircleNew(){
 function viewCircleAdd(c){
   $("title").textContent = "Add people";
   circleDraft = circleDraft || { picked: new Set() };
-  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; circleAsk = null; render(); })}
     <p class="note" style="margin:0">They'll be added straight in, like a WhatsApp group. They can leave any time.</p>
     ${pickerHtml(new Set(c.members.map(m => m.user_id)))}
     <button class="cta" id="c-add" disabled>Add</button></div>`;
@@ -2339,20 +3456,32 @@ function viewCircleAdd(c){
 function viewCircleEdit(c){
   $("title").textContent = "Edit circle";
   const d = circleDraft = circleDraft || { name: c.name, emoji: c.emoji };
-  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; render(); })}
+  main().innerHTML = `<div class="view">${backTo(c.name, () => { circleMode = "view"; circleDraft = null; circleAsk = null; render(); })}
     <div class="card ob"><span class="label">Name</span>
       <input class="field" id="c-name" maxlength="30" value="${esc(d.name)}" autocapitalize="words">
       <span class="label" style="margin-top:12px">Emoji</span>${emojiPicker(d.emoji)}
       <button class="cta" id="c-save" style="margin-top:12px">Save</button></div>
     <div class="card"><b>Invite link</b><p class="note">Resetting makes the old link stop working.</p>
-      <button class="cta ghost" id="c-reset" style="font-size:18px">Reset invite link</button></div></div>`;
+      <button class="cta ghost" id="c-reset" style="font-size:18px">Reset invite link</button></div>
+    ${CHATDEL && chatDelOk ? (circleAsk === "delete"
+      ? `<div class="card ask"><b>Delete ${esc(c.name)} for everyone?</b><p class="note">The circle and its chat are removed for all ${c.members.length} member${c.members.length === 1 ? "" : "s"}. This can't be undone.</p>
+          <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip danger" id="c-del-yes">Delete circle</button><button type="button" class="linkbtn" id="c-del-no">Keep it</button></span></div>`
+      : `<div class="card"><b>Delete circle</b><p class="note">Removes it for everyone, including its chat.</p><button class="cta ghost danger" id="c-del" style="font-size:18px">Delete circle</button></div>`) : ""}</div>`;
   const name = $("c-name");
   name.oninput = () => { d.name = name.value; $("c-save").disabled = !d.name.trim(); };
   main().querySelectorAll("[data-emoji]").forEach(b => b.onclick = () => { d.emoji = b.dataset.emoji; main().querySelectorAll("[data-emoji]").forEach(x => x.classList.toggle("on", x === b)); });
   $("c-save").onclick = async () => {
     const { error } = await sb.rpc("edit_circle", { p_circle: c.id, p_name: d.name.trim(), p_emoji: d.emoji });
     if (error) return showWarn(oops("save", error));
-    toast("Saved"); circleDraft = null; circleMode = "view"; await loadAll(); };
+    toast("Saved"); circleDraft = null; circleMode = "view"; circleAsk = null; await loadAll(); };
+  if ($("c-del")) $("c-del").onclick = () => { circleAsk = "delete"; render(); setTimeout(() => $("c-del-yes")?.scrollIntoView({ block: "center" }), 50); };
+  if ($("c-del-no")) $("c-del-no").onclick = () => { circleAsk = null; render(); };
+  if ($("c-del-yes")) $("c-del-yes").onclick = async () => {
+    const b = $("c-del-yes"); b.disabled = true; b.textContent = "Deleting…";
+    const { error } = await sb.rpc("delete_circle", { p_circle: c.id });
+    if (error){ b.disabled = false; b.textContent = "Delete circle"; return showWarn(oops("delete the circle", error)); }
+    circles = circles.filter(x => x.id !== c.id); messages = messages.filter(m => m.circle_id !== c.id);
+    toast(`Deleted ${c.name}`); circleAsk = null; circleDraft = null; circleMode = "view"; circleId = null; crewView = "circles"; render(); window.scrollTo(0, 0); loadAll(); };
   $("c-reset").onclick = async () => {
     const { error } = await sb.rpc("reset_invite", { p_circle: c.id });
     if (error) return showWarn(oops("reset", error));
@@ -2400,7 +3529,7 @@ function viewCircle(c){
     const { error } = await sb.rpc("mute_circle", { p_circle: c.id, p_muted: to });
     if (error){ if (mine) mine.muted = !to; render(); return showWarn(oops("change that", error)); }
     toast(to ? "Circle muted" : "Circle notifications on"); };
-  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
+  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleAsk = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
   if ($("c-addppl")) $("c-addppl").onclick = () => { circleDraft = { picked: new Set() }; circleMode = "add"; render(); window.scrollTo(0,0); };
   $("c-leave").onclick = () => { circleAsk = "leave"; render(); window.scrollTo(0,0); };
   if ($("c-ask-no")) $("c-ask-no").onclick = () => { circleAsk = null; render(); };
@@ -2495,7 +3624,15 @@ async function removeFollower(id){
   if (error) return showWarn(oops("remove", error));
   toast(`Removed ${nameOf(id)}`); loadAll();
 }
-function openProfile(id){ if (!members.has(id)) return; profileId = id; unbudAsk = null; render(); window.scrollTo(0,0); }
+function openProfile(id){
+  if (!members.has(id)){
+    const hit = (searchHits || []).find(o => o.id === id); if (!hit) return;
+    members.set(id, hit); extraIds.add(id);                 // keep them loaded from now on
+    fetchIn("checkins", "user_id,day", "user_id", [id], q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))
+      .then(rows => { const m = members.get(id); if (m){ rows.forEach(r => m.days[r.day] = 1); if (profileId === id) render(); } }, () => {});
+  }
+  profileId = id; unbudAsk = null; render(); window.scrollTo(0,0);
+}
 function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); }   // no auto-keyboard: tapping the search box is enough
 // One click handler for the whole app: profiles, bud buttons, requests (works on every screen)
 document.addEventListener("click", e => {
@@ -2528,7 +3665,7 @@ function viewProfile(inYou){
   const badge = o.private ? `${LOCK} Private` : "Public";
   if (!o.visible || !sharesStats(o)){
     main().innerHTML = `<div class="view">${back}<div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate</span>
-      <div class="work sign">${esc(o.name)}</div>
+      <div class="pfname"><div class="work sign">${esc(o.name)}</div>${SAFETY && !self ? moreBtn(o) : ""}</div>
       ${countsRow(o, false)}
       <p class="sub">${o.private ? "This account is private. Send a bud request to see their week and streak." : "Hasn't logged anything yet."}</p>
       <div class="pfacts">${budBtn(o)}</div></div></div>`;
@@ -2550,9 +3687,9 @@ function viewProfile(inYou){
   const youBar = inYou ? `<div class="row2"><button class="cta ghost" id="you-edit" style="font-size:18px">Edit profile</button><button class="cta ghost" id="you-settings" style="font-size:18px">⚙️ Settings</button></div>` : "";
   main().innerHTML = `<div class="view">${back}${mine}${req}${ask}
     <div class="card hero" style="${pc(o)}"><span class="label">${badge} · ${plateName(o.plate)} plate${self && !inYou ? " · how others see you" : ""}</span>
-      <div class="work sign">${esc(o.name)}</div>
+      <div class="pfname"><div class="work sign">${esc(o.name)}</div>${SAFETY && !self ? moreBtn(o) : ""}</div>
       ${!self && relation(o) ? `<span class="reltag">${({buds:"🤝 Buds", spotting:"You're spotting them", spotter:"Spots you", requested:"Request sent"})[relation(o)]}</span>` : ""}
-      ${countsRow(o, inYou)}
+      ${countsRow(o, inYou)}${inYou && WORKOUTS ? `<p class="note rellegend"><b>Buds</b> you spot each other · <b>Spotting</b> you follow them · <b>Spotters</b> follow you. Only Buds can message you and see your workout details.</p>` : ""}
       <div class="pfweek">${boxes}</div>
       <p class="sub">This week: ${w.hit} of ${w.target} gym days${w.bonus ? ` · +${w.bonus} bonus` : ""}</p>
       ${self ? "" : `<div class="pfacts">${budBtn(o)}${nudge}${isMutual(o) ? `<button type="button" class="chip" data-openchat="d:${esc(o.id)}">💬 Message</button>` : ""}</div>`}
@@ -2562,11 +3699,13 @@ function viewProfile(inYou){
       <div class="accent"><b class="sign">${dayStreak(o)}</b><span class="label">Day streak</span></div>
       <div><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
       <div><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
-    ${youBar}
+    ${streakHelpLink()}${streakHelpHtml()}${self && inYou ? progressHtml(o) : ""}${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
-    <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
-    ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}`}</div>`;
+    ${woProfileHtml(o, inYou)}
+    ${WORKOUTS && inYou ? "" : `<div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
+    ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}`}`}</div>`;
   if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
+  main().querySelectorAll("[data-editplan]").forEach(b => b.onclick = () => editPlan(b.dataset.editplan, "back"));
   if ($("pf-trophies")) $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
   if (inYou){ $("you-edit").onclick = () => { youView = "edit"; render(); window.scrollTo(0,0); };
               $("you-settings").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); }; }
@@ -2597,55 +3736,89 @@ function viewPeopleList(kind){
 function wnArt(kind, m){
   const me = `--c:var(--p-${PLATES.some(p => p.id === m.plate) ? m.plate : "red"})`, bud = "--c:var(--p-blue)", b2 = "--c:var(--p-yellow)", b3 = "--c:var(--p-green)", b4 = "--c:var(--p-pink)";
   const disc = (st, cls = "") => `<span class="wdisc ${cls}" style="${st}"></span>`;
+  if (kind === "lift"){ const side = st => [["big", me], ["mid", bud], ["sm", b2]].map(([c, x], i) => `<span class="wl-p ${c}" style="${x};--i:${i}"></span>`).join("");
+    return `<div class="wa-lift"><div class="wl-bar"><span class="wl-rod"></span><span class="wl-side l">${side()}</span><span class="wl-side r">${side()}</span></div><span class="wl-shadow"></span></div>`; }
   if (kind === "hello") return `<div class="wa-hello">${disc(b2, "s1")}${disc(me, "s2")}${disc(bud, "s3")}<span class="wa-bar"></span></div>`;
   if (kind === "buds") return `<div class="wa-buds">${disc(me)}<span class="wa-link"><span>BUDS</span></span>${disc(bud)}</div>
       <div class="wa-caps"><span>You</span><span>Your gym mate</span></div>`;
   if (kind === "profiles") return `<div class="wa-card" style="${bud}"><div class="wa-row"><span class="dot"></span><b>Your mate</b></div>
       <div class="wa-week">${[1,1,1,0,1,1,0].map(x => `<i class="${x ? "on" : ""}"></i>`).join("")}</div>
       <div class="wa-stats"><b class="sign">14</b><span>day streak</span></div></div>`;
+  if (kind === "workout") return `<div class="wa-card wa-wo" style="${me}"><div class="wa-row"><span class="wa-live"></span><span class="wa-lab">Going</span><b class="wa-time">25:02</b></div>
+      <b class="sign wa-wotitle">Push</b>
+      ${[["Bench press", 1, "3 × 8"], ["Incline DB", 1, "3 × 10"], ["Dips", 0, "3 × 12"]].map(([n, d, sr]) => `<div class="wa-ex ${d ? "on" : ""}"><i></i><span>${n}</span><em>${sr}</em></div>`).join("")}</div>`;
+  if (kind === "rest") return `<div class="wa-rest" style="${me}"><div class="wa-ringwrap"><svg viewBox="0 0 120 120" width="190" height="190" aria-hidden="true"><circle cx="60" cy="60" r="52" class="wr-bg"/><circle cx="60" cy="60" r="52" class="wr-fg"/></svg>
+      <span class="wr-mid"><b>1:02</b><span class="wa-lab">Rest left</span></span></div>
+      <div class="wa-strip"><span class="wa-live"></span><span>Session 25:02</span><span class="wa-lab">Rest 1:02</span></div></div>`;
+  if (kind === "safety") return `<div class="wa-card wa-safe"><div class="wa-row"><span class="dot" style="${bud}"></span><b>Someone</b><span class="wa-dots">•••</span></div>
+      <div class="wa-acts"><span>Report</span><span class="bad">Block</span></div></div>`;
+  if (kind === "health") return `<div class="wa-health"><span class="wa-pill"><span class="wa-pillfill"></span><span class="wa-pillin"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>1,900</span></span>
+      <div class="wa-card wa-cal"><span class="wa-lab">Calories today</span><div class="wa-stats"><b class="sign">1,900</b><span>kcal</span></div><span class="wa-bar2"><i></i></span></div></div>`;
+  if (kind === "newchat") return `<div class="wa-card wa-nc"><div class="wa-ncbar"><span>Edit</span><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/></svg></div>
+      <div class="wa-ncrow"><span class="dot" style="${bud}"></span><b>Your mate</b><span class="wa-del">Delete</span></div>
+      <div class="wa-ncrow"><span class="dot" style="${b2}"></span><b>Morning crew</b><span class="wa-del">Clear</span></div></div>`;
   if (kind === "circles") return `<div class="wa-ring">${[me, bud, b2, b3, b4].map((st, i) => `<span class="wdisc sm" style="${st};--i:${i}"></span>`).join("")}<span class="wa-mid sign">Crew</span></div>`;
   return `<div class="wa-chat"><span class="wa-bub them">gym at 6?</span><span class="wa-bub me" style="${pc(m)}">yesss 💪 see you there</span><span class="wa-bub them">bring straps</span></div>`;
 }
 // Tour version: bump when the tour gets new screens, so everyone sees it once more.
 // 1 = beta tour (Buds/Profiles/Find people), 2 = launch tour (+ Circles, Chats)
-const TOUR_V = 2; let wnShort = false;
-// ...and each app (main / beta) remembers on its own phone that it showed the tour, so someone who saw it in the
-// beta still gets it the first time they open the main app.
-const tourKey = () => "gs-tour-" + (BETA ? "beta" : "main") + "-" + TOUR_V + "-" + myId;
+// 3 = workouts + safety (beta b40s–b51), 4 = Health + chat tidy-up (b52–b53)
+const TOUR_V = 4; let wnShort = false;
+// b54: once per ACCOUNT (saved on your profile), not once per app or phone. If you skipped a few updates, you get
+// all of them in one go. The phone also remembers it showed it, in case saving to the profile failed (bad signal).
+const tourKey = () => (BETA ? "gs-tour-beta-" + TOUR_V + "c-" : "gs-tour-acct-" + TOUR_V + "-") + myId;   // beta: "c" = 3rd wording, so testers see the final version once
+// DP: seeing it in the BETA is only a test — it must not count for the account. So the beta never saves update 3/4 to
+// the profile (it only remembers on this phone); the real "once per account" save happens when it's in the main app.
+// (Making the public/private choice still records tour 2, so the main app doesn't ask that again.)
+const SEEN_SAVE = BETA ? 2 : TOUR_V;
+// Every feature screen, tagged with the update it came in. You see the ones newer than the last update you saw.
+const UPDATES = [
+  { v: 2, kind: "buds",     title: "Buds",     line: "Follow your gym mates. Bud each other and you're Buds." },
+  { v: 2, kind: "profiles", title: "Profiles", line: "Tap anyone to see their week, streak and trophies." },
+  { v: 2, kind: "circles",  title: "Circles",  line: "Private groups for your crew, like a WhatsApp group." },
+  { v: 2, kind: "chats",    title: "Chats",    line: "Message your Buds and your circles." },
+  { v: 3, kind: "workout",  title: "Workouts", line: "Add your exercises, sets and reps. Tick them off as you go." },
+  { v: 3, kind: "rest",     title: "Timers", line: "Times your whole session, plus every rest between sets." },
+  { v: 4, kind: "health",   title: "Health",   line: "Log meals in kcal or kJ. Tap the heart on Today." }];
 const tourSeenHere = () => { try { return !!localStorage.getItem(tourKey()); } catch(e){ return true; } };
 const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch(e){} };
 async function finishShortTour(){
   markTourHere(); wnActive = false; wnDone = true; wnShort = false; document.documentElement.classList.remove("wn-open"); tab = "today";
-  const m = me(); if (m) m.seenUpdate = TOUR_V;
+  const m = me(); if (m && !BETA) m.seenUpdate = TOUR_V;
   render(); window.scrollTo(0,0);
-  await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
+  if (!BETA) await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
 }
-function startTour(){ wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
+let wnSince = 0;   // the last update this account saw when the tour opened (decides which screens show)
+function startTour(){ wnSince = 0; wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
 if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
   wnPv = wnPv || { ...pvFrom(m), priv: true };            // Private by default; they can switch to Public
   // One new thing per screen, one short line each, full screen with a little picture. Then privacy, then find your buds.
-  const FEATS = [["buds", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
-                 ["profiles", "Profiles", "Tap anyone to see their week, streak and trophies."],
-                 ["circles", "Circles", "Private groups for your crew, like a WhatsApp group."],
-                 ["chats", "Chats", "Message your Buds and your circles."]];
+  const FEATS = UPDATES.filter(u => u.v > wnSince).map(u => [u.kind, u.title, u.line]);
   const PRIV = 2 + FEATS.length, FIND = PRIV + 1;            // step numbers: 1 hello, 2–5 features, 6 privacy, 7 find buds
   const dots = `<div class="steps">${Array.from({ length: wnShort ? PRIV - 1 : FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
   let body = "";
   if (wnStep < PRIV){                                         // the full-screen story part
     document.documentElement.classList.add("wn-open");
-    const art = wnArt(wnStep === 1 ? "hello" : FEATS[wnStep - 2][0], m);
+    const art = wnArt(wnStep === 1 ? (wnShort ? "lift" : "hello") : FEATS[wnStep - 2][0], m);
     const text = wnStep === 1
-      ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`
+      ? (wnShort ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">What's<br>new</h2><p class="wnline">A quick look at what's new since you last opened CREW.</p>`
+                 : `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`)
       : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>`;
     main().innerHTML = `<div class="wnfull" id="wn" style="${pc(m)}">
       <div class="wntop">${dots}${wnStep > 1 ? `<button type="button" class="linkbtn wnskip" id="wn-skip">Skip</button>` : ""}</div>
       <div class="wnstage" key="${wnStep}"><div class="wnart">${art}</div><div class="wntext">${text}</div></div>
       <button class="cta wngo" id="wn-next">${wnStep === 1 ? "Show me" : wnStep === PRIV - 1 ? "Got it" : "Next"}</button></div>`;
     // the big title always fits on one line per word (shrinks if a word is too wide, e.g. before the font loads)
+    // b54: every feature screen uses the SAME size — the size the longest word on any of them needs — so the titles don't jump around
     const fit = () => { const h = $("wn")?.querySelector(".wnbig"); if (!h) return; h.style.fontSize = "";
-      let fs = parseFloat(getComputedStyle(h).fontSize); while (h.scrollWidth > h.clientWidth + 1 && fs > 34){ fs -= 3; h.style.fontSize = fs + "px"; } };
+      const words = wnStep === 1 ? [h.innerHTML] : FEATS.map(f => f[1]);
+      const probe = h.cloneNode(false); probe.style.cssText = "position:absolute;visibility:hidden;width:" + h.clientWidth + "px"; h.parentNode.appendChild(probe);
+      let fs = parseFloat(getComputedStyle(h).fontSize);
+      const tooWide = () => words.some(w => { probe.innerHTML = w; return probe.scrollWidth > probe.clientWidth + 1; });
+      probe.style.fontSize = fs + "px"; while (tooWide() && fs > 34){ fs -= 3; probe.style.fontSize = fs + "px"; }
+      probe.remove(); h.style.fontSize = fs + "px"; };
     fit(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
     $("wn-next").onclick = () => { if (wnShort && wnStep === PRIV - 1) return finishShortTour(); wnStep++; render(); window.scrollTo(0,0); };
     if ($("wn-skip")) $("wn-skip").onclick = () => { if (wnShort) return finishShortTour(); wnStep = PRIV; render(); window.scrollTo(0,0); };
@@ -2665,14 +3838,15 @@ function viewWhatsNew(){
   if (wnStep === PRIV) wirePrivacy(wnPv, render);
   if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
-    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: TOUR_V })){ $("wn-next").disabled = false; return; } }
+    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: Math.max(SEEN_SAVE, me()?.seenUpdate || 0) })){ $("wn-next").disabled = false; return; } }
     if (wnStep === FIND){ markTourHere(); document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
 }
 
 // ================= Shell =================
-const TITLES = {today:"Today",crew:"Crew",chats:"Chats",trophies:"Trophies",you:"You"};
+// Beta: Trophies leaves the tab bar (it opens from your profile); Split takes its place
+const TITLES = WORKOUTS ? {today:"Today",crew:"Crew",chats:"Chats",split:"Split",you:"You"} : {today:"Today",crew:"Crew",chats:"Chats",trophies:"Trophies",you:"You"};
 // iPhone Home Screen apps: if a text box still has the keyboard up when the screen is redrawn, iOS drops the keyboard
 // but leaves the page pushed up, so the bottom bar floats mid-screen. Close the keyboard first, then nudge iOS back.
 function settleKeyboard(){ const ae = document.activeElement; if (ae && ae.matches && ae.matches("input, textarea") && $("main").contains(ae)) ae.blur(); }
@@ -2742,15 +3916,16 @@ function render(){
   settleKeyboard();
   $("date").textContent = today().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"short"});
   const m = me();
-  $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span>${esc(m.name)}` : "";
+  $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span><span class="menm">${esc(m.name)}</span>` : "";
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
-  if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && ((me().seenUpdate || 0) < TOUR_V || !tourSeenHere())){
-    wnActive = true; wnShort = false;                          // everyone gets the full tour, privacy choice included (DP's call)
+  if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && (me().seenUpdate || 0) < TOUR_V && !tourSeenHere()){
+    wnActive = true; wnStep = 1; wnSince = me().seenUpdate || 0;
+    wnShort = wnSince >= 2;                                    // already chose public/private (tour 2): just the new things
   }
   $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
-  renderOnline();
+  renderOnline(); renderHeaderCount(); renderMini();
   if (!sb) return viewSetup();
   if (authMode==="newpass") return viewAuth();
   if (gate) return viewInstall();            // phones in a browser: get it on the Home Screen first
@@ -2769,17 +3944,25 @@ function render(){
     $("load-retry").onclick = () => { main().innerHTML = `<div class="skel">Loading the crew…</div>`; loadAll(); }; return; }
   if (!me()){ $("title").textContent = "Welcome"; $("tabbar").hidden = true; profileId = null; chatKey = null; circleId = null; return viewJoin(); }
   if (wnActive) return viewWhatsNew();
+  if (woSummary && !profileId && !circleId && !chatKey) return viewSummary();
+  if (woPlan && !profileId && !circleId && !chatKey) return viewPlan();
+  if (woDay && !profileId && !circleId && !chatKey) return viewWorkout();
   updateChatBadge();
   if (chatKey && !profileId && !circleId) return viewChat(chatKey);
   if (profileId) return viewProfile();
   if (joinPreview || (pendingJoin && me())) return viewJoinCircle();
   if (circleId || circleMode === "new") return viewCircleRoute();
+  if (HEALTH && healthView) return viewHealth();
   $("title").textContent = TITLES[tab];
-  ({today:viewToday,crew:viewCrew,chats:viewChats,trophies:viewTrophies,you:viewYou})[tab]();
+  if (!TITLES[tab] && tab !== "trophies") tab = "today";
+  $("title").textContent = TITLES[tab] || "Trophies";
+  ({today:viewToday,crew:viewCrew,chats:viewChats,trophies:viewTrophies,split:viewSplit,you:viewYou})[tab]();
   pinBottom();
   maybeShowPushSheet();
 }
-function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+let trophyBack = "you";
+{ const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
+function setTab(t){ healthView = null; mealSheet = null; bodySheet = null; chatEdit = false; chatAsk = null; newChat = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -2800,12 +3983,12 @@ let sb = null, session = null, authKnown = false;
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
     if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
-      loadGen++; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      loadGen++; workouts = []; plans = []; blockedIds = new Set(); myBlockList = null; safetySheet = null; swaps = new Map(); splitOpenDay = null; rest = null; woSummary = null; restSheet = null; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
       messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
       document.documentElement.classList.remove("chat-open");
     }
     if (myId && myId !== was){ ready = false; loading = null; loadAll(); subscribe(); }
-    if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); }
+    if (!myId){ members = new Map(); ready = false; memberCount = 0; renderOnline(); renderHeaderCount(); }
     render();
   });
   render();
@@ -2814,7 +3997,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "50";   // bump together with version.json on every release
+const APP_VERSION = window.GYM_BETA ? "b57" : "51";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -2838,3 +4021,316 @@ setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); rende
 
 // Offline app shell (makes it installable and load instantly)
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+
+// ================= Health (b52): calories, BMI, height & weight =================
+// Opened from the heart pill in the Today header. Everything here is private to you (database rules in 029).
+const KJ = 4.184;
+const MEAL_KINDS = [["breakfast","Breakfast"],["lunch","Lunch"],["dinner","Dinner"],["snack","Snack"]];
+const HEART = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>';
+const HPLUS = '<span class="hplus" aria-hidden="true"><svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 1v10M1 6h10"/></svg></span>';
+const HCHEV = '<svg class="hchev" viewBox="0 0 8 14" width="8" height="14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>';
+const kindName = k => (MEAL_KINDS.find(x => x[0] === k) || [k, k])[1];
+const kcalOf = x => x.unit === "kj" ? x.amount / KJ : x.amount;
+const mealsOn = d => meals.filter(x => x.day === d);
+const todayKcal = () => mealsOn(key(today())).reduce((s, x) => s + kcalOf(x), 0);
+const inUnit = (kcal, u = hp.unit) => u === "kj" ? kcal * KJ : kcal;
+const nf = n => Math.round(n).toLocaleString("en-AU");
+const uName = u => u === "kj" ? "kJ" : "kcal";
+const timeOf = ts => new Date(ts).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }).replace(/\s/g, " ");
+const hDay = d => parse(d).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+const HLB = 2.20462;
+let hUnit = (() => { try { return localStorage.getItem("gs-hunit") || "cm"; } catch(_){ return "cm"; } })();
+const wUnit = () => unit === "lb" ? "lb" : "kg";
+const hW = kg => wUnit() === "lb" ? `${(kg * HLB).toFixed(1)} lb` : `${Number(kg).toFixed(1).replace(/\.0$/, "")} kg`;
+const ftIn = cm => { const t = Math.round(cm / 2.54); return [Math.floor(t / 12), t % 12]; };
+const fmtH = cm => hUnit === "ft" ? `${ftIn(cm)[0]} ft ${ftIn(cm)[1]} in` : `${String(cm).replace(/\.0$/, "")} cm`;
+const fmtHs = cm => hUnit === "ft" ? `${ftIn(cm)[0]}′${ftIn(cm)[1]}″` : fmtH(cm);   // short, for the big tile
+function guessKind(){ const h = new Date().getHours(); return h < 11 ? "breakfast" : h < 15 ? "lunch" : h < 17 ? "snack" : h < 22 ? "dinner" : "snack"; }
+const hBar = f => `<span class="hbar"><span style="width:${Math.max(0, Math.min(100, f * 100)).toFixed(0)}%"></span></span>`;
+const unitSeg = (id, opts, on) => `<span class="hseg" id="${id}" role="group">${opts.map(([v, l]) => `<button type="button" data-u="${v}" class="${v === on ? "on" : ""}" aria-pressed="${v === on}">${l}</button>`).join("")}</span>`;
+
+async function loadHealth(){
+  if (!HEALTH || !sb || !myId) return;
+  const [p, m] = await Promise.all([
+    sb.from("profiles").select("cal_goal,energy_unit,cal_notify,cal_notify_at").eq("id", myId).maybeSingle(),
+    sb.from("meals").select("id,day,kind,name,amount,unit,created_at").gte("day", key(addDays(today(), -30))).order("created_at")]);
+  if (p.error || m.error){ healthOk = false; return; }            // migration 029 not applied yet: keep Health hidden
+  healthOk = true;
+  if (p.data) hp = { goal: p.data.cal_goal ?? null, unit: p.data.energy_unit || "kcal", notify: !!p.data.cal_notify, at: String(p.data.cal_notify_at || "22:00").slice(0, 5) };
+  meals = (m.data || []).map(r => ({ ...r, amount: Number(r.amount) }));
+}
+{ const core = loadAll; loadAll = async function(){ const r = await core.apply(this, arguments); if (HEALTH){ try { await loadHealth(); } catch(_){} renderHeaderCount(); if (healthView) renderSoft(); } return r; }; }
+{ const core = renderHeaderCount; renderHeaderCount = function(){ core(); renderHealthPill(); }; }
+
+// The pill in the Today header: heart + today's total; with a goal it fills up in red as you eat.
+function renderHealthPill(){
+  const el = $("hhealth"); if (!el) return;
+  const show = HEALTH && healthOk && !!session && ready && !!me() && !ob && !locked && !wnActive && tab === "today"
+    && !healthView && !woDay && !woPlan && !woSummary && !profileId && !circleId && !chatKey;
+  el.hidden = !show; if (!show) return;
+  const k = todayKcal(), has = mealsOn(key(today())).length > 0, pct = has && hp.goal ? Math.min(100, k / hp.goal * 100) : 0;
+  el.setAttribute("aria-label", has ? `Health: ${nf(inUnit(k))} ${uName(hp.unit)} today` : "Health");
+  el.innerHTML = `${pct ? `<span class="hhfill" style="width:${pct.toFixed(0)}%"></span>` : ""}<span class="hhin">${HEART}${has ? `<b>${nf(inUnit(k))}</b>` : ""}</span>`;
+}
+document.addEventListener("click", e => { if (e.target.closest && e.target.closest("#hhealth")) openHealth("hub"); });
+function openHealth(v){ if (!HEALTH) return; healthBack = tab; healthView = v || "hub"; mealSheet = null; bodySheet = null; render(); window.scrollTo(0, 0); }
+
+function viewHealth(){
+  const v = healthView, T = { hub: "Health", cal: "Calories", bmi: "BMI", body: "Height\u00a0&\u00a0weight" };   // no-break spaces: one line (the title shrinks to fit)
+  $("title").textContent = T[v] || "Health";
+  const back = v === "hub" ? `‹ ${TITLES[healthBack] || "Today"}` : "‹ Health";
+  const inner = !healthOk ? `<div class="card"><b>Health isn't ready yet</b><p class="note" style="margin:6px 0 0">Check your connection and try again in a bit.</p></div>`
+    : v === "cal" ? hCalHtml() : v === "bmi" ? hBmiHtml() : v === "body" ? hBodyHtml() : hHubHtml();
+  main().innerHTML = `<div class="view hview"><button type="button" class="hback" id="h-back">${esc(back)}</button>${inner}</div>${mealSheetHtml()}${bodySheetHtml()}`;
+  wireHealth2();
+}
+function hHubHtml(){
+  const k = todayKcal(), n = mealsOn(key(today())).length, lw = latestWeight(), b = bmiOf(lw?.kg, body.height);
+  const entry = (go, title, num, unitL, side, extra = "") => `<button type="button" class="card hentry" data-hgo="${go}">
+    <span class="hehead"><span class="sign">${title}</span>${HCHEV}</span>
+    <span class="hebig"><b class="sign">${num}</b>${unitL ? `<span class="label">${unitL}</span>` : ""}<span class="label heside">${side}</span></span>${extra}</button>`;
+  return `<p class="note hnote">Only you can see this.</p>`
+    + entry("cal", "Calories", nf(inUnit(k)), `${uName(hp.unit)} today`, `${n} meal${n === 1 ? "" : "s"}`, hp.goal ? hBar(k / hp.goal) : "")
+    + entry("bmi", "BMI", b ? b.toFixed(1) : "—", "", b ? `${bmiName(b)} range` : "Add height &amp; weight")
+    + entry("body", "Height &amp; weight", lw ? hW(lw.kg).split(" ")[0] : "—", lw ? wUnit() : "", body.height ? esc(fmtH(body.height)) : "Add height");
+}
+const bmiIdx = b => b < 18.5 ? 0 : b < 25 ? 1 : b < 30 ? 2 : 3;
+const bmiName = b => ["Under", "Normal", "Over", "High"][bmiIdx(b)];
+
+function hCalHtml(){
+  const list = mealsOn(key(today())), k = todayKcal(), u = hp.unit, o = u === "kj" ? "kcal" : "kj", n = list.length;
+  const left = hp.goal ? hp.goal - k : null;
+  const status = hp.goal ? (left >= 0 ? `${nf(inUnit(left))} left of ${nf(inUnit(hp.goal))}` : `${nf(inUnit(-left))} over ${nf(inUnit(hp.goal))}`) : "";
+  const rows = list.map(x => `<button type="button" class="hrow hmeal" data-meal="${esc(x.id)}">
+      <span class="hmname"><b>${esc(x.name || kindName(x.kind))}</b><span class="label">${x.name ? esc(kindName(x.kind)) + " · " : ""}${timeOf(x.created_at)}</span></span>
+      <span class="hmval"><b class="sign">${nf(x.amount)}</b><span class="hmunit">${x.unit === "kj" ? `KJ · ${nf(x.amount / KJ)} KCAL` : "KCAL"}</span></span></button>`).join("");
+  return `<section class="card hcal"><div class="hline"><span class="label">Today</span>${unitSeg("h-unit", [["kcal", "kcal"], ["kj", "kJ"]], u)}</div>
+      <div class="hebig"><b class="sign hcalnum">${nf(inUnit(k))}</b><span class="label">${uName(u)}</span><span class="label heside">${nf(inUnit(k, o))} ${uName(o)}</span></div>
+      ${hp.goal ? hBar(k / hp.goal) : ""}<div class="hline"><span class="label">${n} meal${n === 1 ? "" : "s"}</span><span class="label">${status}</span></div></section>
+    <div class="hsechead"><h2 class="sign">Today's meals</h2><span class="label">Only you</span></div>
+    <div class="card hlist">${rows}<button type="button" class="hrow hadd" id="h-addmeal">${HPLUS}Add meal</button></div>
+    <div class="card hlist">
+      <button type="button" class="hrow" id="h-goal"><b>Daily goal</b><span class="hmuted">${hp.goal ? `${nf(inUnit(hp.goal))} ${uName(u)}` : "Not set"}</span>${HCHEV}</button>
+      <div class="hrow"><label for="h-notify"><b>Nightly total</b></label><input type="time" id="h-at" class="htime" value="${esc(hp.at)}" step="300" aria-label="Time for the nightly total" ${hp.notify ? "" : "disabled"}><input type="checkbox" class="sw" id="h-notify" ${hp.notify ? "checked" : ""}></div></div>
+    <p class="note hnote">${hp.notify ? `At ${esc(hp.at)} you'll get a notification with the day's total (only on days you log a meal).` : "Turn on to get your day's total as a notification."}</p>`;
+}
+function hBmiHtml(){
+  const lw = latestWeight(), b = bmiOf(lw?.kg, body.height);
+  if (!b) return `<div class="card hempty"><b>Add your height and weight</b><p class="note">Your BMI is worked out from them.</p><button class="cta" data-hgo="body">Height &amp; weight</button></div>`;
+  const i = bmiIdx(b), pos = Math.max(1, Math.min(99, b / 40 * 100));
+  const ranges = [["Under", "Below 18.5"], ["Normal", "18.5 – 24.9"], ["Over", "25 – 29.9"], ["High", "30 and up"]];
+  return `<section class="card hbmi"><div class="hebig"><b class="sign">${b.toFixed(1)}</b><span class="hband">${bmiName(b)} range</span></div>
+      <div class="hscale"><span class="hmark" style="left:${pos.toFixed(1)}%"></span>
+        <div class="hsegs">${[0, 1, 2, 3].map(j => `<span class="${j === i ? "on" : ""}"></span>`).join("")}</div>
+        <div class="hsegs hticks"><span>18.5</span><span>25</span><span>30</span><span></span></div></div>
+      <p class="note">From your height (${esc(fmtH(body.height))}) and latest weight (${esc(hW(lw.kg))}). A rough guide, not a health check.</p></section>
+    <span class="label hsec">Ranges</span>
+    <div class="card hlist">${ranges.map(([nm, v], j) => `<div class="hrow${j === i ? " cur" : ""}"><b>${nm}</b><span class="label">${v}</span></div>`).join("")}</div>`;
+}
+function hBodyHtml(){
+  const lw = latestWeight(), hist = body.weights.slice(-8).reverse();
+  const tile = (k, l, val, has) => `<button type="button" class="card htile" data-bedit="${k}"><span class="hline"><span class="label">${l}</span><span class="hedit">${has ? "Edit" : "Add"}</span></span><b class="sign">${val}</b></button>`;
+  const rows = hist.map((w, j) => { const prev = hist[j + 1], d = prev ? w.kg - prev.kg : 0;
+    return `<div class="hrow"><span class="hmname"><b>${esc(hW(w.kg))}</b><span class="label">${hDay(w.day)}</span></span>${prev && Math.abs(d) >= 0.05 ? `<span class="hmuted">${d > 0 ? "+" : "−"}${esc(hW(Math.abs(d)))}</span>` : ""}</div>`; }).join("");
+  return `<div class="htiles">${tile("height", "Height", body.height ? esc(fmtHs(body.height)) : "—", !!body.height)}${tile("weight", "Weight", lw ? esc(hW(lw.kg)) : "—", !!lw)}</div>
+    <span class="label hsec">History</span>
+    <div class="card hlist">${rows || `<div class="hrow"><span class="hmuted">No weigh-ins yet</span></div>`}<button type="button" class="hrow hadd" data-bedit="weight">${HPLUS}Log weight</button></div>`;
+}
+
+// ---------- the "Add meal" sheet ----------
+function openMeal(x){
+  mealSheet = x ? { id: x.id, kind: x.kind, name: x.name || "", amount: String(x.amount), unit: x.unit, delArm: false }
+                : { id: null, kind: guessKind(), name: "", amount: "", unit: hp.unit, delArm: false };
+  render(); setTimeout(() => $("m-amt")?.focus({ preventScroll: true }), x ? 9999999 : 150);
+}
+const otherLine = (amt, u) => { const n = parseFloat(amt); return n > 0 ? (u === "kj" ? `= ${nf(n / KJ)} kcal` : `= ${nf(n * KJ)} kJ`) : ""; };
+function mealSheetHtml(){
+  const s = mealSheet; if (!s) return "";
+  return `<div class="chgwrap" id="mealwrap"><div class="chgdim" data-hclose></div><div class="chgsheet hsheet" role="dialog" aria-label="${s.id ? "Edit meal" : "Add a meal"}">
+    <div class="grab"></div><span class="label">${s.id ? "Edit meal" : "Add a meal"}</span><h3 class="sign chgtitle">What did you eat?</h3>
+    <div class="chgchips" role="group">${MEAL_KINDS.map(([k, l]) => `<button type="button" class="chip${s.kind === k ? " on" : ""}" data-mkind="${k}" aria-pressed="${s.kind === k}">${l}</button>`).join("")}</div>
+    <input id="m-name" class="woin" placeholder="Name it (optional)" maxlength="60" value="${esc(s.name)}" autocomplete="off" enterkeyhint="next" aria-label="Meal name">
+    <div class="hline"><span class="label">Energy</span>${unitSeg("m-unit", [["kcal", "kcal"], ["kj", "kJ"]], s.unit)}</div>
+    <label class="hamount"><input id="m-amt" type="number" inputmode="decimal" min="1" step="any" placeholder="0" value="${esc(s.amount)}" aria-label="Energy" enterkeyhint="done"><span class="label" id="m-u">${uName(s.unit)}</span><span class="label heside" id="m-other">${otherLine(s.amount, s.unit)}</span></label>
+    <button class="cta" id="m-save" ${parseFloat(s.amount) > 0 ? "" : "disabled"}>${s.id ? "Save" : "Add meal"}</button>
+    ${s.id ? `<button type="button" class="linkbtn hdel" id="m-del">${s.delArm ? "Tap again to delete" : "Delete meal"}</button>` : `<button type="button" class="linkbtn" data-hclose style="align-self:center">Cancel</button>`}</div></div>`;
+}
+async function saveMeal(){
+  const s = mealSheet; if (!s) return;
+  const amt = Math.round(parseFloat($("m-amt").value) * 10) / 10, name = $("m-name").value.trim().slice(0, 60) || null;
+  if (!(amt > 0)) return;
+  const max = s.unit === "kj" ? 41840 : 10000;
+  if (amt > max) return showWarn(`That's a lot for one meal. The most is ${nf(max)} ${uName(s.unit)}.`);
+  const btn = $("m-save"); btn.disabled = true; btn.textContent = "Saving…";
+  const row = { kind: s.kind, name, amount: amt, unit: s.unit }, cols = "id,day,kind,name,amount,unit,created_at";
+  const { data, error } = s.id ? await sb.from("meals").update(row).eq("id", s.id).select(cols).single()
+                               : await sb.from("meals").insert({ ...row, day: key(today()) }).select(cols).single();
+  if (error){ btn.disabled = false; btn.textContent = s.id ? "Save" : "Add meal"; return showWarn(oops("save the meal", error)); }
+  const r = { ...data, amount: Number(data.amount) };
+  meals = s.id ? meals.map(x => x.id === s.id ? r : x) : [...meals, r];
+  mealSheet = null; toast(s.id ? "Saved" : "Meal added"); render();
+}
+async function deleteMeal(){
+  const s = mealSheet; if (!s?.id) return;
+  if (!s.delArm){ s.delArm = true; const b = $("m-del"); if (b) b.textContent = "Tap again to delete"; return; }
+  const { error } = await sb.from("meals").delete().eq("id", s.id);
+  if (error) return showWarn(oops("delete the meal", error));
+  meals = meals.filter(x => x.id !== s.id); mealSheet = null; toast("Meal deleted"); render();
+}
+
+// ---------- the height / weight / daily goal sheet ----------
+function openBody(kind){
+  const lw = latestWeight();
+  if (kind === "height") bodySheet = { kind, unit: hUnit, v: body.height ? (hUnit === "ft" ? String(ftIn(body.height)[0]) : String(body.height)) : "", v2: body.height && hUnit === "ft" ? String(ftIn(body.height)[1]) : "" };
+  else if (kind === "weight") bodySheet = { kind, unit: wUnit(), v: lw ? (wUnit() === "lb" ? (lw.kg * HLB).toFixed(1) : String(lw.kg)) : "", v2: "" };
+  else bodySheet = { kind: "goal", unit: hp.unit, v: hp.goal ? String(Math.round(inUnit(hp.goal))) : "", v2: "" };
+  render(); setTimeout(() => $("b-v")?.focus({ preventScroll: true }), 150);
+}
+function bodyValue(s){            // what's typed, converted to cm / kg / kcal (null if empty or not a number)
+  const a = parseFloat(s.v), b = parseFloat(s.v2) || 0;
+  if (s.kind === "height") return s.unit === "ft" ? (a > 0 || b > 0 ? Math.round(((a || 0) * 12 + b) * 2.54 * 10) / 10 : null) : (a > 0 ? Math.round(a * 10) / 10 : null);
+  if (s.kind === "weight") return a > 0 ? Math.round((s.unit === "lb" ? a / HLB : a) * 10) / 10 : null;
+  return a > 0 ? Math.round(s.unit === "kj" ? a / KJ : a) : null;
+}
+function bodyOther(s){
+  const x = bodyValue(s); if (x == null) return "";
+  if (s.kind === "height") return s.unit === "ft" ? `= ${String(x).replace(/\.0$/, "")} cm` : `= ${ftIn(x)[0]} ft ${ftIn(x)[1]} in`;
+  if (s.kind === "weight") return s.unit === "lb" ? `= ${x} kg` : `= ${(x * HLB).toFixed(1)} lb`;
+  return s.unit === "kj" ? `= ${nf(x)} kcal` : `= ${nf(x * KJ)} kJ`;
+}
+function bodySheetHtml(){
+  const s = bodySheet; if (!s) return "";
+  const c = { height: ["Your height", [["cm", "cm"], ["ft", "ft in"]], "Used for your BMI."],
+              weight: ["Your weight", [["kg", "kg"], ["lb", "lb"]], "Saved as today's weigh-in."],
+              goal:   ["Daily goal", [["kcal", "kcal"], ["kj", "kJ"]], "Optional. Shows how much is left each day."] }[s.kind];
+  const ft = s.kind === "height" && s.unit === "ft";
+  const field = (id, val, u, ph) => `<label class="hamount${ft ? " half" : ""}"><input id="${id}" type="number" inputmode="decimal" min="0" step="any" placeholder="${ph}" value="${esc(val)}" aria-label="${u}" enterkeyhint="done"><span class="label">${u}</span></label>`;
+  return `<div class="chgwrap" id="bodywrap"><div class="chgdim" data-hclose></div><div class="chgsheet hsheet" role="dialog" aria-label="${c[0]}">
+    <div class="grab"></div><span class="label">${s.kind === "goal" ? "Calories" : "Edit"}</span><h3 class="sign chgtitle">${c[0]}</h3>
+    <div class="hline"><span class="label">Unit</span>${unitSeg("b-unit", c[1], s.unit)}</div>
+    <div class="hamounts">${ft ? field("b-v", s.v, "ft", "5") + field("b-v2", s.v2, "in", "10") : field("b-v", s.v, c[1].find(x => x[0] === s.unit)[1], s.kind === "height" ? "178" : s.kind === "weight" ? "72.5" : "2500")}</div>
+    <p class="note hnote"><span id="b-other" class="mono">${bodyOther(s)}</span> ${c[2]}</p>
+    <button class="cta" id="b-save">Save</button>
+    ${s.kind === "goal" && hp.goal ? `<button type="button" class="linkbtn hdel" id="b-clear">Remove goal</button>` : `<button type="button" class="linkbtn" data-hclose style="align-self:center">Cancel</button>`}</div></div>`;
+}
+async function saveBody(clear){
+  const s = bodySheet; if (!s) return;
+  const x = clear ? null : bodyValue(s), btn = $("b-save");
+  const lim = { height: [100, 250, "Height should be between 100 and 250 cm (3 ft 4 in – 8 ft 2 in)."], weight: [25, 350, "Weight should be between 25 and 350 kg."], goal: [500, 10000, "A daily goal should be between 500 and 10,000 kcal."] }[s.kind];
+  if (!clear && (x == null || x < lim[0] || x > lim[1])) return showWarn(lim[2]);
+  if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  let error;
+  if (s.kind === "height"){ ({ error } = await sb.from("profiles").update({ height_cm: x }).eq("id", myId)); if (!error){ body.height = x; hUnit = s.unit; try { localStorage.setItem("gs-hunit", hUnit); } catch(_){} } }
+  else if (s.kind === "weight"){ const day = key(today()); ({ error } = await sb.from("bodyweight").upsert({ user_id: myId, day, kg: x }));
+    if (!error){ body.weights = [...body.weights.filter(w => w.day !== day), { day, kg: x }].sort((a, b) => a.day.localeCompare(b.day)); if (s.unit !== unit && typeof setUnit === "function") setUnit(s.unit); } }
+  else { ({ error } = await sb.from("profiles").update({ cal_goal: x }).eq("id", myId)); if (!error) hp.goal = x; }
+  if (error){ if (btn){ btn.disabled = false; btn.textContent = "Save"; } return showWarn(oops("save that", error)); }
+  bodySheet = null; toast(clear ? "Goal removed" : "Saved"); render();
+}
+async function saveHp(patch){
+  const before = { ...hp }; Object.assign(hp, patch);
+  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ goal: "cal_goal", unit: "energy_unit", notify: "cal_notify", at: "cal_notify_at" }[k]] = v;
+  const { error } = await sb.from("profiles").update(row).eq("id", myId);
+  if (error){ hp = before; showWarn(oops("save that", error)); }
+  render();
+}
+function wireSeg(id, on){
+  const g = $(id); if (!g) return;
+  g.querySelectorAll("[data-u]").forEach(b => b.onclick = () => { g.querySelectorAll("[data-u]").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b); }); on(b.dataset.u); });
+}
+function wireHealth2(){
+  $("h-back").onclick = () => { if (healthView === "hub") setTab(healthBack); else { healthView = "hub"; render(); window.scrollTo(0, 0); } };
+  main().querySelectorAll("[data-hgo]").forEach(b => b.onclick = () => { healthView = b.dataset.hgo; render(); window.scrollTo(0, 0); });
+  $("h-addmeal")?.addEventListener("click", () => openMeal());
+  main().querySelectorAll("[data-meal]").forEach(b => b.onclick = () => openMeal(meals.find(x => x.id === b.dataset.meal)));
+  main().querySelectorAll(".hview [data-bedit]").forEach(b => b.onclick = () => openBody(b.dataset.bedit));
+  $("h-goal")?.addEventListener("click", () => openBody("goal"));
+  wireSeg("h-unit", u => saveHp({ unit: u }));
+  const nt = $("h-notify"), at = $("h-at");
+  if (nt) nt.onchange = () => { saveHp({ notify: nt.checked }); if (nt.checked && typeof pushState === "function" && pushState() !== "on") showPushSheet(); };
+  if (at) at.onchange = () => { if (at.value) saveHp({ at: at.value }); };
+  main().querySelectorAll("[data-hclose]").forEach(b => b.onclick = () => { mealSheet = null; bodySheet = null; render(); });
+  if (mealSheet){
+    const s = mealSheet, amt = $("m-amt"), sync = () => { s.amount = amt.value; $("m-other").textContent = otherLine(amt.value, s.unit); $("m-save").disabled = !(parseFloat(amt.value) > 0); };
+    main().querySelectorAll("[data-mkind]").forEach(b => b.onclick = () => { s.kind = b.dataset.mkind; main().querySelectorAll("[data-mkind]").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b); }); });
+    $("m-name").oninput = e => { s.name = e.target.value; };
+    $("m-name").onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); amt.focus(); } };
+    wireSeg("m-unit", u => { s.unit = u; $("m-u").textContent = uName(u); sync(); });
+    amt.oninput = sync; amt.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); saveMeal(); } };
+    $("m-save").onclick = saveMeal;
+    $("m-del")?.addEventListener("click", deleteMeal);
+  }
+  if (bodySheet){
+    const s = bodySheet, sync = () => { s.v = $("b-v")?.value ?? ""; s.v2 = $("b-v2")?.value ?? ""; $("b-other").textContent = bodyOther(s); };
+    wireSeg("b-unit", u => { const x = bodyValue(s); s.unit = u;
+      if (x != null){ if (s.kind === "height"){ if (u === "ft"){ [s.v, s.v2] = ftIn(x).map(String); } else { s.v = String(x); s.v2 = ""; } }
+        else if (s.kind === "weight") s.v = u === "lb" ? (x * HLB).toFixed(1) : String(x); else s.v = String(Math.round(u === "kj" ? x * KJ : x)); }
+      render(); });
+    ["b-v", "b-v2"].forEach(id => { const f = $(id); if (f){ f.oninput = sync; f.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); saveBody(); } }; } });
+    $("b-save").onclick = () => saveBody(false);
+    $("b-clear")?.addEventListener("click", () => saveBody(true));
+  }
+}
+
+
+// ================= Chats (b53): new chat, Edit → delete a chat, like WhatsApp =================
+const COMPOSE = '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/></svg>';
+function chatRowHtml(k, last, unread, edit){
+  const t = chatTarget(k), o = t.person;
+  const av = t.circle ? circleBadge(t.circle) : `<span class="dot" style="${pc(o)}"></span>`;
+  const who = last ? (last.from_user === myId ? "You: " : t.circle ? nameOf(last.from_user) + ": " : "") : "";
+  const prev = last ? who + last.body : (t.circle ? "Say something to the circle" : "Say hi 👋");
+  const inner = `<span class="av">${av}</span><span class="grow" style="min-width:0"><span class="nm">${esc(t.circle ? t.circle.name : chatName(k))}</span><span class="prev ${unread ? "unread" : ""}">${esc(prev)}</span></span>`;
+  if (edit) return `<div class="li chatrow">${inner}${last ? `<button type="button" class="chip danger chdel" data-chatdel="${esc(k)}">${t.circle ? "Clear" : "Delete"}</button>` : `<span class="when"></span>`}</div>`;
+  return `<button type="button" class="li chatrow" data-openchat="${esc(k)}">${inner}<span class="when">${last ? esc(whenShort(last.created_at)) : ""}${unread ? `<span class="ucount">${unread}</span>` : ""}</span></button>`;
+}
+function viewChats2(){
+  if (newChat !== null) return viewNewChat();
+  const list = chatList(), canEdit = chatDelOk && list.some(c => c.last);
+  if (!canEdit) chatEdit = false;
+  const tools = `<div class="chtools">${canEdit ? `<button type="button" class="chtool" id="ch-edit">${chatEdit ? "Done" : "Edit"}</button>` : "<span></span>"}
+    <button type="button" class="chnew" id="ch-new" aria-label="New chat">${COMPOSE}</button></div>`;
+  let ask = "";
+  if (chatAsk){ const isC = chatAsk.startsWith("c:"), nm = esc(isC ? chatTarget(chatAsk).circle?.name || "the circle" : chatName(chatAsk));
+    ask = `<div class="card ask"><b>${isC ? `Clear the chat in ${nm}?` : `Delete your chat with ${nm}?`}</b>
+      <p class="note">${isC ? "Old messages are hidden for you. You stay in the circle." : `It's removed from your Chats. ${nm} still has their copy. If they message again, it comes back.`}</p>
+      <span style="display:flex;gap:8px;margin-top:8px"><button type="button" class="chip danger" id="ch-del-yes">${isC ? "Clear chat" : "Delete chat"}</button><button type="button" class="linkbtn" id="ch-del-no">Cancel</button></span></div>`; }
+  const body = list.length ? `<div class="list">${list.map(({ k, last, unread }) => chatRowHtml(k, last, unread, chatEdit)).join("")}</div>`
+    : `<div class="card"><b>No chats yet</b><p class="note" style="margin:6px 0 12px">Message your Buds (people you bud who bud you back) or chat in your circles.</p><button class="cta" id="ch-start">Start a chat</button></div>`;
+  main().innerHTML = `<div class="view">${tools}${ask}${body}</div>`;
+  $("ch-new").onclick = () => { newChat = ""; chatEdit = false; chatAsk = null; render(); window.scrollTo(0, 0); };
+  $("ch-start")?.addEventListener("click", () => { newChat = ""; render(); });
+  $("ch-edit")?.addEventListener("click", () => { chatEdit = !chatEdit; chatAsk = null; render(); });
+  main().querySelectorAll("[data-chatdel]").forEach(b => b.onclick = () => { chatAsk = b.dataset.chatdel; render(); window.scrollTo(0, 0); });
+  $("ch-del-no")?.addEventListener("click", () => { chatAsk = null; render(); });
+  $("ch-del-yes")?.addEventListener("click", () => deleteChat(chatAsk));
+}
+async function deleteChat(k){
+  const last = chatMsgs(k).filter(m => !m.pending).pop(); if (!last){ chatAsk = null; return render(); }
+  const before = chatCleared[k], at = last.created_at;              // the server's time of the newest message, so the phone's clock doesn't matter
+  chatCleared[k] = at; chatAsk = null; render();
+  const { error } = await sb.from("chat_reads").upsert({ user_id: myId, chat: k, read_at: at > (chatReads[k] || "") ? at : chatReads[k], cleared_at: at }, { onConflict: "user_id,chat" });
+  if (error){ if (before) chatCleared[k] = before; else delete chatCleared[k]; render(); return showWarn(oops("delete the chat", error)); }
+  if (at > (chatReads[k] || "")) chatReads[k] = at;
+  updateChatBadge(); toast(k.startsWith("c:") ? "Chat cleared" : "Chat deleted");
+}
+function viewNewChat(){
+  $("title").textContent = "New chat";
+  main().innerHTML = `<div class="view"><button type="button" class="linkbtn pfback" id="nc-back">‹ Chats</button>
+    <input class="field" id="nc-q" type="search" placeholder="Search your Buds and circles" autocomplete="off" value="${esc(newChat)}" aria-label="Search">
+    <button type="button" class="li chatrow ncnew" id="nc-circle"><span class="av"><span class="hplus">${'<svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 1v10M1 6h10"/></svg>'}</span></span><span class="grow"><span class="nm">New circle</span><span class="prev">A group chat with its own leaderboard</span></span></button>
+    <div id="nc-list"></div></div>`;
+  const paint = () => {
+    const q = (newChat || "").trim().toLowerCase(), hit = n => !q || String(n).toLowerCase().includes(q);
+    const buds = [...members.values()].filter(o => o.id !== myId && isMutual(o) && !(blockedIds.size && blockedIds.has(o.id)) && hit(o.name)).sort((a, b) => a.name.localeCompare(b.name));
+    const cs = circles.filter(c => hit(c.name)).sort((a, b) => a.name.localeCompare(b.name));
+    const row = (k, av, nm, sub) => `<button type="button" class="li chatrow" data-openchat="${esc(k)}"><span class="av">${av}</span><span class="grow" style="min-width:0"><span class="nm">${esc(nm)}</span>${sub ? `<span class="prev">${esc(sub)}</span>` : ""}</span></button>`;
+    $("nc-list").innerHTML = (buds.length ? `<div class="sec"><h2 class="sign">Buds</h2><span class="label">${buds.length}</span></div><div class="list">${buds.map(o => row("d:" + o.id, `<span class="dot" style="${pc(o)}"></span>`, o.name, "")).join("")}</div>` : "")
+      + (cs.length ? `<div class="sec"><h2 class="sign">Circles</h2><span class="label">${cs.length}</span></div><div class="list">${cs.map(c => row("c:" + c.id, circleBadge(c), c.name, `${c.members.length} members`)).join("")}</div>` : "")
+      + (!buds.length && !cs.length ? `<p class="note" style="text-align:center;margin-top:16px">${q ? "No matches." : "No Buds yet. You can message people who bud you back. Find people in Crew → Everyone."}</p>` : "");
+  };
+  paint();
+  $("nc-q").oninput = e => { newChat = e.target.value; paint(); };
+  $("nc-back").onclick = () => { newChat = null; render(); window.scrollTo(0, 0); };
+  $("nc-circle").onclick = () => { newChat = null; setTab("crew"); crewView = "circles"; circleMode = "new"; circleDraft = null; render(); window.scrollTo(0, 0); };
+}

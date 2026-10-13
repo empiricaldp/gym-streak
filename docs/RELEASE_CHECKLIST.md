@@ -33,6 +33,7 @@ For each one:
 - [ ] Send one test notification to a test account, not to real members.
 
 ## D. Before opening CREW to the public
+- [x] v51 (2026-10-14): normal app = beta b57 (workouts, split tab, timers, Health, chats, report/block, update screens). Rollback: git checkout main-v50-before-launch -- app.js index.html styles.css split.js sw.js version.json, bump to v52 and push.
 - [ ] 027 (block/report) and 028 (delete account) live in the normal app.
 - [ ] Privacy policy and terms finished, reviewed and linked from sign-up and Settings.
 - [ ] Minimum age decided and asked at sign-up.

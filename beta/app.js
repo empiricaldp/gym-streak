@@ -1638,7 +1638,7 @@ async function toggleDay(d){
 // changed, it's a scroll wheel. Finishing logs the day (→ the ONE notification your crew gets) and updates your plan
 // to today's numbers, so next time is ready too. Forgot to finish? The server finishes it after 2 quiet hours.
 // Buds see your workouts (the database enforces that). Plans are private. Weights are stored in kg, shown in kg or lb.
-const WORKOUTS = !!window.GYM_BETA;                     // beta only for now
+const WORKOUTS = !!window.GYM_BETA || !!window.GYM_WORKOUTS;   // the new app (workouts, split tab, header count…): beta, and the main app from v51
 const DELETE_ON = WORKOUTS && !!window.GYM_DELETE;   // 'Delete my account' — switched on once migration 028 is applied
 // Health (b52): calories, BMI, height & weight. Also needs migration 029 — until it's applied the heart button stays hidden.
 const HEALTH = WORKOUTS && !!window.GYM_HEALTH;
@@ -3997,7 +3997,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b56";   // bump together with version.json on every release
+const APP_VERSION = window.GYM_BETA ? "b57" : "51";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
