@@ -1687,7 +1687,7 @@ const cleanEx = ex => (ex || []).slice(0, 30).map(e => ({ name: String(e.name ||
   ...(Number.isFinite(e.rest) && e.rest >= 0 && e.rest <= 600 ? { rest: e.rest } : {}),
   sets: (e.sets || []).slice(0, 20).map(s => ({ reps: numIn(s.reps), kg: numIn(s.kg, true), ...(s.done ? { done: true } : {}) })) }));
 const copySets = sets => (sets || []).map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null }));
-const blankEx = () => ({ name: "", done: false, sets: [{ reps: 10, kg: null }, { reps: 10, kg: null }, { reps: 10, kg: null }] });
+const blankEx = () => ({ name: "", done: false, sets: [] });   // just a name; sets & weights are optional (DP: "keep that optional")
 
 // ---- The scroll wheels (a <select> opens the iPhone's own picker wheel) ----
 function repSel(at, v){
@@ -1735,12 +1735,12 @@ function viewPlan(){
   main().innerHTML = `<div class="view wo plan" style="${pc(me())}">
     <button type="button" class="linkbtn pfback" id="pl-back">‹ ${p.then === "start" ? "Today" : "Back"}</button>
     <div class="wohead"><span class="label">Your plan</span><div class="work sign">${esc(p.label)}</div>
-      <p class="note">Write it once. Every ${esc(p.label)} workout opens with it, so at the gym you just tick ✓.</p></div>
-    <div class="worow">${unitToggle()}<span class="note">Weights in ${unit}</span></div>
+      <p class="note">Just the names is fine. Add sets and weights only if you want them.</p></div>
+    ${p.exercises.some(e => (e.sets || []).length) ? `<div class="worow">${unitToggle()}<span class="note">Weights in ${unit}</span></div>` : ""}
     ${p.exercises.map((e, i) => `<div class="card woex open">
-      <input class="woin woexname" data-name="${i}" value="${esc(e.name)}" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+      <input class="woin woexname" data-name="${i}" value="${esc(e.name)}" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="next">
       <div class="wosets">${setRows(e, i)}
-        <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">+ Add set</button>
+        <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">${(e.sets || []).length ? "+ Add set" : "+ Add sets &amp; weights"}</button>
         <button type="button" class="linkbtn" data-rmex="${i}">Remove</button></div></div></div>`).join("")}
     <button type="button" class="cta ghost woadd" id="pl-add">+ Add exercise</button>${namesList()}
     <p class="note wopriv">${LOCK} Your plan is private. Buds only see workouts you finish.</p>
@@ -1749,6 +1749,11 @@ function viewPlan(){
   $("pl-add").onclick = () => { p.exercises.push(blankEx()); render(); const f = main().querySelectorAll("[data-name]"); f[f.length - 1]?.focus(); };
   $("pl-save").onclick = savePlan;
   main().querySelectorAll("[data-name]").forEach(f => f.oninput = () => { const e = p.exercises[+f.dataset.name]; if (e) e.name = f.value; $("pl-save").disabled = !ok(); });
+  // Enter after a name → straight on to the next one (type a quick list: Bench, Incline, Dips…)
+  main().querySelectorAll("[data-name]").forEach(f => f.onkeydown = ev => { if (ev.key !== "Enter") return; ev.preventDefault();
+    const i = +f.dataset.name; if (!f.value.trim()) return f.blur();
+    if (i === p.exercises.length - 1) p.exercises.push(blankEx());
+    render(); const next = main().querySelector(`[data-name="${i + 1}"]`); if (next) next.focus(); });
   wireSets(p.exercises, structural => { if (structural) render(); });
 }
 async function putPlan(label, exercises){
@@ -3772,7 +3777,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b46";   // bump together with version.json on every release
+const APP_VERSION = "b47";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
