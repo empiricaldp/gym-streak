@@ -41,13 +41,21 @@ Legend: **Bug** = verified defect · **UX** = works but confusing · **Scale** =
 | X1 | Trophies "WEEK 1" heading broke mid-word ("WEE / K 1") | Bug | Found while testing; pre-existing. | Fixed |
 | S1 | No block / report | Scale (safety) | Not in code. Found while building: the legacy `shares_attendance` read rules would have let a BLOCKED person keep reading a public account's check-ins/freezes/reactions. | Built: migration 027 (not applied) + app UI behind `SAFETY` switch (off) + push filter (not deployed). 23/23 DB checks, UI run-through pass |
 | S2 | No account deletion / privacy policy / terms | Scale (store) | Not in code. | Pending (Phase 5) |
-| S3 | Everyone list loads every user | Scale | `fetchAll("people")` pages through all rows. | Pending (Phase 4) |
+| S3 | Everyone list loads every user | Scale | `fetchAll("people")` pages through all rows. | Fixed locally (beta, not published): above 400 members the app loads only you + Buds/Spotting/Spotters + circle-mates, searches Everyone on the server, and loads a stranger's days only when you open them. Below 400 nothing changes. |
 | S4 | Names globally unique | Scale | | Pending: handles vs display names (Q) |
 | S5 | Beta notification taps open the main app | Bug | Push subscription lives in main app scope. | Pending (Phase 5) |
 
 ## Verified extra
 - Legacy check-in rule `shares_attendance` lets anyone read check-ins of accounts that are public AND have the old flag on. Private accounts with the flag on: **0 of 36**, and `sync_privacy` keeps it that way. Not a leak; tidy up in Phase 2.
 - Migration 026 was run together with its test inside one rolled-back transaction: 5/5 pass, nothing left behind (trigger/function/test user absent afterwards).
+
+## Scale measurements (local test DB, 10,000 fake users, ~48 check-ins each)
+| What the app loads | Rows | Time |
+|---|---|---|
+| Everyone's profiles (old way) | 10,000 | ~6 s |
+| Everyone's visible check-ins (old way) | 480,024 | ~70 s (unusable) |
+| Scoped: me + ~20 people I know (new way) | ~1,008 | ~0.2 s |
+Indexes were already fine; the fix is *what* the app asks for. Open question for DP: the global "Public leaderboard" can't be built from loaded data at that size (needs server-side stats, or limit it to people you know — the beta does the latter when scoped).
 
 ## Local test database
 `/var/tmp/crewpg` (workspace only): plain Postgres 16 with Supabase stand-ins (auth.uid, roles, cron, pg_net), rebuilt from the repo migrations by `rebuild.sh`; `runtests.sh` runs every DB test. 12 of 15 suites match production; 3 are outdated (written for the Oct 7–8 privacy model, replaced since): privacy_test, social_body_test, steps_test → rewrite later.

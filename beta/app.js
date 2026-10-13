@@ -400,10 +400,11 @@ function viewCrew(){
     `<button type="button" role="tab" id="crewtab-${id}" data-crewview="${id}" aria-selected="${crewView===id}" aria-pressed="${crewView===id}" tabindex="${crewView===id ? 0 : -1}">${l}</button>`).join("")}</div>`;
   if (crewView === "circles"){ viewCirclesTab(seg); }
   else if (crewView === "everyone"){
-    const top = seg + (WORKOUTS && memberCount ? `<p class="note membercount"><span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b> people on CREW</p>` : "") + `<input class="field findq" id="find-q" type="search" placeholder="Search people" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
-      <div class="list peoplelist" id="people">${everyone().map(personRow).join("")}</div>
+    const top = seg + (WORKOUTS && memberCount ? `<p class="note membercount"><span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b> people on CREW</p>` : "") + `<input class="field findq" id="find-q" type="search" placeholder="Search people${scoped ? " by name" : ""}" value="${esc(findQ)}" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="list peoplelist" id="people">${(scoped ? (searchHits || []) : everyone()).map(personRow).join("")}</div>
+      ${scoped && !searchHits ? `<p class="note" style="text-align:center">Type at least 2 letters to search everyone on CREW.</p>` : ""}
       <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
-    crewBoard(statsCrew().filter(o => o.id === myId || !o.private), [], top, { title: "Public leaderboard", weekBoard: false,
+    crewBoard(statsCrew().filter(o => o.id === myId || !o.private), [], top, { title: scoped ? "Leaderboard · people you know" : "Public leaderboard", weekBoard: false,
       note: me()?.private ? `<p class="note selfnote">${LOCK} Your account is private, so you're only on this list for yourself. Others don't see you here.</p>` : "" });
     wireFind();
   } else {
@@ -424,6 +425,21 @@ function personRow(o){
 }
 function wireFind(){
   const q = $("find-q"); if (!q) return;
+  if (scoped){                                              // big CREW: ask the server, 30 at a time
+    q.oninput = () => { findQ = q.value; clearTimeout(searchT); const term = tidyName(q.value);
+      if (term.length < 2){ if (searchHits){ searchHits = null; render(); } return; }
+      const seq = ++searchSeq;
+      searchT = setTimeout(async () => {
+        const safe = term.replace(/[%_,()*]/g, "");
+        const { data, error } = await sb.from("people").select(PEOPLE_COLS).ilike("name", `%${safe}%`).order("name").limit(30);
+        if (seq !== searchSeq) return;
+        if (error) return showWarn(oops("search", error));
+        searchHits = (data || []).filter(p => p.id !== myId).map(p => members.get(p.id) || memberFrom(p)); render();
+        const f = $("find-q"); if (f){ f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+        if ($("find-none")) $("find-none").hidden = searchHits.length > 0;
+      }, 300); };
+    return;
+  }
   const apply = () => { findQ = q.value; const n = tidyName(q.value).toLowerCase(); let shown = 0;
     main().querySelectorAll("#people [data-name]").forEach(r => { const hit = !n || r.dataset.name.includes(n); r.hidden = !hit; if (hit) shown++; });
     $("find-none").hidden = shown > 0; };
@@ -1408,6 +1424,30 @@ function saveTimeZone(saved){
   const tz = phoneTZ();
   if (tz && saved !== undefined && saved !== tz) sb.from("profiles").update({ tz }).eq("id", myId).then(() => {}, () => {});
 }
+// ---- Scale: once CREW is big, load only the people you know (you, anyone you bud / who buds you, your circles) ----
+// Measured on a 10,000-member test database: loading every check-in = 480,000 rows / 70 s (unusable);
+// scoped = ~1,000 rows / 0.2 s. Below the limit nothing changes. Everyone else is found by SEARCH (server-side).
+const SCALE_LIMIT = Number(window.GYM_SCALE_LIMIT) || 400, PEOPLE_COLS = "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters,watcher";
+let scoped = false, extraIds = new Set(), searchHits = null, searchT = null, searchSeq = 0;
+const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
+const memberFrom = p => ({ id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
+  isPublic:!p.private, shareAtt:p.visible, shareSplit:!p.split_hidden, privacyChosen:true, shareSteps:false,
+  private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0, watcher:!!p.watcher,
+  days:{}, steps:{}, stepsAt:null });
+async function fetchIn(table, cols, col, ids, extra){
+  const out = [];
+  for (let i = 0; i < ids.length; i += 100){                 // 100 ids per request keeps the web address short
+    let q = sb.from(table).select(cols).in(col, ids.slice(i, i + 100)); if (extra) q = extra(q);
+    const { data, error } = await q.range(0, 9999); if (error) throw error; out.push(...data);
+  }
+  return out;
+}
+async function scopedIds(){
+  const [b, cm] = await Promise.all([fetchAll("buds", "follower,followee"), fetchAll("circle_members", "user_id")]);   // the database returns only YOUR rows
+  const ids = new Set([myId, ...extraIds]); b.forEach(r => { ids.add(r.follower); ids.add(r.followee); }); cm.forEach(r => ids.add(r.user_id));
+  return [...ids];
+}
+const SINCE_DAYS = 400;   // scoped mode keeps ~13 months of history per person (streaks longer than that show as 400+)
 let editSeq = 0, reloadAgain = false, loadGen = 0, failed = new Set();   // loadGen: bumped on sign-out so old loads are thrown away   // editSeq goes up every time I tick/untick a day
 async function loadAll(){
   if (loading){ reloadAgain = true; return loading; }   // a change arrived mid-load: load again afterwards
@@ -1415,10 +1455,13 @@ async function loadAll(){
   const before = ready && myId ? { members, reactions, nudges, circles } : null;   // what we had, to spot what's new
   loading = (async () => {
     try {
-      const [profiles, checkins] = await Promise.all([
-        // "crew" is a database view that already strips out whatever each person keeps private
+      if (WORKOUTS){ const { data } = await sb.rpc("member_count"); if (typeof data === "number"){ memberCount = data; scoped = data > SCALE_LIMIT; } }
+      const [profiles, checkins] = scoped
+        ? await scopedIds().then(ids => Promise.all([fetchIn("people", PEOPLE_COLS, "id", ids),
+            fetchIn("checkins", "user_id,day", "user_id", ids, q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))]))
+        : await Promise.all([
         // "people" (database view) = everyone, with only what I'm allowed to see about each person
-        fetchAll("people", "id,name,plate,plan,since,track_start,created_at,private,visible,split_hidden,account,seen_update,i_bud,they_bud,n_buds,n_spotting,n_spotters,watcher"),
+        fetchAll("people", PEOPLE_COLS),
         fetchAll("checkins", "user_id,day")
       ]);
       // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
@@ -1429,12 +1472,7 @@ async function loadAll(){
         stepsKey = own.data?.steps_token || null;
       }
       const next = new Map();
-      // tidy older, hand-typed split names on the way in ("back bicep" -> "Back + Biceps")
-      const tidyPlan = plan => Array.isArray(plan) ? plan.map(s => s && s.w ? { ...s, w: normalizeWorkout(s.w) || s.w } : s) : plan;
-      for (const p of profiles) next.set(p.id, { id:p.id, name:p.name, plate:p.plate, plan:tidyPlan(p.plan), since:p.since, trackStart:p.track_start, joined:p.created_at,
-        isPublic:!p.private, shareAtt:p.visible, shareSplit:!p.split_hidden, privacyChosen:true, shareSteps:false,
-        private:p.private, visible:p.visible, splitHidden:p.split_hidden, account:p.account, seenUpdate:p.seen_update || 0, iBud:p.i_bud, theyBud:p.they_bud, nBuds:p.n_buds || 0, nSpotting:p.n_spotting || 0, nSpotters:p.n_spotters || 0, watcher:!!p.watcher,
-        days:{}, steps:{}, stepsAt:null });
+      for (const p of profiles) next.set(p.id, memberFrom(p));
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       // Streak freezes (the database only returns your own + people who share attendance)
@@ -3302,7 +3340,15 @@ async function removeFollower(id){
   if (error) return showWarn(oops("remove", error));
   toast(`Removed ${nameOf(id)}`); loadAll();
 }
-function openProfile(id){ if (!members.has(id)) return; profileId = id; unbudAsk = null; render(); window.scrollTo(0,0); }
+function openProfile(id){
+  if (!members.has(id)){
+    const hit = (searchHits || []).find(o => o.id === id); if (!hit) return;
+    members.set(id, hit); extraIds.add(id);                 // keep them loaded from now on
+    fetchIn("checkins", "user_id,day", "user_id", [id], q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))
+      .then(rows => { const m = members.get(id); if (m){ rows.forEach(r => m.days[r.day] = 1); if (profileId === id) render(); } }, () => {});
+  }
+  profileId = id; unbudAsk = null; render(); window.scrollTo(0,0);
+}
 function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); }   // no auto-keyboard: tapping the search box is enough
 // One click handler for the whole app: profiles, bud buttons, requests (works on every screen)
 document.addEventListener("click", e => {
