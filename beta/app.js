@@ -3767,6 +3767,10 @@ const TOUR_V = 4; let wnShort = false;
 // b54: once per ACCOUNT (saved on your profile), not once per app or phone. If you skipped a few updates, you get
 // all of them in one go. The phone also remembers it showed it, in case saving to the profile failed (bad signal).
 const tourKey = () => "gs-tour-acct-" + TOUR_V + "-" + myId;
+// DP: seeing it in the BETA is only a test — it must not count for the account. So the beta never saves update 3/4 to
+// the profile (it only remembers on this phone); the real "once per account" save happens when it's in the main app.
+// (Making the public/private choice still records tour 2, so the main app doesn't ask that again.)
+const SEEN_SAVE = BETA ? 2 : TOUR_V;
 // Every feature screen, tagged with the update it came in. You see the ones newer than the last update you saw.
 const UPDATES = [
   { v: 2, kind: "buds",     title: "Buds",     line: "Follow your gym mates. Bud each other and you're Buds." },
@@ -3780,9 +3784,9 @@ const tourSeenHere = () => { try { return !!localStorage.getItem(tourKey()); } c
 const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch(e){} };
 async function finishShortTour(){
   markTourHere(); wnActive = false; wnDone = true; wnShort = false; document.documentElement.classList.remove("wn-open"); tab = "today";
-  const m = me(); if (m) m.seenUpdate = TOUR_V;
+  const m = me(); if (m && !BETA) m.seenUpdate = TOUR_V;
   render(); window.scrollTo(0,0);
-  await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
+  if (!BETA) await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
 }
 let wnSince = 0;   // the last update this account saw when the tour opened (decides which screens show)
 function startTour(){ wnSince = 0; wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
@@ -3834,7 +3838,7 @@ function viewWhatsNew(){
   if (wnStep === PRIV) wirePrivacy(wnPv, render);
   if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
-    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: TOUR_V })){ $("wn-next").disabled = false; return; } }
+    if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: Math.max(SEEN_SAVE, me()?.seenUpdate || 0) })){ $("wn-next").disabled = false; return; } }
     if (wnStep === FIND){ markTourHere(); document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
     wnStep++; render(); window.scrollTo(0,0);
   };
@@ -3993,7 +3997,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b54";   // bump together with version.json on every release
+const APP_VERSION = "b55";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
