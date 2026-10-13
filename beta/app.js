@@ -1413,7 +1413,7 @@ async function loadAll(){
       // keep what we had instead of treating it as "empty" (that kicked people out of circles and caused false banners).
       const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
       const soft = p => p.then(v => v, () => null);           // null = this part failed
-      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows] = await Promise.all([
+      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows, planRows] = await Promise.all([
         soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
         soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
         soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
@@ -1422,9 +1422,10 @@ async function loadAll(){
         soft(fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8))))),
         soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
         soft(fetchAll("nudges", "to_user", q => q.eq("from_user", myId))),
-        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz").eq("id", myId).maybeSingle(),
+        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz" + (WORKOUTS ? ",weight_unit" : "")).eq("id", myId).maybeSingle(),
         soft(fetchAll("bodyweight", "day,kg", q => q.order("day"))),
-        WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at", q => q.gte("day", key(addDays(today(), -120))))) : null]);
+        WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at", q => q.gte("day", key(addDays(today(), -120))))) : null,
+        WORKOUTS ? soft(fetchAll("workout_plans", "label,exercises,updated_at")) : null]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
       failed = new Set();
       // Circles I'm in (the database only returns those) and their members
@@ -1459,6 +1460,8 @@ async function loadAll(){
       if (woRows){ const local = workouts.filter(w => w.user_id === myId && (w.day === woDay || w.dirty));
         for (const l of local){ const srv = woRows.find(r => r.user_id === myId && r.day === l.day); if (srv && srv.finished_at && !l.finished_at) l.finished_at = srv.finished_at; }
         workouts = [...woRows.filter(r => !local.some(l => l.user_id === r.user_id && l.day === r.day)), ...local]; }
+      if (planRows) plans = planRows;
+      if (WORKOUTS && mine.data?.weight_unit) unit = mine.data.weight_unit;
       // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
@@ -1527,70 +1530,144 @@ async function toggleDay(d){
 }
 
 // ================= Workout details (beta) =================
-// Optional "Start workout": a pre-filled list of exercises, each with sets (reps × kg). Tick ✓ each one as you finish it.
-// Nothing is sent while you train. "Finish workout" logs the day → the ONE notification your crew gets.
-// Forgot to tap Finish? The server finishes it for you after 2 quiet hours (or when your day ends).
-// Who sees the details: you + your Buds (you bud each other). The database enforces that, not just the app.
+// You write your workout ONCE per split day (your plan: exercises, sets, reps, weight). "Start workout" opens it
+// already filled in, so there's nothing to type mid-set: just tick ✓ each exercise as you finish it. If a number
+// changed, it's a scroll wheel. Finishing logs the day (→ the ONE notification your crew gets) and updates your plan
+// to today's numbers, so next time is ready too. Forgot to finish? The server finishes it after 2 quiet hours.
+// Buds see your workouts (the database enforces that). Plans are private. Weights are stored in kg, shown in kg or lb.
 const WORKOUTS = !!window.GYM_BETA;                     // beta only for now
-let workouts = [], woDay = null, woSaveT = null, woErr = null, woOpenEx = null, woAdding = false, woDiscardAsk = false;
-const EX_FOR = {
-  chest: ["Bench press", "Incline dumbbell press", "Cable fly"], triceps: ["Tricep pushdown", "Overhead tricep extension"],
-  back: ["Lat pulldown", "Barbell row", "Seated cable row"], biceps: ["Barbell curl", "Hammer curl"],
-  shoulders: ["Overhead press", "Lateral raise", "Rear delt fly"], legs: ["Squat", "Romanian deadlift", "Leg press", "Leg curl", "Calf raise"],
-  quads: ["Squat", "Leg press", "Leg extension"], hamstrings: ["Romanian deadlift", "Leg curl"], glutes: ["Hip thrust", "Bulgarian split squat"],
-  calves: ["Calf raise"], abs: ["Cable crunch", "Hanging leg raise"], core: ["Plank", "Cable crunch"], obliques: ["Russian twist"],
-  forearms: ["Wrist curl"], traps: ["Shrugs"], arms: ["Barbell curl", "Tricep pushdown", "Hammer curl"],
-  push: ["Bench press", "Overhead press", "Incline dumbbell press", "Lateral raise", "Tricep pushdown"],
-  pull: ["Lat pulldown", "Barbell row", "Face pull", "Barbell curl"], "upper body": ["Bench press", "Barbell row", "Overhead press", "Lat pulldown"],
-  "lower body": ["Squat", "Romanian deadlift", "Leg press", "Calf raise"], "full body": ["Squat", "Bench press", "Barbell row", "Overhead press"],
-  strength: ["Squat", "Bench press", "Deadlift"], powerlifting: ["Squat", "Bench press", "Deadlift"], "glute focus": ["Hip thrust", "Bulgarian split squat", "Cable kickback"]
-};
-const EX_EXTRA = ["Deadlift", "Pull-up", "Dips", "Push-up", "Chest press machine", "Pec deck", "Front squat", "Hack squat", "Lunges", "Preacher curl",
-  "Skull crusher", "Arnold press", "T-bar row", "Leg extension", "Cable kickback", "Face pull", "Incline bench press", "Dumbbell bench press", "Goblet squat"];
+let workouts = [], plans = [], unit = "kg", woDay = null, woSaveT = null, woErr = null, woAdding = false, woDiscardAsk = false, woOpenEx = null;
+let woPlan = null;                                       // the plan being written: { label, exercises, then: "start"|"back"|"workout", day }
 const lc = s => String(s || "").trim().toLowerCase();
 const myWo = k => workouts.find(w => w.user_id === myId && w.day === k) || null;
 const woOf = id => workouts.filter(w => w.user_id === id).sort((a, b) => b.day.localeCompare(a.day));
 const woDone = w => (w.exercises || []).filter(e => e.done);
 const woLabelFor = (m, d) => isGym(m, d) ? (slot(m, d)?.w || "Gym day") : "Bonus session";
-// "3×8 @ 60kg", "8, 8, 6 @ 60kg" or "8×60, 6×55kg"
+const planFor = label => plans.find(p => lc(p.label) === lc(label)) || null;
+const myNames = () => [...new Set([...plans.flatMap(p => p.exercises || []), ...woOf(myId).flatMap(w => w.exercises || [])].map(e => e.name).filter(Boolean))].sort();
+
+// ---- kg / lb. Stored in kg; shown in whichever you picked. ----
+const LB = 0.45359237;
+const showW = kg => kg == null ? null : unit === "lb" ? Math.round(kg / LB * 2) / 2 : Math.round(kg * 100) / 100;
+const toKg = v => v === "" || v == null ? null : unit === "lb" ? Math.round(+v * LB * 1000) / 1000 : +v;
+const fmtW = kg => kg == null ? "" : `${showW(kg)}${unit}`;
+const range = (a, b, s) => { const o = []; for (let v = a; v <= b + 1e-9; v += s) o.push(Math.round(v * 100) / 100); return o; };
+const REPS = [...range(1, 30, 1), 35, 40, 45, 50, 60, 75, 100];
+const W_OPTS = { kg: [...range(0.5, 20, 0.5), ...range(21, 100, 1), ...range(102.5, 400, 2.5)], lb: [...range(2.5, 100, 2.5), ...range(105, 900, 5)] };
+function setUnit(u){
+  if (u === unit || !["kg", "lb"].includes(u)) return;
+  unit = u; render();
+  sb.from("profiles").update({ weight_unit: u }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save kg/lb", error)); });
+}
+const unitToggle = () => `<div class="woseg" role="group" aria-label="Weight unit">${["kg", "lb"].map(u =>
+  `<button type="button" data-unit="${u}" class="${unit === u ? "on" : ""}" aria-pressed="${unit === u}">${u}</button>`).join("")}</div>`;
+
+// "3×8 @ 60kg", "8, 8, 6 @ 60kg" or "8×60kg, 6×55kg" (in the viewer's unit)
 function fmtSets(sets){
   const s = (sets || []).filter(x => x && (x.reps != null || x.kg != null));
   if (!s.length) return "";
   const r = s.map(x => x.reps ?? "–"), kg = s.map(x => x.kg), sameR = r.every(v => v === r[0]), sameK = kg.every(v => v === kg[0]);
-  const k = v => v == null ? "" : `${v}kg`;
-  if (sameR && sameK) return `${s.length}×${r[0]}${kg[0] != null ? " @ " + k(kg[0]) : ""}`;
-  if (sameK) return `${r.join(", ")}${kg[0] != null ? " @ " + k(kg[0]) : ""}`;
-  return s.map(x => `${x.reps ?? "–"}×${k(x.kg) || "–"}`).join(", ");
+  if (sameR && sameK) return `${s.length}×${r[0]}${kg[0] != null ? " @ " + fmtW(kg[0]) : ""}`;
+  if (sameK) return `${r.join(", ")}${kg[0] != null ? " @ " + fmtW(kg[0]) : ""}`;
+  return s.map(x => `${x.reps ?? "–"}×${fmtW(x.kg) || "–"}`).join(", ");
 }
-// What you did for this exercise the last time (before this day)
+// What you did for this exercise last time (before this day)
 function lastFor(name, beforeDay){
   for (const w of woOf(myId)) if (w.day < beforeDay){
-    const e = (w.exercises || []).find(x => lc(x.name) === lc(name) && (x.sets || []).some(s => s.reps != null || s.kg != null));
+    const e = (w.exercises || []).find(x => x.done && lc(x.name) === lc(name) && (x.sets || []).some(s => s.reps != null || s.kg != null));
     if (e) return { day: w.day, sets: e.sets };
   }
   return null;
 }
-const emptySets = n => Array.from({ length: n }, () => ({ reps: null, kg: null }));
-// Pre-fill: your last workout with the same name (e.g. "Push") with its numbers; first time = common exercises for those muscles
-function prefill(label, k){
-  const prev = woOf(myId).find(w => w.day < k && lc(w.label) === lc(label) && (w.exercises || []).length);
-  if (prev) return prev.exercises.map(e => ({ name: e.name, done: false, sets: (e.sets && e.sets.length ? e.sets : emptySets(3)).map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null })) }));
-  const parts = lc(label).split(/\s*\+\s*|\s*&\s*|\s*,\s*/).filter(Boolean);
-  return [...new Set(parts.flatMap(x => EX_FOR[x] || []))].slice(0, 6).map(name => { const l = lastFor(name, k);
-    return { name, done: false, sets: l ? l.sets.map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null })) : emptySets(3) }; });
-}
-// Ideas for this day's muscles + anything you've done before, minus what's already on the list
-function woSuggest(label, have){
-  const parts = lc(label).split(/\s*\+\s*|\s*&\s*|\s*,\s*/).filter(Boolean);
-  const fromLabel = parts.flatMap(p => EX_FOR[p] || []);
-  const mine = woOf(myId).flatMap(w => (w.exercises || []).map(e => e.name));
-  const taken = new Set(have.map(lc));
-  return [...new Set([...fromLabel, ...mine, ...EX_EXTRA])].filter(n => n && !taken.has(lc(n)));
-}
-const numIn = (v, dec) => { const n = dec ? parseFloat(String(v).replace(",", ".")) : parseInt(v, 10); return Number.isFinite(n) && n >= 0 && n < 1000 ? Math.round(n * 10) / 10 : null; };
+const numIn = (v, dec) => { const n = dec ? parseFloat(String(v).replace(",", ".")) : parseInt(v, 10); return Number.isFinite(n) && n >= 0 && n < 1000 ? (dec ? Math.round(n * 1000) / 1000 : n) : null; };
 const cleanEx = ex => (ex || []).slice(0, 30).map(e => ({ name: String(e.name || "").trim().slice(0, 60) || "Exercise", done: !!e.done,
   sets: (e.sets || []).slice(0, 20).map(s => ({ reps: numIn(s.reps), kg: numIn(s.kg, true) })) }));
+const copySets = sets => (sets || []).map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null }));
+const blankEx = () => ({ name: "", done: false, sets: [{ reps: 10, kg: null }, { reps: 10, kg: null }, { reps: 10, kg: null }] });
 
+// ---- The scroll wheels (a <select> opens the iPhone's own picker wheel) ----
+function repSel(at, v){
+  const opts = v != null && !REPS.includes(v) ? [...REPS, v].sort((a, b) => a - b) : REPS;
+  return `<select class="wosel mono" data-reps="${at}" aria-label="Reps"><option value=""${v == null ? " selected" : ""}>–</option>${opts.map(n => `<option value="${n}"${n === v ? " selected" : ""}>${n}</option>`).join("")}</select>`;
+}
+function wSel(at, kg){
+  const v = showW(kg), base = W_OPTS[unit], opts = v != null && !base.includes(v) ? [...base, v].sort((a, b) => a - b) : base;
+  return `<select class="wosel mono" data-kg="${at}" aria-label="Weight in ${unit}"><option value=""${v == null ? " selected" : ""}>–</option>${opts.map(n => `<option value="${n}"${n === v ? " selected" : ""}>${n}</option>`).join("")}</select>`;
+}
+function setRows(e, i){
+  return (e.sets || []).map((s, j) => `<div class="wosrow"><span class="won mono">${j + 1}</span>
+    <label class="wopick">${repSel(i + ":" + j, s.reps)}<span>reps</span></label>
+    <label class="wopick">${wSel(i + ":" + j, s.kg)}<span>${unit}</span></label>
+    <button type="button" class="worm" data-rmset="${i}:${j}" aria-label="Remove set ${j + 1}">×</button></div>`).join("");
+}
+// Wire the wheels + set buttons for a list of exercises (plan editor and workout share this). onChange(structural)
+function wireSets(list, onChange){
+  const at = s => s.split(":").map(Number);
+  // Change a set → the sets below it that still had the old number follow (set 1 to 8 × 60 and sets 2-3 come too)
+  const pick = (f, field, val) => { const [i, j] = at(f.dataset[field === "reps" ? "reps" : "kg"]), e = list[i], s = e?.sets?.[j]; if (!s) return;
+    const old = s[field]; s[field] = val; let spread = false;
+    for (let k = j + 1; k < e.sets.length; k++){ if (e.sets[k][field] !== old) break; e.sets[k][field] = val; spread = true; }
+    onChange(spread); };
+  main().querySelectorAll("[data-reps]").forEach(f => f.onchange = () => pick(f, "reps", numIn(f.value)));
+  main().querySelectorAll("[data-kg]").forEach(f => f.onchange = () => pick(f, "kg", toKg(f.value)));
+  main().querySelectorAll("[data-addset]").forEach(b => b.onclick = () => { const e = list[+b.dataset.addset]; if (!e) return;
+    const prev = e.sets[e.sets.length - 1]; e.sets.push(prev ? { ...prev } : { reps: 10, kg: null }); onChange(true); });
+  main().querySelectorAll("[data-rmset]").forEach(b => b.onclick = () => { const [i, j] = at(b.dataset.rmset); list[i]?.sets.splice(j, 1); onChange(true); });
+  main().querySelectorAll("[data-rmex]").forEach(b => b.onclick = () => { list.splice(+b.dataset.rmex, 1); woOpenEx = null; onChange(true); });
+  main().querySelectorAll("[data-unit]").forEach(b => b.onclick = () => setUnit(b.dataset.unit));
+}
+const namesList = () => `<datalist id="wo-names">${myNames().map(n => `<option value="${esc(n)}"></option>`).join("")}</datalist>`;
+
+// ================= Plans: write it once =================
+function editPlan(label, then, day){
+  const p = planFor(label);
+  woPlan = { label, then, day, exercises: p ? p.exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })) : [blankEx()] };
+  woDay = then === "workout" ? woDay : null; render(); window.scrollTo(0, 0);
+  if (!p) setTimeout(() => { const f = main().querySelector("[data-name]"); if (f) f.focus(); }, 50);
+}
+function viewPlan(){
+  const p = woPlan; $("title").textContent = "Plan"; $("tabbar").hidden = true;
+  const ok = () => p.exercises.some(e => e.name.trim());
+  main().innerHTML = `<div class="view wo plan" style="${pc(me())}">
+    <button type="button" class="linkbtn pfback" id="pl-back">‹ ${p.then === "start" ? "Today" : "Back"}</button>
+    <div class="wohead"><span class="label">Your plan</span><div class="work sign">${esc(p.label)}</div>
+      <p class="note">Write it once. Every ${esc(p.label)} workout opens with it, so at the gym you just tick ✓.</p></div>
+    <div class="worow">${unitToggle()}<span class="note">Weights in ${unit}</span></div>
+    ${p.exercises.map((e, i) => `<div class="card woex open">
+      <input class="woin woexname" data-name="${i}" value="${esc(e.name)}" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+      <div class="wosets">${setRows(e, i)}
+        <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">+ Add set</button>
+        <button type="button" class="linkbtn" data-rmex="${i}">Remove</button></div></div></div>`).join("")}
+    <button type="button" class="cta ghost woadd" id="pl-add">+ Add exercise</button>${namesList()}
+    <p class="note wopriv">${LOCK} Your plan is private. Buds only see workouts you finish.</p>
+    <div class="wofoot"><button class="cta" id="pl-save" ${ok() ? "" : "disabled"}>${p.then === "start" ? "Save & start" : "Save plan"}</button></div></div>`;
+  $("pl-back").onclick = () => { const back = p.then === "workout"; woPlan = null; if (!back) woDay = null; render(); window.scrollTo(0, 0); };
+  $("pl-add").onclick = () => { p.exercises.push(blankEx()); render(); const f = main().querySelectorAll("[data-name]"); f[f.length - 1]?.focus(); };
+  $("pl-save").onclick = savePlan;
+  main().querySelectorAll("[data-name]").forEach(f => f.oninput = () => { const e = p.exercises[+f.dataset.name]; if (e) e.name = f.value; $("pl-save").disabled = !ok(); });
+  wireSets(p.exercises, structural => { if (structural) render(); });
+}
+async function putPlan(label, exercises){
+  const ex = cleanEx(exercises.filter(e => String(e.name || "").trim())).map(e => ({ name: e.name, sets: e.sets }));
+  if (!ex.length) return { error: null, ex };
+  const { error } = await sb.from("workout_plans").upsert({ user_id: myId, label, exercises: ex }, { onConflict: "user_id,key" });
+  if (!error){ plans = plans.filter(x => lc(x.label) !== lc(label)); plans.push({ label, exercises: ex, updated_at: new Date().toISOString() }); }
+  return { error, ex };
+}
+async function savePlan(){
+  const p = woPlan; if (!p) return;
+  const btn = $("pl-save"); btn.disabled = true; btn.textContent = "Saving…";
+  const { error } = await putPlan(p.label, p.exercises);
+  if (error){ btn.disabled = false; btn.textContent = "Save plan"; return showWarn(oops("save your plan", error)); }
+  woPlan = null;
+  if (p.then === "start") return startWorkout(parse(p.day));
+  if (p.then === "workout"){ const w = myWo(woDay);
+    if (w && !woDone(w).length && !w.finished_at){ w.exercises = planFor(p.label).exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })); woChanged(false); }
+    toast("Plan saved"); render(); return; }
+  toast("Plan saved"); render(); window.scrollTo(0, 0);
+}
+
+// ================= The workout =================
 function woStatus(){
   const el = $("wo-status"), w = myWo(woDay); if (!el || !w) return;
   const n = woDone(w).length, tot = w.exercises.length;
@@ -1615,22 +1692,25 @@ async function woSave(finish){
 function startWorkout(d){
   const m = me(); if (!m || !WORKOUTS) return;
   const k = key(d); let w = myWo(k);
-  if (!w){ const label = woLabelFor(m, d);
-    w = { user_id: myId, day: k, label, exercises: prefill(label, k), started_at: new Date().toISOString(), finished_at: null };
-    workouts.push(w); woDay = k; woChanged(false); }
-  woDay = k; woAdding = !w.exercises.length; woDiscardAsk = false;
-  woOpenEx = w.exercises.findIndex(e => !e.done); if (woOpenEx < 0) woOpenEx = null;
+  if (!w){
+    const label = woLabelFor(m, d), plan = planFor(label);
+    if (!plan) return editPlan(label, "start", k);                    // first time for this day: write the plan first
+    w = { user_id: myId, day: k, label, exercises: plan.exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })), started_at: new Date().toISOString(), finished_at: null };
+    workouts.push(w); woDay = k; woChanged(false);
+  }
+  woDay = k; woAdding = false; woDiscardAsk = false; woOpenEx = null;
   render(); window.scrollTo(0, 0);
 }
 function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; render(); window.scrollTo(0, 0); }
 async function finishWorkout(){
   const w = myWo(woDay); if (!w) return;
-  if (w.finished_at){ return closeWorkout(); }                       // already finished: "Done" just closes (edits are saved)
+  if (w.finished_at) return closeWorkout();                          // already finished: "Done" just closes (edits are saved)
   if (!woDone(w).length) return;
   const btn = $("wo-finish"); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
   const ok = await woSave({ w });
   if (!ok){ if (btn){ btn.disabled = false; btn.textContent = "Finish workout"; } return showWarn(oops("finish the workout", woErr)); }
   w.finished_at = new Date().toISOString();
+  putPlan(w.label, w.exercises).catch(() => {});                     // next time opens with today's numbers
   const d = parse(w.day); woDay = null; woAdding = false;
   if (!ticked(me(), d)) await toggleDay(d);                          // logs the day → streak + the one notification
   else { render(); toast(`Workout saved · ${woDone(w).length} exercise${woDone(w).length === 1 ? "" : "s"}`); }
@@ -1656,36 +1736,14 @@ function woTodayHtml(m, t){
 }
 
 function woExHtml(e, i, w){
-  const open = woOpenEx === i, sum = fmtSets(e.sets), last = lastFor(e.name, w.day);
-  const sub = e.done ? (sum || "Done") : sum ? sum : last ? `Last: ${fmtSets(last.sets)}` : `${(e.sets || []).length} sets`;
-  let body = "";
-  if (open){
-    const rows = (e.sets || []).map((s, j) => { const ls = last?.sets?.[j] || last?.sets?.[last.sets.length - 1];
-      return `<div class="wosrow"><span class="won mono">${j + 1}</span>
-        <input class="woin mono" inputmode="numeric" pattern="[0-9]*" data-reps="${i}:${j}" value="${s.reps ?? ""}" placeholder="${ls?.reps ?? 10}" aria-label="Set ${j + 1} reps">
-        <input class="woin mono" inputmode="decimal" data-kg="${i}:${j}" value="${s.kg ?? ""}" placeholder="${ls?.kg ?? "–"}" aria-label="Set ${j + 1} kg">
-        <button type="button" class="worm" data-rmset="${i}:${j}" aria-label="Remove set ${j + 1}">×</button></div>`; }).join("");
-    body = `<div class="wosets"><div class="wosrow wohdr"><span>Set</span><span>Reps</span><span>kg</span><span></span></div>${rows}
-      <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">+ Add set</button>
-      ${last ? `<span class="note">Last time: ${esc(fmtSets(last.sets))}</span>` : ""}</div>
-      <div class="woexfoot"><button type="button" class="linkbtn" data-rmex="${i}">Remove exercise</button>
-      ${e.done ? "" : `<button type="button" class="chip" data-tick="${i}">${CHECK} Done</button>`}</div></div>`;
-  }
+  const open = !e.done || woOpenEx === i, last = lastFor(e.name, w.day), sum = fmtSets(e.sets);
+  const sub = e.done ? (sum || "Done") : last ? `Last: ${fmtSets(last.sets)}` : `${(e.sets || []).length} sets`;
   return `<div class="card woex${e.done ? " done" : ""}${open ? " open" : ""}">
     <div class="woexhead"><button type="button" class="wotick" data-tick="${i}" aria-label="${e.done ? "Not done" : "Done"}: ${esc(e.name)}">${e.done ? CHECK : ""}</button>
-      <button type="button" class="woname" data-openex="${i}"><b>${esc(e.name)}</b><span class="note">${esc(sub)}</span></button></div>${body}</div>`;
-}
-function woAddHtml(w){
-  if (!woAdding) return `<button type="button" class="cta ghost woadd" id="wo-add">+ Add exercise</button>`;
-  return `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise name" maxlength="60" autocomplete="off" enterkeyhint="done">
-    <div class="wosug" id="wo-sug">${woSugHtml(w, "")}</div>
-    <button type="button" class="linkbtn" id="wo-addcancel" style="padding-left:0">Cancel</button></div>`;
-}
-function woSugHtml(w, q){
-  const have = w.exercises.map(e => e.name), all = woSuggest(w.label, have), ql = lc(q);
-  const list = (ql ? all.filter(n => lc(n).includes(ql)) : all).slice(0, 8);
-  const typed = q.trim() && !all.concat(have).some(n => lc(n) === ql) ? `<button type="button" class="chip on" data-addex="${esc(q.trim())}">+ Add “${esc(q.trim())}”</button>` : "";
-  return typed + list.map(n => `<button type="button" class="chip" data-addex="${esc(n)}">${esc(n)}</button>`).join("");
+      <button type="button" class="woname" data-openex="${i}"><b>${esc(e.name)}</b><span class="note">${esc(sub)}</span></button></div>
+    ${open ? `<div class="wosets">${setRows(e, i)}
+      <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">+ Add set</button>
+      <button type="button" class="linkbtn" data-rmex="${i}">Remove</button></div></div>` : ""}</div>`;
 }
 function viewWorkout(){
   const w = myWo(woDay); if (!w){ woDay = null; return render(); }
@@ -1697,53 +1755,50 @@ function viewWorkout(){
     <div class="wohead"><span class="label">${fin ? "Finished" : "In progress"} · ${when}</span>
       <div class="work sign">${esc(w.label || "Workout")}</div>
       <p class="note" id="wo-status"></p></div>
-    ${w.exercises.length ? w.exercises.map((e, i) => woExHtml(e, i, w)).join("") : ""}
-    ${woAddHtml(w)}
-    <p class="note wopriv">${LOCK} Only you and your Buds see the details.${fin ? "" : " Your crew gets one notification when you finish."}</p>
+    <div class="worow">${unitToggle()}<button type="button" class="linkbtn" id="wo-plan">Edit plan</button></div>
+    ${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}
+    ${woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise name" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+        <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
+      : `<button type="button" class="cta ghost woadd" id="wo-add">+ Add exercise</button>`}${namesList()}
+    <p class="note wopriv">${LOCK} Only you and your Buds see this.${fin ? "" : " Your crew gets one notification when you finish."}</p>
     ${fin ? "" : `<button type="button" class="linkbtn wodiscard" id="wo-discard">${woDiscardAsk ? "Tap again to delete this workout" : "Discard workout"}</button>`}
     <div class="wofoot"><button class="cta" id="wo-finish" ${fin || n ? "" : "disabled"}>${fin ? "Done" : "Finish workout"}</button></div></div>`;
   woStatus();
   $("wo-back").onclick = closeWorkout;
   $("wo-finish").onclick = finishWorkout;
+  $("wo-plan").onclick = () => editPlan(w.label, "workout", w.day);
   if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
-  const at = s => s.split(":").map(Number);
-  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const i = +b.dataset.tick, e = w.exercises[i]; if (!e) return;
-    e.done = !e.done; woDiscardAsk = false;
-    if (e.done){ try { navigator.vibrate && navigator.vibrate(10); } catch(_){}
-      const nx = w.exercises.findIndex((x, j) => j > i && !x.done); woOpenEx = nx >= 0 ? nx : (woOpenEx === i ? null : woOpenEx); }
+  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const e = w.exercises[+b.dataset.tick]; if (!e) return;
+    e.done = !e.done; woDiscardAsk = false; woOpenEx = null;
+    if (e.done) try { navigator.vibrate && navigator.vibrate(10); } catch(_){}
     woChanged(true); });
-  main().querySelectorAll("[data-openex]").forEach(b => b.onclick = () => { const i = +b.dataset.openex; woOpenEx = woOpenEx === i ? null : i; render(); });
-  main().querySelectorAll("[data-reps],[data-kg]").forEach(f => {
-    f.oninput = () => { const [i, j] = at(f.dataset.reps || f.dataset.kg), s = w.exercises[i]?.sets?.[j]; if (!s) return;
-      if (f.dataset.reps) s.reps = numIn(f.value); else s.kg = numIn(f.value, true); woChanged(false); };
-    f.onfocus = () => { try { f.select(); } catch(_){} };
-  });
-  main().querySelectorAll("[data-addset]").forEach(b => b.onclick = () => { const e = w.exercises[+b.dataset.addset]; if (!e) return;
-    const prev = e.sets[e.sets.length - 1]; e.sets.push(prev ? { ...prev } : { reps: null, kg: null }); woChanged(true); });
-  main().querySelectorAll("[data-rmset]").forEach(b => b.onclick = () => { const [i, j] = at(b.dataset.rmset); w.exercises[i]?.sets.splice(j, 1); woChanged(true); });
-  main().querySelectorAll("[data-rmex]").forEach(b => b.onclick = () => { w.exercises.splice(+b.dataset.rmex, 1); woOpenEx = null; woChanged(true); });
-  if ($("wo-add")) $("wo-add").onclick = () => { woAdding = true; render(); const f = $("wo-newex"); if (f) f.focus(); };
-  const addEx = name => { name = String(name || "").trim().slice(0, 60); if (!name) return;
+  main().querySelectorAll("[data-openex]").forEach(b => b.onclick = () => { const i = +b.dataset.openex; if (!w.exercises[i]?.done) return; woOpenEx = woOpenEx === i ? null : i; render(); });
+  wireSets(w.exercises, woChanged);
+  if ($("wo-add")) $("wo-add").onclick = () => { woAdding = true; render(); $("wo-newex")?.focus(); };
+  const addEx = () => { const name = String($("wo-newex")?.value || "").trim().slice(0, 60); if (!name) return $("wo-newex")?.focus();
     const l = lastFor(name, w.day);
-    w.exercises.push({ name, done: false, sets: l ? l.sets.map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null })) : emptySets(3) });
-    woOpenEx = w.exercises.length - 1; woAdding = false; woChanged(true); };
-  const wireSug = () => main().querySelectorAll("[data-addex]").forEach(b => b.onclick = () => addEx(b.dataset.addex));
-  wireSug();
-  if ($("wo-newex")){ const f = $("wo-newex");
-    f.oninput = () => { $("wo-sug").innerHTML = woSugHtml(w, f.value); wireSug(); };
-    f.onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); addEx(f.value); } };
-    $("wo-addcancel").onclick = () => { woAdding = false; render(); }; }
+    w.exercises.push({ name, done: false, sets: l ? copySets(l.sets) : blankEx().sets }); woAdding = false; woChanged(true); };
+  if ($("wo-newex")){ $("wo-addgo").onclick = addEx; $("wo-addcancel").onclick = () => { woAdding = false; render(); };
+    $("wo-newex").onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); addEx(); } }; }
 }
 
-// Profile: recent workouts (you, or a Bud)
-function woProfileHtml(o){
+// Profile: recent workouts (you, or a Bud). On your own You tab: your plans too.
+function woProfileHtml(o, inYou){
   if (!WORKOUTS || !o) return "";
   const self = o.id === myId; if (!self && !isMutual(o)) return "";
+  let out = "";
+  if (self && inYou){
+    const labels = [...new Set([...(o.plan || []).filter(s => s && s.w).map(s => s.w), ...plans.map(p => p.label)])];
+    if (labels.length) out += `<div class="sec"><h2 class="sign">Workout plans</h2><span class="label">Only you</span></div>
+      <div class="list">${labels.map(l => { const p = planFor(l);
+        return `<button type="button" class="li tappable woplanrow" data-editplan="${esc(l)}"><span class="grow"><b>${esc(l)}</b>
+          <span class="note">${p ? `${p.exercises.length} exercise${p.exercises.length === 1 ? "" : "s"}` : "Not written yet"}</span></span><span class="note">${p ? "Edit" : "Write it"} ›</span></button>`; }).join("")}</div>`;
+  }
   const list = woOf(o.id).filter(w => woDone(w).length).slice(0, 3);
-  if (!list.length) return self ? "" : "";
+  if (!list.length) return out;
   const when = k => { const d = parse(k), diff = Math.round((today() - d) / 864e5);
     return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : diff < 7 ? DAYS_LONG[dow(d)] : d.toLocaleDateString("en-AU", { day: "numeric", month: "short" }); };
-  return `<div class="sec"><h2 class="sign">Workouts</h2><span class="label">${self ? "You + your Buds see this" : "Buds only"}</span></div>
+  return out + `<div class="sec"><h2 class="sign">Workouts</h2><span class="label">${self ? "You + your Buds see this" : "Buds only"}</span></div>
     <div class="card wolist">${list.map(w => `<div class="wolog"><div class="wologhead"><b>${esc(w.label || "Workout")}</b><span class="note">${when(w.day)}${w.finished_at ? "" : " · in progress"}</span></div>
       ${woDone(w).map(e => `<div class="wologex"><span>${esc(e.name)}</span><span class="mono note">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>`).join("")}</div>`;
 }
@@ -2037,7 +2092,7 @@ async function loadMemberCount(){
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay;
+  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay && !woPlan;
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
@@ -2793,10 +2848,11 @@ function viewProfile(inYou){
       <div><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
     ${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
-    ${woProfileHtml(o)}
+    ${woProfileHtml(o, inYou)}
     <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
     ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}`}</div>`;
   if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
+  main().querySelectorAll("[data-editplan]").forEach(b => b.onclick = () => editPlan(b.dataset.editplan, "back"));
   if ($("pf-trophies")) $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
   if (inYou){ $("you-edit").onclick = () => { youView = "edit"; render(); window.scrollTo(0,0); };
               $("you-settings").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); }; }
@@ -2999,6 +3055,7 @@ function render(){
     $("load-retry").onclick = () => { main().innerHTML = `<div class="skel">Loading the crew…</div>`; loadAll(); }; return; }
   if (!me()){ $("title").textContent = "Welcome"; $("tabbar").hidden = true; profileId = null; chatKey = null; circleId = null; return viewJoin(); }
   if (wnActive) return viewWhatsNew();
+  if (woPlan && !profileId && !circleId && !chatKey) return viewPlan();
   if (woDay && !profileId && !circleId && !chatKey) return viewWorkout();
   updateChatBadge();
   if (chatKey && !profileId && !circleId) return viewChat(chatKey);
@@ -3010,7 +3067,7 @@ function render(){
   pinBottom();
   maybeShowPushSheet();
 }
-function setTab(t){ if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ woPlan = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -3031,7 +3088,7 @@ let sb = null, session = null, authKnown = false;
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
     if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
-      loadGen++; workouts = []; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      loadGen++; workouts = []; plans = []; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
       messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
       document.documentElement.classList.remove("chat-open");
     }
@@ -3045,7 +3102,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b36";   // bump together with version.json on every release
+const APP_VERSION = "b37";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

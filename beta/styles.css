@@ -814,3 +814,20 @@ html.wn-open header.top{display:none}
 .wologex .mono{flex:none;text-align:right}
 .wohead .work{font-size:46px;margin:2px 0 4px;overflow-wrap:anywhere}
 @media (max-width:380px){.wohead .work{font-size:38px}}
+/* plans + scroll wheels + kg/lb */
+.wosrow{grid-template-columns:26px 1fr 1fr 30px}
+.wopick{position:relative;display:flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line2);border-radius:12px;padding:0 10px;min-width:0}
+.wopick span{font-size:12px;color:var(--muted);flex:none}
+.wosel{appearance:none;-webkit-appearance:none;border:0;background:transparent;color:var(--fg);font-size:20px;font-weight:700;padding:10px 0;width:100%;min-width:0;cursor:pointer;text-align:left}
+.wosel:focus{outline:none}
+.wopick:focus-within{outline:2px solid var(--c);border-color:transparent}
+.worow{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.worow .linkbtn{padding-right:0}
+.woseg{display:inline-flex;border:1px solid var(--line2);border-radius:999px;padding:3px;gap:2px}
+.woseg button{border:0;background:transparent;color:var(--muted);font:700 13px var(--mono);padding:6px 14px;border-radius:999px;cursor:pointer}
+.woseg button.on{background:var(--iron);color:var(--on-iron)}
+.woex.open > .woexname{display:block;margin:12px 14px 0;width:calc(100% - 28px);font-family:var(--body);font-weight:700}
+.plan .woex .wosets{border-top:0}
+.woplanrow{width:100%;border:0;border-bottom:1px solid var(--line);background:none;color:var(--fg);text-align:left;font:inherit;cursor:pointer}
+.woplanrow:last-child{border-bottom:0}
+.woplanrow b{display:block}
