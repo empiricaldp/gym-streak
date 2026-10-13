@@ -3747,6 +3747,9 @@ function wnArt(kind, m){
   if (kind === "workout") return `<div class="wa-card wa-wo" style="${me}"><div class="wa-row"><span class="wa-live"></span><span class="wa-lab">Going</span><b class="wa-time">25:02</b></div>
       <b class="sign wa-wotitle">Push</b>
       ${[["Bench press", 1], ["Incline DB", 1], ["Dips", 0]].map(([n, d]) => `<div class="wa-ex ${d ? "on" : ""}"><i></i><span>${n}</span></div>`).join("")}</div>`;
+  if (kind === "rest") return `<div class="wa-rest" style="${me}"><div class="wa-ringwrap"><svg viewBox="0 0 120 120" width="190" height="190" aria-hidden="true"><circle cx="60" cy="60" r="52" class="wr-bg"/><circle cx="60" cy="60" r="52" class="wr-fg"/></svg>
+      <span class="wr-mid"><b>1:02</b><span class="wa-lab">Rest left</span></span></div>
+      <div class="wa-strip"><span class="wa-live"></span><span>Rest 1:02</span><span class="wa-lab">Next: Dips</span></div></div>`;
   if (kind === "safety") return `<div class="wa-card wa-safe"><div class="wa-row"><span class="dot" style="${bud}"></span><b>Someone</b><span class="wa-dots">•••</span></div>
       <div class="wa-acts"><span>Report</span><span class="bad">Block</span></div></div>`;
   if (kind === "health") return `<div class="wa-health"><span class="wa-pill"><span class="wa-pillfill"></span><span class="wa-pillin"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>1,900</span></span>
@@ -3770,7 +3773,8 @@ const UPDATES = [
   { v: 2, kind: "profiles", title: "Profiles", line: "Tap anyone to see their week, streak and trophies." },
   { v: 2, kind: "circles",  title: "Circles",  line: "Private groups for your crew, like a WhatsApp group." },
   { v: 2, kind: "chats",    title: "Chats",    line: "Message your Buds and your circles." },
-  { v: 3, kind: "workout",  title: "Workouts", line: "Start a timer, tick off exercises, rest between sets." },
+  { v: 3, kind: "workout",  title: "Workouts", line: "Tap Start workout on Today. Tick off each exercise as you go." },
+  { v: 3, kind: "rest",     title: "Rest timer", line: "Tick a set and your rest starts. It stays at the bottom while you look around." },
   { v: 4, kind: "health",   title: "Health",   line: "Log meals in kcal or kJ. Tap the heart on Today." }];
 const tourSeenHere = () => { try { return !!localStorage.getItem(tourKey()); } catch(e){ return true; } };
 const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch(e){} };
@@ -3795,7 +3799,7 @@ function viewWhatsNew(){
     document.documentElement.classList.add("wn-open");
     const art = wnArt(wnStep === 1 ? (wnShort ? "lift" : "hello") : FEATS[wnStep - 2][0], m);
     const text = wnStep === 1
-      ? (wnShort ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">What's<br>new</h2><p class="wnline">${FEATS.length} new thing${FEATS.length === 1 ? "" : "s"} since you last opened CREW.</p>`
+      ? (wnShort ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">What's<br>new</h2><p class="wnline">A quick look at what's new since you last opened CREW.</p>`
                  : `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`)
       : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>`;
     main().innerHTML = `<div class="wnfull" id="wn" style="${pc(m)}">
