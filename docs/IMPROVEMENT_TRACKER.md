@@ -64,3 +64,11 @@ Indexes were already fine; the fix is *what* the app asks for. Open question for
 - Database: `supabase/tests/*.sql` (run in SQL editor; each undoes itself).
 - App: headless Playwright scripts against a fake Supabase (scratchpad `qa/`), iPhone sizes 390×844 and 320×640.
 - Not covered by automation: real iPhone keyboard, push delivery, installed-PWA background behaviour.
+
+## Phase 5 (local only, not published)
+- Leaderboard: DP chose **Buds + Circles only**. Beta Everyone tab is now search/list only; no global board (removes the private self-note with it).
+- 028_delete_account.sql (NOT applied): `delete_my_account('DELETE')` leaves circles normally (admin hand-over), clears push_log, deletes auth user → everything cascades. Local test 9/9.
+- App: Settings → Account → "Delete my account" (type DELETE), behind `GYM_DELETE` (off). App test t22 passes.
+- 026 test gained check 8: other days' workouts untouched (8/8).
+- Drafts: docs/legal/PRIVACY_POLICY_DRAFT.md, docs/legal/TERMS_DRAFT.md. Release checklist: docs/RELEASE_CHECKLIST.md.
+- Known gap (027): in a shared Circle, the person who was blocked still sees the blocker's circle messages (only the blocker's side is filtered).

@@ -404,7 +404,8 @@ function viewCrew(){
       <div class="list peoplelist" id="people">${(scoped ? (searchHits || []) : everyone()).map(personRow).join("")}</div>
       ${scoped && !searchHits ? `<p class="note" style="text-align:center">Type at least 2 letters to search everyone on CREW.</p>` : ""}
       <p class="note" id="find-none" hidden style="text-align:center">No one by that name.</p>`;
-    crewBoard(statsCrew().filter(o => o.id === myId || !o.private), [], top, { title: scoped ? "Leaderboard · people you know" : "Public leaderboard", weekBoard: false,
+    if (WORKOUTS) crewBoard([], [], top + `<p class="note boardhint">Leaderboards are in <b>My crew</b> (your Buds) and inside each <b>Circle</b>.</p>`, {});   // DP: Buds + Circles only, no global board
+    else crewBoard(statsCrew().filter(o => o.id === myId || !o.private), [], top, { title: scoped ? "Leaderboard · people you know" : "Public leaderboard", weekBoard: false,
       note: me()?.private ? `<p class="note selfnote">${LOCK} Your account is private, so you're only on this list for yourself. Others don't see you here.</p>` : "" });
     wireFind();
   } else {
@@ -554,10 +555,11 @@ function viewYou(){
       <li>They open it from there, tap <b>Create account</b> and answer 6 quick questions.</li></ol>
     <button class="cta ghost" id="copylink" style="margin-top:12px;font-size:18px">Copy link</button></div>`;
   const acct = `<p class="note" style="text-align:center">Signed in as ${esc(session?.user?.email || "")}</p>
-    <button class="cta ghost" id="logout">Log out</button>`;
+    <button class="cta ghost" id="logout">Log out</button>${DELETE_ON ? `<button type="button" class="linkbtn sfdanger" id="del-open" style="align-self:center;margin-top:14px">Delete my account</button>` : ""}`;
   if (!m){ main().innerHTML = `<div class="view"><div class="card"><p style="margin:0;font-weight:600">You haven't set up your plan yet.</p><p class="note">Go to Today and tap Get started.</p></div>${invite}${acct}</div>`; }
   else {
     const backBtn = `<button type="button" class="linkbtn pfback" id="you-back">‹ Profile</button>`;
+    if (youView === "delete") return viewDelete();
     if (youView === "edit"){
       $("title").textContent = "Edit profile";
       main().innerHTML = `<div class="view">${backBtn}
@@ -597,6 +599,7 @@ function viewYou(){
     });
   }
   $("copylink").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied"); } catch(e){ toast("Copy failed"); } };
+  if ($("del-open")) $("del-open").onclick = () => { youView = "delete"; render(); window.scrollTo(0,0); };
   $("logout").onclick = async () => {
     // stop this device getting your notifications once you've logged out
     try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager?.getSubscription();
@@ -1424,6 +1427,29 @@ function saveTimeZone(saved){
   const tz = phoneTZ();
   if (tz && saved !== undefined && saved !== tz) sb.from("profiles").update({ tz }).eq("id", myId).then(() => {}, () => {});
 }
+// ---- Delete my account (beta, needs migration 028; switched on with GYM_DELETE once 028 is applied) ----
+function viewDelete(){
+  $("title").textContent = "Delete account";
+  main().innerHTML = `<div class="view"><button type="button" class="linkbtn pfback" id="del-back">‹ Settings</button>
+    <div class="card"><h3 class="sign" style="margin:0 0 8px">This removes you from CREW for good.</h3>
+      <ul class="sflist"><li>Your profile, streak, gym days, workouts and plans</li><li>Your Buds, Spotting and Spotters</li>
+        <li>Messages you sent and received, nudges and reactions</li><li>You leave every Circle (if you were the only admin, the longest member takes over)</li></ul>
+      <p class="note" style="margin-top:10px">It can't be undone. Want a break instead? Log out, or set your account to Private.</p>
+      <label class="label" for="del-word" style="display:block;margin-top:12px">Type DELETE to confirm</label>
+      <input class="field" id="del-word" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="DELETE">
+      <button class="cta sfdanger" id="del-go" disabled style="margin-top:12px">Delete my account</button></div></div>`;
+  $("del-back").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); };
+  $("del-word").oninput = e => { $("del-go").disabled = e.target.value.trim() !== "DELETE"; };
+  $("del-go").onclick = async () => {
+    const btn = $("del-go"); btn.disabled = true; btn.textContent = "Deleting…";
+    try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager?.getSubscription(); if (sub) await sub.unsubscribe(); } catch(_) {}
+    const { error } = await sb.rpc("delete_my_account", { confirm: "DELETE" });
+    if (error){ btn.disabled = false; btn.textContent = "Delete my account"; return showWarn(oops("delete your account", error)); }
+    try { Object.keys(localStorage).filter(k => k.startsWith("gs-")).forEach(k => localStorage.removeItem(k)); } catch(_) {}
+    youView = "profile"; await sb.auth.signOut(); toast("Your account has been deleted.");
+  };
+}
+
 // ---- Scale: once CREW is big, load only the people you know (you, anyone you bud / who buds you, your circles) ----
 // Measured on a 10,000-member test database: loading every check-in = 480,000 rows / 70 s (unusable);
 // scoped = ~1,000 rows / 0.2 s. Below the limit nothing changes. Everyone else is found by SEARCH (server-side).
@@ -1612,6 +1638,7 @@ async function toggleDay(d){
 // to today's numbers, so next time is ready too. Forgot to finish? The server finishes it after 2 quiet hours.
 // Buds see your workouts (the database enforces that). Plans are private. Weights are stored in kg, shown in kg or lb.
 const WORKOUTS = !!window.GYM_BETA;                     // beta only for now
+const DELETE_ON = WORKOUTS && !!window.GYM_DELETE;   // 'Delete my account' — switched on once migration 028 is applied
 let workouts = [], plans = [], unit = "kg", woDay = null, woSaveT = null, woErr = null, woAdding = false, woDiscardAsk = false, woOpenEx = null;
 let woPlan = null;                                       // the plan being written: { label, exercises, then: "start"|"back"|"workout", day }
 const lc = s => String(s || "").trim().toLowerCase();

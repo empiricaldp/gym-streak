@@ -8,7 +8,9 @@ begin
   insert into public.profiles (id, name, plate, plan, since, track_start, account, is_public, share_attendance) values (a,'Ul A','red',gym,t-30,t-30,'public',true,true);
   insert into public.workouts (user_id, day, label, exercises, session_ms, finished_at, duration_s)
     values (a, t, 'Push', '[{"name":"Bench","done":true,"sets":[{"reps":8,"kg":60,"done":true},{"reps":8,"kg":60,"done":true}]}]', 3000000, now(), 3000);
-  insert into public.checkins (user_id, day) values (a, t);
+  insert into public.workouts (user_id, day, label, exercises, session_ms, finished_at, duration_s)
+    values (a, t - 2, 'Legs', '[{"name":"Squat","done":true,"sets":[{"reps":5,"kg":100,"done":true}]}]', 4000000, now() - interval '2 days', 4000);
+  insert into public.checkins (user_id, day) values (a, t), (a, t - 2);
   delete from public.checkins where user_id = a and day = t;           -- unlog (e.g. from the main app)
   select * into w from public.workouts where user_id = a and day = t;
   out := out || E'\n1 unlog → workout no longer finished: ' || case when w.finished_at is null then 'PASS' else 'FAIL' end;
@@ -27,5 +29,8 @@ begin
   insert into public.checkins (user_id, day) values (a, t - 1);
   delete from public.checkins where user_id = a and day = t - 1;       -- a day with no workout: nothing happens
   out := out || E'\n7 unlog a day with no workout: no error, no backup: ' || case when not exists (select 1 from workout_reset_backups where user_id = a and day = t - 1) then 'PASS' else 'FAIL' end;
+  select * into w from public.workouts where user_id = a and day = t - 2;
+  out := out || E'\n8 other days'' workouts untouched (still finished, ticks, 100 kg): ' || case when w.finished_at is not null and w.duration_s = 4000
+       and (w.exercises->0->>'done')::boolean and (w.exercises->0->'sets'->0->>'kg')::numeric = 100 and exists (select 1 from checkins where user_id = a and day = t - 2) then 'PASS' else 'FAIL' end;
   raise exception 'TESTS:%', out;
 end $$;
