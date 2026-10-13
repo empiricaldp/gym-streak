@@ -1506,6 +1506,7 @@ async function toggleDay(d){
   const m = me(); if (!m || !db) return;
   const k = key(d); if (busy.has(k)) return; busy.add(k); editSeq++;
   const was = !!(m.days && m.days[k]), before = weekStats(m,startOfWeek(d));
+  if (was && WORKOUTS) resetWorkoutFor(k);         // unlogged = "I didn't train": the workout goes back to a fresh start
   const days = {...(m.days||{})}; if (was) delete days[k]; else days[k] = 1;
   members.set(myId, {...m, days});
   if (!was && isGym(m,d) && key(startOfWeek(d)) === key(startOfWeek(today()))){   // the new plate slides on
@@ -1750,7 +1751,7 @@ function paintTimers(numbersOnly){
 }
 function timersHtml(w){
   const run = !!w?.session_run_at, ms = sesMs(w), fin = !!w?.finished_at;
-  const ses = `<div class="tcard ses${run ? " live" : ""}" id="t-ses"><span class="label">${run ? '<i class="ldot"></i>Session' : ms ? "Paused" : "Session"}</span>
+  const ses = `<div class="tcard ses${run ? " live" : ""}" id="t-ses"><span class="label">${run ? '<i class="ldot"></i>Session' : ms ? "Paused" : "Session"}${!run && ms && !fin ? `<button type="button" class="tlink" data-tses="reset">Reset</button>` : ""}</span>
     <span class="tnum mono${run || ms ? "" : " mut"}" id="ses-t">${clock(ms)}</span>
     <div class="tacts">${fin ? `<span class="note">${ms ? "Done" : "Not timed"}</span>` : run ? `<button type="button" class="tbtn" data-tses="pause">❚❚ Pause</button>`
       : `<button type="button" class="tbtn go" data-tses="start">▶ ${ms ? "Resume" : "Start"}</button>`}</div></div>`;
@@ -1763,7 +1764,7 @@ function timersHtml(w){
   return ses + rst;
 }
 function wireTimers(){
-  main().querySelectorAll("[data-tses]").forEach(b => b.onclick = () => b.dataset.tses === "start" ? sesStart() : sesPause());
+  main().querySelectorAll("[data-tses]").forEach(b => b.onclick = () => b.dataset.tses === "start" ? sesStart() : b.dataset.tses === "reset" ? sesReset() : sesPause());
   main().querySelectorAll("[data-trest]").forEach(b => b.onclick = () => { const a = b.dataset.trest, w = myWo(woDay);
     if (a === "plus") restPlus(); else if (a === "skip") restSkip();
     else if (a === "start") startRest(restPrefs.s || 90, nextUp(w, 0, -1));
@@ -1859,6 +1860,17 @@ async function discardWorkout(){
   const { error } = await sb.from("workouts").delete().eq("user_id", myId).eq("day", k);
   if (error) showWarn(oops("delete the workout", error)); else toast("Workout deleted");
 }
+// Undo the log → the workout is fresh again: timer 0:00, no ticks, finished cleared. Exercises + numbers stay.
+function resetWorkoutFor(k){
+  const w = myWo(k); if (!w) return;
+  w.finished_at = null; w.duration_s = null; w.session_ms = 0; w.session_run_at = null;
+  (w.exercises || []).forEach(e => { e.done = false; (e.sets || []).forEach(s => { delete s.done; }); });
+  if (rest){ rest = null; saveRestLocal(); cancelAlarm(); }
+  sb.from("workouts").update({ finished_at: null, duration_s: null, session_ms: 0, session_run_at: null, exercises: cleanEx(w.exercises) })
+    .eq("user_id", myId).eq("day", k).then(({ error }) => { if (error) showWarn(oops("reset the workout", error)); });
+  setTimeout(() => toast("Unlogged. Workout reset, ready when you are"), 2300);
+}
+function sesReset(){ const w = myWo(woDay); if (!w || w.session_run_at) return; w.session_ms = 0; woChanged(true); }
 // After Finish: a small summary, and (first time for this day) "save as your plan?"
 function viewSummary(){
   const s = woSummary; $("title").textContent = "Done"; $("tabbar").hidden = true;
@@ -3433,7 +3445,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b39";   // bump together with version.json on every release
+const APP_VERSION = "b40";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
