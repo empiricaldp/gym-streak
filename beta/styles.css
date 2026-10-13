@@ -949,3 +949,22 @@ html.wn-open header.top{display:none}
 .sfreasons{display:flex;flex-wrap:wrap;gap:8px}
 .sfreasons .chip.on{background:var(--iron);color:var(--on-iron);border-color:transparent}
 .msgreport{align-self:flex-start;font-size:12px;padding:2px 4px;margin:-2px 0 4px}
+/* ===== Phase 3 (beta) ===== */
+.pitch{display:flex;flex-direction:column;gap:6px;padding:6px 2px 4px}
+.pitch h2{margin:0;font-size:38px;line-height:.95}
+.pitch ul{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:15px;line-height:1.4}
+.pitch li{display:flex;gap:10px}
+.pitch li b{width:22px;flex:none;text-align:center}
+.whypick{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.whypick .path.on{outline:2px solid var(--fg);outline-offset:0}
+.progbars{display:flex;align-items:flex-end;gap:6px;height:110px}
+.pbw{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;min-width:0}
+.pbcol{position:relative;flex:1;width:100%;max-width:28px}
+.pbcol i{position:absolute;left:0;right:0;bottom:0;border-radius:5px}
+.pbt{box-shadow:inset 0 0 0 1.5px var(--line2)}
+.pbh{background:var(--c)}
+.pbb{background:color-mix(in srgb,var(--c) 40%,transparent)}
+.pbw small{font-size:10px;color:var(--muted)}
+.pbw.now small{color:var(--fg);font-weight:700}
+.freshcard .note{line-height:1.45}
+.whypick .path{border:1.5px solid var(--line2)!important;box-shadow:none!important}.whypick .path.watchpath{border-style:dashed!important}.whypick .path.on{border:2px solid var(--fg)!important;border-style:solid!important}

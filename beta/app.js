@@ -274,7 +274,10 @@ function viewToday(){
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span>${action ? `<span class="rowact">${action}</span>` : ""}</div>
           <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>` +
       (crewAll.length > crew.length ? `<button type="button" class="cta ghost ssm" id="crew-all">See all ${crewAll.length}</button>` : "");
-  } else crewHtml = `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">Your buds' sessions show up here.</p>
+  } else crewHtml = WORKOUTS ? `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">CREW works solo too.</p>
+      <p class="note">Your streak, week and workouts are yours either way. It's better with friends: you see who's trained, nudge them, and they keep you honest.</p>
+      <div class="row2" style="margin-top:10px"><button class="cta ghost ssm" data-goto-find>Find people</button><button class="cta ssm" id="invite-friend">Invite a friend</button></div></div>`
+    : `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">Your buds' sessions show up here.</p>
       <p class="note">Bud your gym mates to see who's trained today and nudge them. Bud each other and you're Buds.</p>
       <button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find your buds</button></div>`;
 
@@ -321,6 +324,7 @@ function viewToday(){
     topHtml += `<div class="card banner"><span class="big-emoji">📊</span><div class="grow"><b>Your weekly recap is ready</b>
       <span class="note">${lastWk.hit}/${lastWk.target} last week. See it and share it.</span></div>
       <button type="button" class="chip" id="recap-open">See it</button></div>`;
+  if (!topHtml.includes('id="recap-open"')) topHtml += freshStartHtml(m, t);    // one "about last week" card at a time
 
   let stepsHtml = "";
   if (!STEPS_ENABLED){ /* steps hidden */ }
@@ -343,6 +347,7 @@ function viewToday(){
   main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${m.watcher ? "" : tiles + streakHelpLink() + stepsHtml + q}${WORKOUTS ? circleRow + crewHtml : crewHtml + circleRow}${streakHelpHtml()}</div>`;
   if ($("watch-train")) $("watch-train").onclick = () => startOnboarding(true, "split");
   if ($("crew-all")) $("crew-all").onclick = () => { crewView = "buds"; setTab("crew"); };
+  if ($("invite-friend")) $("invite-friend").onclick = inviteFriend;
   if ($("wo-go")) $("wo-go").onclick = () => startWorkout(t);
   if ($("logbtn")) $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
@@ -1141,6 +1146,7 @@ function startOnboarding(edit, only){
 function viewOnboarding(){
   // Steps by name, so adding a question is just adding a word here
   const STEPS = ob.only ? [ob.only] : ob.edit ? ["name","goal","plate","split","review"]
+    : WORKOUTS ? (ob.watch ? ["name","why","plate","privacy","review"] : ["name","why","goal","plate","split","experience","streak","privacy","review"])
     : ob.watch ? ["name","goal","plate","split","privacy","review"] : ["name","goal","plate","split","experience","streak","privacy","review"];
   const total = STEPS.length, s = ob.step, k = STEPS[s], qn = s + 1;
   const ql = ob.only ? "Edit" : "Question " + qn;      // label above each question
@@ -1150,6 +1156,11 @@ function viewOnboarding(){
       <input class="field" id="f-name" type="text" maxlength="20" placeholder="e.g. DP" value="${esc(ob.name)}" autocomplete="nickname" autocapitalize="words" spellcheck="false">
       <p class="note namemsg ${ob.nameState === "taken" || ob.nameState === "bad" ? "bad" : ob.nameState === "ok" ? "ok" : ""}" id="name-msg">${esc(ob.nameMsg || "Letters and numbers only, no emoji. Each name can only be used once.")}</p>`;
     canNext = ob.nameState === "ok"; }
+  if (k==="why"){ body = `<span class="label">${ql}</span><h2 class="sign">What brings you to CREW?</h2>
+      <div class="whypick">
+        <button type="button" class="path${ob.why === "train" ? " on" : ""}" data-why="train" aria-pressed="${ob.why === "train"}"><b>🏋️ I train</b><small>Log gym days, keep a streak, show up with your crew.</small></button>
+        <button type="button" class="path watchpath${ob.why === "watch" ? " on" : ""}" data-why="watch" aria-pressed="${ob.why === "watch"}"><b>👀 I'm here for my friends</b><small>No split, no gym questions. Cheer them on and keep them honest. You can start training any time.</small></button></div>`;
+    canNext = !!ob.why; }
   if (k==="goal"){ body = `<span class="label">${ql}</span><h2 class="sign">What are your goals?</h2>
       <p class="note">Only you see this. It tunes your motivation messages and your weight trend.</p>${goalPicker(ob.goals)}`;
     canNext = ob.goals.length > 0; }
@@ -1169,10 +1180,10 @@ function viewOnboarding(){
       <p class="note">You can change this any time in the You tab.</p>${privacyPicker(ob.pv)}`; }
   const isReview = k === "review", last = isReview || !!ob.only;
   if (isReview){ const gym = ob.plan.filter((w,i)=>normalizeWorkout(w)&&!ob.opt[i]).length;
-    body = `<span class="label">Check it</span><h2 class="sign">${ob.edit?"Save changes":"Ready to lift"}</h2>
+    body = `<span class="label">Check it</span><h2 class="sign">${ob.edit?"Save changes":ob.watch?"Ready to cheer":"Ready to lift"}</h2>
       <div class="review" style="--c:var(--p-${ob.plate})">
         <div><span>Name</span><b>${esc(ob.name)}</b></div>
-        <div><span>Goals</span><b>${esc(goalsText(ob.goals) || "Not set")}</b></div>
+        ${ob.watch ? "" : `<div><span>Goals</span><b>${esc(goalsText(ob.goals) || "Not set")}</b></div>`}
         <div><span>Plate</span><b style="display:flex;align-items:center;gap:6px">${plateSvg(ob.plate, 22)}${plateName(ob.plate)}</b></div>
         <div><span>Gym days a week</span><b>${ob.watch ? "Just watching 👀" : gym}</b></div>
         ${ob.edit?"":`${ob.watch ? "" : `<div><span>Gym experience</span><b>${esc(durText(ob.exp))}</b></div>
@@ -1184,6 +1195,7 @@ function viewOnboarding(){
     <div class="row2"><button class="cta ghost" id="ob-back">${s===0 && !(k==="split" && (ob.splitMode==="ready" || ob.splitMode==="custom" || (ob.splitMode==="review" && !ob.edit))) ? "Cancel" : "Back"}</button>
     <button class="cta" id="ob-next" ${canNext?"":"disabled"} ${k==="split" && (ob.splitMode===null || ob.splitMode==="ready") ? "hidden" : ""}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
   const nextBtn = $("ob-next");
+  main().querySelectorAll("[data-why]").forEach(b => b.onclick = () => { ob.why = b.dataset.why; ob.watch = ob.why === "watch"; render(); });
   const refresh = () => { const ok = k==="name" ? ob.nameState === "ok" : k==="goal" ? ob.goals.length > 0 : k==="split" ? splitReady() : true; nextBtn.disabled = !ok; };
   if (k==="name"){
     const f = $("f-name"), msg = $("name-msg");
@@ -2093,6 +2105,39 @@ document.addEventListener("click", e => {
   }
 });
 
+// Invite: the phone's own share sheet if it has one (Messages, WhatsApp…), else copy the link
+async function inviteFriend(){
+  const link = location.origin + location.pathname.replace(/beta\/(index\.html)?$/, "");     // invites always go to the main app
+  const text = "Join my crew on CREW, the gym streak app. Open this on your phone:";
+  try { if (navigator.share){ await navigator.share({ title: "CREW", text, url: link }); return; } } catch(e){ if (e && e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(text + " " + link); toast("Invite link copied"); } catch(e){ toast("Couldn't copy. The link is in You → Settings → Invite"); }
+}
+// Your last 8 weeks: planned sessions hit (solid) vs planned (outline), plus bonus days. Personal progress, no friends needed.
+function progressHtml(m){
+  if (!WORKOUTS || !m || m.watcher) return "";
+  const ws = startOfWeek(today()), floor = startOfWeek(parse(m.since)), weeks = [];
+  for (let i = 7; i >= 0; i--){ const s = addDays(ws, -7 * i); if (s < floor) continue; weeks.push({ s, w: weekStats(m, s), now: i === 0 }); }
+  if (weeks.length < 2) return "";
+  const max = Math.max(1, ...weeks.map(x => Math.max(x.w.target, x.w.hit - x.w.froze + x.w.bonus)));
+  const done = weeks.filter(x => !x.now), total = done.reduce((n, x) => n + (x.w.hit - x.w.froze) + x.w.bonus, 0), full = done.filter(x => x.w.target && x.w.hit >= x.w.target).length;
+  return `<div class="sec"><h2 class="sign">Last ${weeks.length} weeks</h2><span class="label">${full}/${done.length} full weeks</span></div>
+    <div class="card progcard" style="${pc(m)}"><div class="progbars" role="img" aria-label="Sessions per week for the last ${weeks.length} weeks">
+      ${weeks.map(x => { const got = x.w.hit - x.w.froze; return `<div class="pbw${x.now ? " now" : ""}"><div class="pbcol">
+        <i class="pbt" style="height:${100 * x.w.target / max}%"></i><i class="pbh" style="height:${100 * got / max}%"></i>${x.w.bonus ? `<i class="pbb" style="bottom:${100 * got / max}%;height:${100 * x.w.bonus / max}%"></i>` : ""}</div>
+        <small class="mono">${got + x.w.bonus}</small></div>`; }).join("")}</div>
+      <p class="note" style="margin:8px 0 0">${total} session${total === 1 ? "" : "s"} in ${done.length} week${done.length === 1 ? "" : "s"}, about ${Math.round(10 * total / Math.max(1, done.length)) / 10} a week. Solid = planned days hit · outline = your plan · light = bonus.</p></div>`;
+}
+// A missed week shouldn't feel like the end: a calm fresh-start card, until you've logged this week
+function freshStartHtml(m, t){
+  if (!WORKOUTS || !m || m.watcher) return "";
+  const ws = startOfWeek(t), last = weekStats(m, addDays(ws, -7)), now = weekStats(m, ws);
+  if (!last.target || last.hit >= last.target || now.missed || addDays(ws, -7) < startOfWeek(parse(m.since))) return "";
+  const got = last.hit - last.froze;
+  const said = got ? `Last week you got ${got} of ${last.target}. That still counts.` : "Last week didn't happen. It happens to everyone.";
+  return `<div class="card banner freshcard"><span class="big-emoji">🌱</span><div class="grow"><b>${now.hit ? "You're back" : "Fresh week"}</b>
+    <span class="note">${now.hit ? `${now.hit} of ${now.target} this week so far. ${said}` : `${said} This week is ${now.target} gym day${now.target === 1 ? "" : "s"}. Start with today.`}</span></div></div>`;
+}
+
 // ================= How streaks work =================
 let streakHelp = false;
 function streakHelpHtml(){
@@ -2595,7 +2640,12 @@ function viewAuth(){
       <button class="linkbtn" id="a-switch">${isUp ? "Already have an account? Sign in" : "New here? Create an account"}</button>
       ${isUp ? "" : `<button class="linkbtn" id="a-forgot">Forgot password?</button>`}`;
   }
-  main().innerHTML = `<div class="card auth">${body}<div class="err" id="a-err">${esc(authErr)}</div>${authMsg?`<div class="okmsg">${esc(authMsg)}</div>`:""}</div>`;
+  const pitch = WORKOUTS && (authMode === "signup" || authMode === "signin") ? `<div class="pitch"><span class="label">CREW</span>
+      <h2 class="sign">Show up to the gym, with your crew.</h2>
+      <ul><li><b>✓</b>Tick off your gym days. Rest days never break your streak.</li>
+        <li><b>👥</b>See your friends show up, and let them see you. Nudge, react, chat.</li>
+        <li><b>🏋️</b>Log sets and weights only if you want to.</li></ul></div>` : "";
+  main().innerHTML = `${pitch}<div class="card auth">${body}<div class="err" id="a-err">${esc(authErr)}</div>${authMsg?`<div class="okmsg">${esc(authMsg)}</div>`:""}</div>`;
   const go = $("a-go"), email = $("a-email"), pass = $("a-pass");
   const submit = async () => {
     authErr = ""; authMsg = ""; go.disabled = true;
@@ -3319,7 +3369,7 @@ function viewProfile(inYou){
       <div class="accent"><b class="sign">${dayStreak(o)}</b><span class="label">Day streak</span></div>
       <div><b class="sign">${weekNo(o)}</b><span class="label">Week</span></div>
       <div><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
-    ${streakHelpLink()}${streakHelpHtml()}${youBar}
+    ${streakHelpLink()}${streakHelpHtml()}${self && inYou ? progressHtml(o) : ""}${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
     ${woProfileHtml(o, inYou)}
     ${WORKOUTS && inYou ? "" : `<div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>

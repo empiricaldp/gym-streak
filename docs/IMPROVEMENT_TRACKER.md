@@ -32,7 +32,12 @@ Legend: **Bug** = verified defect · **UX** = works but confusing · **Scale** =
 | U2 | Today shows full roster before Circles | UX | Unbounded list. | Fixed: Circles first, 5-person preview + See all |
 | U3 | Streak measures unexplained | UX | | Fixed: "How streaks work" sheet |
 | U4 | Bonus day looks like a normal session in recap | Bug | Recap checked "trained?" before "planned day?", so a rest-day session showed as a planned one. | Fixed: planned day first; bonus = "+" tile + legend |
-| U5 | Settings mixes everything | UX | | Pending (Phase 3) |
+| U5 | Settings mixes everything | UX | | Done: Privacy & safety (privacy, blocked people) first · Goal & body · Notifications · What's new · Invite · Account last. Support & legal waits for Phase 5 pages |
+| N1 | Sign-up doesn't say what CREW is | UX | | Done: 3-line pitch above sign in / sign up |
+| N2 | Watchers answer gym questions first | UX | Watch option was buried in the split step. | Done: "What brings you to CREW?" right after the name; watchers get 5 short steps, no gym questions |
+| N3 | Nothing to do with zero friends | UX | | Done: "CREW works solo too" + Find people + Invite (share sheet) |
+| N4 | No personal progress | UX | | Done: "Last 8 weeks" bars on your profile (planned hit / plan / bonus, sessions per week) |
+| N5 | A missed week feels like failure | UX | | Done: calm "Fresh week" / "You're back" card after a missed week (not on recap days) |
 | X1 | Trophies "WEEK 1" heading broke mid-word ("WEE / K 1") | Bug | Found while testing; pre-existing. | Fixed |
 | S1 | No block / report | Scale (safety) | Not in code. Found while building: the legacy `shares_attendance` read rules would have let a BLOCKED person keep reading a public account's check-ins/freezes/reactions. | Built: migration 027 (not applied) + app UI behind `SAFETY` switch (off) + push filter (not deployed). 23/23 DB checks, UI run-through pass |
 | S2 | No account deletion / privacy policy / terms | Scale (store) | Not in code. | Pending (Phase 5) |
