@@ -3742,15 +3742,36 @@ function wnArt(kind, m){
   if (kind === "profiles") return `<div class="wa-card" style="${bud}"><div class="wa-row"><span class="dot"></span><b>Your mate</b></div>
       <div class="wa-week">${[1,1,1,0,1,1,0].map(x => `<i class="${x ? "on" : ""}"></i>`).join("")}</div>
       <div class="wa-stats"><b class="sign">14</b><span>day streak</span></div></div>`;
+  if (kind === "workout") return `<div class="wa-card wa-wo" style="${me}"><div class="wa-row"><span class="wa-live"></span><span class="wa-lab">Going</span><b class="wa-time">25:02</b></div>
+      <b class="sign wa-wotitle">Push</b>
+      ${[["Bench press", 1], ["Incline DB", 1], ["Dips", 0]].map(([n, d]) => `<div class="wa-ex ${d ? "on" : ""}"><i></i><span>${n}</span></div>`).join("")}</div>`;
+  if (kind === "safety") return `<div class="wa-card wa-safe"><div class="wa-row"><span class="dot" style="${bud}"></span><b>Someone</b><span class="wa-dots">•••</span></div>
+      <div class="wa-acts"><span>Report</span><span class="bad">Block</span></div></div>`;
+  if (kind === "health") return `<div class="wa-health"><span class="wa-pill"><span class="wa-pillfill"></span><span class="wa-pillin"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>1,900</span></span>
+      <div class="wa-card wa-cal"><span class="wa-lab">Calories today</span><div class="wa-stats"><b class="sign">1,900</b><span>kcal</span></div><span class="wa-bar2"><i></i></span></div></div>`;
+  if (kind === "newchat") return `<div class="wa-card wa-nc"><div class="wa-ncbar"><span>Edit</span><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/></svg></div>
+      <div class="wa-ncrow"><span class="dot" style="${bud}"></span><b>Your mate</b><span class="wa-del">Delete</span></div>
+      <div class="wa-ncrow"><span class="dot" style="${b2}"></span><b>Morning crew</b><span class="wa-del">Clear</span></div></div>`;
   if (kind === "circles") return `<div class="wa-ring">${[me, bud, b2, b3, b4].map((st, i) => `<span class="wdisc sm" style="${st};--i:${i}"></span>`).join("")}<span class="wa-mid sign">Crew</span></div>`;
   return `<div class="wa-chat"><span class="wa-bub them">gym at 6?</span><span class="wa-bub me" style="${pc(m)}">yesss 💪 see you there</span><span class="wa-bub them">bring straps</span></div>`;
 }
 // Tour version: bump when the tour gets new screens, so everyone sees it once more.
 // 1 = beta tour (Buds/Profiles/Find people), 2 = launch tour (+ Circles, Chats)
-const TOUR_V = 2; let wnShort = false;
-// ...and each app (main / beta) remembers on its own phone that it showed the tour, so someone who saw it in the
-// beta still gets it the first time they open the main app.
-const tourKey = () => "gs-tour-" + (BETA ? "beta" : "main") + "-" + TOUR_V + "-" + myId;
+// 3 = workouts + safety (beta b40s–b51), 4 = Health + chat tidy-up (b52–b53)
+const TOUR_V = 4; let wnShort = false;
+// b54: once per ACCOUNT (saved on your profile), not once per app or phone. If you skipped a few updates, you get
+// all of them in one go. The phone also remembers it showed it, in case saving to the profile failed (bad signal).
+const tourKey = () => "gs-tour-acct-" + TOUR_V + "-" + myId;
+// Every feature screen, tagged with the update it came in. You see the ones newer than the last update you saw.
+const UPDATES = [
+  { v: 2, kind: "buds",     title: "Buds",     line: "Follow your gym mates. Bud each other and you're Buds." },
+  { v: 2, kind: "profiles", title: "Profiles", line: "Tap anyone to see their week, streak and trophies." },
+  { v: 2, kind: "circles",  title: "Circles",  line: "Private groups for your crew, like a WhatsApp group." },
+  { v: 2, kind: "chats",    title: "Chats",    line: "Message your Buds and your circles." },
+  { v: 3, kind: "workout",  title: "Workouts", line: "Start a timer, tick off exercises, rest between sets." },
+  { v: 3, kind: "safety",   title: "Report & block", line: "Tap ⋯ next to anyone's name. They're never told." },
+  { v: 4, kind: "health",   title: "Health",   line: "Log meals in kcal or kJ. Tap the heart on Today." },
+  { v: 4, kind: "newchat",  title: "Chats",    line: "Start a chat from the top corner. Tap Edit to delete one." }];
 const tourSeenHere = () => { try { return !!localStorage.getItem(tourKey()); } catch(e){ return true; } };
 const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch(e){} };
 async function finishShortTour(){
@@ -3759,16 +3780,16 @@ async function finishShortTour(){
   render(); window.scrollTo(0,0);
   await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
 }
-function startTour(){ wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
+let wnSince = 0;   // the last update this account saw when the tour opened (decides which screens show)
+function startTour(){ wnSince = 0; wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
 if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
   wnPv = wnPv || { ...pvFrom(m), priv: true };            // Private by default; they can switch to Public
   // One new thing per screen, one short line each, full screen with a little picture. Then privacy, then find your buds.
-  const FEATS = [["buds", "Buds", "Follow your gym mates. Bud each other and you're Buds."],
-                 ["profiles", "Profiles", "Tap anyone to see their week, streak and trophies."],
-                 ["circles", "Circles", "Private groups for your crew, like a WhatsApp group."],
-                 ["chats", "Chats", "Message your Buds and your circles."]];
+  let FEATS = UPDATES.filter(u => u.v > wnSince).map(u => [u.kind, u.title, u.line]);
+  if (FEATS.some(f => f[0] === "chats")) FEATS = FEATS.filter(f => f[0] !== "newchat")      // missed both chat updates: one Chats screen
+    .map(f => f[0] === "chats" ? [f[0], f[1], "Message your Buds and circles. Start one from the top corner."] : f);
   const PRIV = 2 + FEATS.length, FIND = PRIV + 1;            // step numbers: 1 hello, 2–5 features, 6 privacy, 7 find buds
   const dots = `<div class="steps">${Array.from({ length: wnShort ? PRIV - 1 : FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
   let body = "";
@@ -3776,7 +3797,8 @@ function viewWhatsNew(){
     document.documentElement.classList.add("wn-open");
     const art = wnArt(wnStep === 1 ? "hello" : FEATS[wnStep - 2][0], m);
     const text = wnStep === 1
-      ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`
+      ? (wnShort ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">What's<br>new</h2><p class="wnline">${FEATS.length} new thing${FEATS.length === 1 ? "" : "s"} since you last opened CREW.</p>`
+                 : `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`)
       : `<span class="wnkick">New · ${wnStep - 1} of ${FEATS.length}</span><h2 class="sign wnbig">${FEATS[wnStep - 2][1]}</h2><p class="wnline">${FEATS[wnStep - 2][2]}</p>`;
     main().innerHTML = `<div class="wnfull" id="wn" style="${pc(m)}">
       <div class="wntop">${dots}${wnStep > 1 ? `<button type="button" class="linkbtn wnskip" id="wn-skip">Skip</button>` : ""}</div>
@@ -3885,8 +3907,9 @@ function render(){
   $("mebadge").innerHTML = m ? `<span class="dot" style="${pc(m)}"></span><span class="menm">${esc(m.name)}</span>` : "";
   const signedIn = !!session;
   const gate = !!sb && authMode !== "newpass" && needsInstall();
-  if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && ((me().seenUpdate || 0) < TOUR_V || !tourSeenHere())){
-    wnActive = true; wnShort = false;                          // everyone gets the full tour, privacy choice included (DP's call)
+  if (ready && session && !ob && !locked && !wnDone && !wnActive && me() && (me().seenUpdate || 0) < TOUR_V && !tourSeenHere()){
+    wnActive = true; wnStep = 1; wnSince = me().seenUpdate || 0;
+    wnShort = wnSince >= 2;                                    // already chose public/private (tour 2): just the new things
   }
   $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
@@ -3962,7 +3985,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b53";   // bump together with version.json on every release
+const APP_VERSION = "b54";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
