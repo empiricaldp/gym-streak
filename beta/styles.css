@@ -769,3 +769,48 @@ html.wn-open header.top{display:none}
 .watchpath{border-style:dashed}
 .watchcard .wline{margin:0 0 6px;font-size:18px}
 .watchhero .work{font-size:44px}
+
+/* ===== Workout details (beta) ===== */
+.hero .wo-go{margin-top:10px;font-size:18px;padding:12px}
+.hero .wo-link{display:block;margin:6px auto 0;font-size:14px}
+.wo{padding-bottom:110px}
+.wohead{padding:2px 2px 4px}
+.wohead .work{margin:2px 0 4px}
+#wo-status.bad{color:var(--bad)}
+.woex{padding:0;overflow:hidden}
+.woexhead{display:flex;align-items:center;gap:12px;padding:12px 14px}
+.wotick{flex:none;width:34px;height:34px;border-radius:50%;border:2px solid var(--line2);background:transparent;color:var(--on-c,#fff);display:grid;place-items:center;cursor:pointer;padding:0}
+.wotick svg{width:18px;height:18px}
+.woex.done .wotick{background:var(--c);border-color:var(--c)}
+.woname{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:0;background:none;color:var(--fg);text-align:left;padding:2px 0;cursor:pointer;font:inherit}
+.woname b{font-size:16px;overflow-wrap:anywhere}
+.woex.done:not(.open) .woname b{color:var(--muted)}
+.wosets{border-top:1px solid var(--line);padding:10px 14px 12px;display:flex;flex-direction:column;gap:8px}
+.wosrow{display:grid;grid-template-columns:34px 1fr 1fr 34px;gap:8px;align-items:center}
+.wohdr span{font:700 10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.won{color:var(--muted);text-align:center;font-weight:700}
+.woin{width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--line2);background:var(--card2);color:var(--fg);border-radius:10px;padding:10px 12px;font-size:17px}
+.woin:focus{outline:2px solid var(--c);outline-offset:0;border-color:transparent}
+.woin::placeholder{color:var(--muted);opacity:.6}
+.worm{border:0;background:none;color:var(--muted);font-size:22px;line-height:1;cursor:pointer;padding:6px}
+.woexfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.woexfoot .linkbtn{padding-left:0}
+.woexfoot .chip svg{width:16px;height:16px}
+.woadd{font-size:18px;padding:12px}
+.woaddbox{display:flex;flex-direction:column;gap:10px}
+.wosug{display:flex;flex-wrap:wrap;gap:8px}
+.wosug .chip{flex:none;font-size:13px;padding:7px 12px}
+.wosug .chip.on{background:var(--iron);color:var(--on-iron);border-color:transparent}
+.wopriv{display:flex;gap:6px;align-items:center;justify-content:center;text-align:center}
+.wodiscard{align-self:center}
+.wofoot{position:fixed;left:0;right:0;bottom:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 70%,transparent);z-index:5}
+.wofoot .cta{width:100%;max-width:560px;margin:0 auto}
+.wofoot .cta[disabled]{opacity:.5}
+.wolist{display:flex;flex-direction:column;gap:14px}
+.wolog + .wolog{border-top:1px solid var(--line);padding-top:12px}
+.wologhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.wologex{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:3px 0}
+.wologex span:first-child{min-width:0;overflow-wrap:anywhere}
+.wologex .mono{flex:none;text-align:right}
+.wohead .work{font-size:46px;margin:2px 0 4px;overflow-wrap:anywhere}
+@media (max-width:380px){.wohead .work{font-size:38px}}

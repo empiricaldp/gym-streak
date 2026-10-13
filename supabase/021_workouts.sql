@@ -48,6 +48,7 @@ create policy "edit my workouts" on public.workouts for update to authenticated
 drop policy if exists "delete my workouts" on public.workouts;
 create policy "delete my workouts" on public.workouts for delete to authenticated using (auth.uid() = user_id);
 grant select, insert, update, delete on public.workouts to authenticated;
+grant select on public.workouts to service_role;   -- the push function counts exercises for the finish notification
 
 -- Auto-finish: forgot to tap Finish? If at least one exercise is ticked and nothing changed for 2 hours,
 -- or your day has ended, finish it for you: log the day (→ the normal notification) and mark it finished.

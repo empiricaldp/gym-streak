@@ -242,9 +242,9 @@ function viewToday(){
     ${barbell(m,w)}
     <div class="plates-cap"><span>${w.hit}/${w.target} PLATES LOADED</span><span>${w.left ? w.left+" TO GO" : "FULL BAR"}</span></div>`;
   if (gym) hero += `<button class="cta ${done?"done":""}" id="logbtn" ${db?"":"disabled"}>${done?CHECK+" Session logged":"Log today's session"}</button>
-      <p class="note" style="text-align:center">${done?"Tap again to undo.":"Tap after you've trained."}</p>`;
+      <p class="note" style="text-align:center">${done?"Tap again to undo.":"Tap after you've trained."}</p>${woTodayHtml(m,t)}`;
   else hero += `<button class="cta ghost ${done?"done":""}" id="logbtn" ${db?"":"disabled"}>${done?CHECK+" Bonus logged":"+ Log a bonus session"}</button>
-      <p class="note" style="text-align:center">Rest days never break your streak.</p>`;
+      <p class="note" style="text-align:center">Rest days never break your streak.</p>${woTodayHtml(m,t)}`;
   if (receivedLine(t)) hero += `<p class="recv">${receivedLine(t)}</p>`;
   hero += `</div>`;
   const tiles = `<div class="tiles" style="${pc(m)}">
@@ -338,6 +338,7 @@ function viewToday(){
   const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
   main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${m.watcher ? "" : tiles + stepsHtml + q}${crewHtml}${circleRow}</div>`;
   if ($("watch-train")) $("watch-train").onclick = () => startOnboarding(true, "split");
+  if ($("wo-go")) $("wo-go").onclick = () => startWorkout(t);
   if ($("logbtn")) $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
   main().querySelectorAll("[data-react]").forEach(b => b.onclick = () => toggleReaction(b.dataset.react, b.dataset.to, b.dataset.day));
   main().querySelectorAll("[data-nudge]").forEach(b => b.onclick = () => { b.disabled = true; sendNudge(b.dataset.nudge); });
@@ -1412,7 +1413,7 @@ async function loadAll(){
       // keep what we had instead of treating it as "empty" (that kicked people out of circles and caused false banners).
       const since90 = new Date(Date.now() - 90 * 864e5).toISOString(), fetchedAt = new Date(Date.now() - 60000).toISOString();
       const soft = p => p.then(v => v, () => null);           // null = this part failed
-      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows] = await Promise.all([
+      const [cRows, cmRows, msgRows, readRows, freezeRows, rRows, nRows, sentRows, mine, wRows, woRows] = await Promise.all([
         soft(fetchAll("circles", "id,name,emoji,invite_code,created_by,created_at")),
         soft(fetchAll("circle_members", "circle_id,user_id,role,muted,added_by,joined_at")),
         soft(fetchAll("messages", "id,from_user,to_user,circle_id,body,created_at", q => q.gte("created_at", since90))),
@@ -1422,7 +1423,8 @@ async function loadAll(){
         soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
         soft(fetchAll("nudges", "to_user", q => q.eq("from_user", myId))),
         sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz").eq("id", myId).maybeSingle(),
-        soft(fetchAll("bodyweight", "day,kg", q => q.order("day")))]);
+        soft(fetchAll("bodyweight", "day,kg", q => q.order("day"))),
+        WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at", q => q.gte("day", key(addDays(today(), -120))))) : null]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
       failed = new Set();
       // Circles I'm in (the database only returns those) and their members
@@ -1453,6 +1455,10 @@ async function loadAll(){
         body.height = mine.data.height_cm ? Number(mine.data.height_cm) : null;
       }
       if (wRows) body.weights = wRows.map(r => ({ day: r.day, kg: Number(r.kg) }));
+      // Workouts (mine + my Buds'). Never overwrite the one I'm editing or one that hasn't saved yet.
+      if (woRows){ const local = workouts.filter(w => w.user_id === myId && (w.day === woDay || w.dirty));
+        for (const l of local){ const srv = woRows.find(r => r.user_id === myId && r.day === l.day); if (srv && srv.finished_at && !l.finished_at) l.finished_at = srv.finished_at; }
+        workouts = [...woRows.filter(r => !local.some(l => l.user_id === r.user_id && l.day === r.day)), ...local]; }
       // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
@@ -1479,8 +1485,9 @@ function subscribe(){
     .on("postgres_changes", { event:"*", schema:"public", table:"buds" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"circles" }, reloadSoon)
     .on("postgres_changes", { event:"*", schema:"public", table:"circle_members" }, reloadSoon)
-    .on("postgres_changes", { event:"*", schema:"public", table:"messages" }, onMessageLive)
-    .subscribe();
+    .on("postgres_changes", { event:"*", schema:"public", table:"messages" }, onMessageLive);
+  if (WORKOUTS) channel.on("postgres_changes", { event:"*", schema:"public", table:"workouts" }, p => { if ((p.new?.user_id || p.old?.user_id) !== myId) reloadSoon(); });
+  channel.subscribe();
 }
 
 // ================= Writes =================
@@ -1517,6 +1524,228 @@ async function toggleDay(d){
     const cur = me(); if (cur){ const days = { ...(cur.days || {}) }; if (was) days[k] = 1; else delete days[k]; members.set(myId, { ...cur, days }); }
     render(); showWarn("Couldn't save that — check your internet and try again.");
   }
+}
+
+// ================= Workout details (beta) =================
+// Optional "Start workout": a pre-filled list of exercises, each with sets (reps × kg). Tick ✓ each one as you finish it.
+// Nothing is sent while you train. "Finish workout" logs the day → the ONE notification your crew gets.
+// Forgot to tap Finish? The server finishes it for you after 2 quiet hours (or when your day ends).
+// Who sees the details: you + your Buds (you bud each other). The database enforces that, not just the app.
+const WORKOUTS = !!window.GYM_BETA;                     // beta only for now
+let workouts = [], woDay = null, woSaveT = null, woErr = null, woOpenEx = null, woAdding = false, woDiscardAsk = false;
+const EX_FOR = {
+  chest: ["Bench press", "Incline dumbbell press", "Cable fly"], triceps: ["Tricep pushdown", "Overhead tricep extension"],
+  back: ["Lat pulldown", "Barbell row", "Seated cable row"], biceps: ["Barbell curl", "Hammer curl"],
+  shoulders: ["Overhead press", "Lateral raise", "Rear delt fly"], legs: ["Squat", "Romanian deadlift", "Leg press", "Leg curl", "Calf raise"],
+  quads: ["Squat", "Leg press", "Leg extension"], hamstrings: ["Romanian deadlift", "Leg curl"], glutes: ["Hip thrust", "Bulgarian split squat"],
+  calves: ["Calf raise"], abs: ["Cable crunch", "Hanging leg raise"], core: ["Plank", "Cable crunch"], obliques: ["Russian twist"],
+  forearms: ["Wrist curl"], traps: ["Shrugs"], arms: ["Barbell curl", "Tricep pushdown", "Hammer curl"],
+  push: ["Bench press", "Overhead press", "Incline dumbbell press", "Lateral raise", "Tricep pushdown"],
+  pull: ["Lat pulldown", "Barbell row", "Face pull", "Barbell curl"], "upper body": ["Bench press", "Barbell row", "Overhead press", "Lat pulldown"],
+  "lower body": ["Squat", "Romanian deadlift", "Leg press", "Calf raise"], "full body": ["Squat", "Bench press", "Barbell row", "Overhead press"],
+  strength: ["Squat", "Bench press", "Deadlift"], powerlifting: ["Squat", "Bench press", "Deadlift"], "glute focus": ["Hip thrust", "Bulgarian split squat", "Cable kickback"]
+};
+const EX_EXTRA = ["Deadlift", "Pull-up", "Dips", "Push-up", "Chest press machine", "Pec deck", "Front squat", "Hack squat", "Lunges", "Preacher curl",
+  "Skull crusher", "Arnold press", "T-bar row", "Leg extension", "Cable kickback", "Face pull", "Incline bench press", "Dumbbell bench press", "Goblet squat"];
+const lc = s => String(s || "").trim().toLowerCase();
+const myWo = k => workouts.find(w => w.user_id === myId && w.day === k) || null;
+const woOf = id => workouts.filter(w => w.user_id === id).sort((a, b) => b.day.localeCompare(a.day));
+const woDone = w => (w.exercises || []).filter(e => e.done);
+const woLabelFor = (m, d) => isGym(m, d) ? (slot(m, d)?.w || "Gym day") : "Bonus session";
+// "3×8 @ 60kg", "8, 8, 6 @ 60kg" or "8×60, 6×55kg"
+function fmtSets(sets){
+  const s = (sets || []).filter(x => x && (x.reps != null || x.kg != null));
+  if (!s.length) return "";
+  const r = s.map(x => x.reps ?? "–"), kg = s.map(x => x.kg), sameR = r.every(v => v === r[0]), sameK = kg.every(v => v === kg[0]);
+  const k = v => v == null ? "" : `${v}kg`;
+  if (sameR && sameK) return `${s.length}×${r[0]}${kg[0] != null ? " @ " + k(kg[0]) : ""}`;
+  if (sameK) return `${r.join(", ")}${kg[0] != null ? " @ " + k(kg[0]) : ""}`;
+  return s.map(x => `${x.reps ?? "–"}×${k(x.kg) || "–"}`).join(", ");
+}
+// What you did for this exercise the last time (before this day)
+function lastFor(name, beforeDay){
+  for (const w of woOf(myId)) if (w.day < beforeDay){
+    const e = (w.exercises || []).find(x => lc(x.name) === lc(name) && (x.sets || []).some(s => s.reps != null || s.kg != null));
+    if (e) return { day: w.day, sets: e.sets };
+  }
+  return null;
+}
+const emptySets = n => Array.from({ length: n }, () => ({ reps: null, kg: null }));
+// Pre-fill: your last workout with the same name (e.g. "Push") with its numbers; first time = common exercises for those muscles
+function prefill(label, k){
+  const prev = woOf(myId).find(w => w.day < k && lc(w.label) === lc(label) && (w.exercises || []).length);
+  if (prev) return prev.exercises.map(e => ({ name: e.name, done: false, sets: (e.sets && e.sets.length ? e.sets : emptySets(3)).map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null })) }));
+  const parts = lc(label).split(/\s*\+\s*|\s*&\s*|\s*,\s*/).filter(Boolean);
+  return [...new Set(parts.flatMap(x => EX_FOR[x] || []))].slice(0, 6).map(name => { const l = lastFor(name, k);
+    return { name, done: false, sets: l ? l.sets.map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null })) : emptySets(3) }; });
+}
+// Ideas for this day's muscles + anything you've done before, minus what's already on the list
+function woSuggest(label, have){
+  const parts = lc(label).split(/\s*\+\s*|\s*&\s*|\s*,\s*/).filter(Boolean);
+  const fromLabel = parts.flatMap(p => EX_FOR[p] || []);
+  const mine = woOf(myId).flatMap(w => (w.exercises || []).map(e => e.name));
+  const taken = new Set(have.map(lc));
+  return [...new Set([...fromLabel, ...mine, ...EX_EXTRA])].filter(n => n && !taken.has(lc(n)));
+}
+const numIn = (v, dec) => { const n = dec ? parseFloat(String(v).replace(",", ".")) : parseInt(v, 10); return Number.isFinite(n) && n >= 0 && n < 1000 ? Math.round(n * 10) / 10 : null; };
+const cleanEx = ex => (ex || []).slice(0, 30).map(e => ({ name: String(e.name || "").trim().slice(0, 60) || "Exercise", done: !!e.done,
+  sets: (e.sets || []).slice(0, 20).map(s => ({ reps: numIn(s.reps), kg: numIn(s.kg, true) })) }));
+
+function woStatus(){
+  const el = $("wo-status"), w = myWo(woDay); if (!el || !w) return;
+  const n = woDone(w).length, tot = w.exercises.length;
+  el.textContent = `${n}/${tot} done` + (!n && !w.finished_at && !woErr ? " · tick ✓ each one as you finish it" : "") + (woErr ? " · not saved yet, will retry" : w.dirty ? " · saving…" : "");
+  el.classList.toggle("bad", !!woErr);
+}
+function woChanged(structural){
+  const w = myWo(woDay); if (!w) return;
+  w.dirty = true; clearTimeout(woSaveT); woSaveT = setTimeout(woSave, 700);
+  if (structural) render(); else woStatus();
+}
+// Save the open workout. Safe to repeat (one row per day: insert or update). Times are stamped by the server.
+async function woSave(finish){
+  clearTimeout(woSaveT);
+  const w = myWo(woDay) || (finish && finish.w); if (!w) return true;
+  const row = { user_id: myId, day: w.day, label: w.label, exercises: cleanEx(w.exercises) };
+  if (finish) row.finished_at = new Date().toISOString();
+  const { error } = await sb.from("workouts").upsert(row, { onConflict: "user_id,day" });
+  if (error){ woErr = error; woSaveT = setTimeout(woSave, 5000); woStatus(); return false; }   // keep it on the phone, try again soon
+  woErr = null; w.dirty = false; woStatus(); return true;
+}
+function startWorkout(d){
+  const m = me(); if (!m || !WORKOUTS) return;
+  const k = key(d); let w = myWo(k);
+  if (!w){ const label = woLabelFor(m, d);
+    w = { user_id: myId, day: k, label, exercises: prefill(label, k), started_at: new Date().toISOString(), finished_at: null };
+    workouts.push(w); woDay = k; woChanged(false); }
+  woDay = k; woAdding = !w.exercises.length; woDiscardAsk = false;
+  woOpenEx = w.exercises.findIndex(e => !e.done); if (woOpenEx < 0) woOpenEx = null;
+  render(); window.scrollTo(0, 0);
+}
+function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; render(); window.scrollTo(0, 0); }
+async function finishWorkout(){
+  const w = myWo(woDay); if (!w) return;
+  if (w.finished_at){ return closeWorkout(); }                       // already finished: "Done" just closes (edits are saved)
+  if (!woDone(w).length) return;
+  const btn = $("wo-finish"); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  const ok = await woSave({ w });
+  if (!ok){ if (btn){ btn.disabled = false; btn.textContent = "Finish workout"; } return showWarn(oops("finish the workout", woErr)); }
+  w.finished_at = new Date().toISOString();
+  const d = parse(w.day); woDay = null; woAdding = false;
+  if (!ticked(me(), d)) await toggleDay(d);                          // logs the day → streak + the one notification
+  else { render(); toast(`Workout saved · ${woDone(w).length} exercise${woDone(w).length === 1 ? "" : "s"}`); }
+  window.scrollTo(0, 0);
+}
+async function discardWorkout(){
+  const w = myWo(woDay); if (!w) return;
+  if (!woDiscardAsk){ woDiscardAsk = true; return render(); }
+  const k = w.day; workouts = workouts.filter(x => x !== w); clearTimeout(woSaveT); woErr = null; woDay = null; woDiscardAsk = false; render();
+  const { error } = await sb.from("workouts").delete().eq("user_id", myId).eq("day", k);
+  if (error) showWarn(oops("delete the workout", error)); else toast("Workout deleted");
+}
+
+// The Today card's workout button (under "Log today's session")
+function woTodayHtml(m, t){
+  if (!WORKOUTS || !m || m.watcher) return "";
+  const w = myWo(key(t)), done = ticked(m, t);
+  if (w && !w.finished_at){ const n = woDone(w).length;
+    return `<button class="cta wo-go" id="wo-go">Continue workout${w.exercises.length ? ` · ${n}/${w.exercises.length}` : ""}</button>`; }
+  if (w && woDone(w).length) return `<button type="button" class="linkbtn wo-link" id="wo-go">See today's workout · ${woDone(w).length} exercise${woDone(w).length === 1 ? "" : "s"}</button>`;
+  if (done) return `<button type="button" class="linkbtn wo-link" id="wo-go">+ Add workout details</button>`;
+  return `<button class="cta ghost wo-go" id="wo-go">🏋️ Start workout</button>`;
+}
+
+function woExHtml(e, i, w){
+  const open = woOpenEx === i, sum = fmtSets(e.sets), last = lastFor(e.name, w.day);
+  const sub = e.done ? (sum || "Done") : sum ? sum : last ? `Last: ${fmtSets(last.sets)}` : `${(e.sets || []).length} sets`;
+  let body = "";
+  if (open){
+    const rows = (e.sets || []).map((s, j) => { const ls = last?.sets?.[j] || last?.sets?.[last.sets.length - 1];
+      return `<div class="wosrow"><span class="won mono">${j + 1}</span>
+        <input class="woin mono" inputmode="numeric" pattern="[0-9]*" data-reps="${i}:${j}" value="${s.reps ?? ""}" placeholder="${ls?.reps ?? 10}" aria-label="Set ${j + 1} reps">
+        <input class="woin mono" inputmode="decimal" data-kg="${i}:${j}" value="${s.kg ?? ""}" placeholder="${ls?.kg ?? "–"}" aria-label="Set ${j + 1} kg">
+        <button type="button" class="worm" data-rmset="${i}:${j}" aria-label="Remove set ${j + 1}">×</button></div>`; }).join("");
+    body = `<div class="wosets"><div class="wosrow wohdr"><span>Set</span><span>Reps</span><span>kg</span><span></span></div>${rows}
+      <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">+ Add set</button>
+      ${last ? `<span class="note">Last time: ${esc(fmtSets(last.sets))}</span>` : ""}</div>
+      <div class="woexfoot"><button type="button" class="linkbtn" data-rmex="${i}">Remove exercise</button>
+      ${e.done ? "" : `<button type="button" class="chip" data-tick="${i}">${CHECK} Done</button>`}</div></div>`;
+  }
+  return `<div class="card woex${e.done ? " done" : ""}${open ? " open" : ""}">
+    <div class="woexhead"><button type="button" class="wotick" data-tick="${i}" aria-label="${e.done ? "Not done" : "Done"}: ${esc(e.name)}">${e.done ? CHECK : ""}</button>
+      <button type="button" class="woname" data-openex="${i}"><b>${esc(e.name)}</b><span class="note">${esc(sub)}</span></button></div>${body}</div>`;
+}
+function woAddHtml(w){
+  if (!woAdding) return `<button type="button" class="cta ghost woadd" id="wo-add">+ Add exercise</button>`;
+  return `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise name" maxlength="60" autocomplete="off" enterkeyhint="done">
+    <div class="wosug" id="wo-sug">${woSugHtml(w, "")}</div>
+    <button type="button" class="linkbtn" id="wo-addcancel" style="padding-left:0">Cancel</button></div>`;
+}
+function woSugHtml(w, q){
+  const have = w.exercises.map(e => e.name), all = woSuggest(w.label, have), ql = lc(q);
+  const list = (ql ? all.filter(n => lc(n).includes(ql)) : all).slice(0, 8);
+  const typed = q.trim() && !all.concat(have).some(n => lc(n) === ql) ? `<button type="button" class="chip on" data-addex="${esc(q.trim())}">+ Add “${esc(q.trim())}”</button>` : "";
+  return typed + list.map(n => `<button type="button" class="chip" data-addex="${esc(n)}">${esc(n)}</button>`).join("");
+}
+function viewWorkout(){
+  const w = myWo(woDay); if (!w){ woDay = null; return render(); }
+  $("title").textContent = "Workout"; $("tabbar").hidden = true;
+  const n = woDone(w).length, fin = !!w.finished_at, d = parse(w.day);
+  const when = key(d) === key(today()) ? "Today" : DAYS_LONG[dow(d)];
+  main().innerHTML = `<div class="view wo" style="${pc(me())}">
+    <button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>
+    <div class="wohead"><span class="label">${fin ? "Finished" : "In progress"} · ${when}</span>
+      <div class="work sign">${esc(w.label || "Workout")}</div>
+      <p class="note" id="wo-status"></p></div>
+    ${w.exercises.length ? w.exercises.map((e, i) => woExHtml(e, i, w)).join("") : ""}
+    ${woAddHtml(w)}
+    <p class="note wopriv">${LOCK} Only you and your Buds see the details.${fin ? "" : " Your crew gets one notification when you finish."}</p>
+    ${fin ? "" : `<button type="button" class="linkbtn wodiscard" id="wo-discard">${woDiscardAsk ? "Tap again to delete this workout" : "Discard workout"}</button>`}
+    <div class="wofoot"><button class="cta" id="wo-finish" ${fin || n ? "" : "disabled"}>${fin ? "Done" : "Finish workout"}</button></div></div>`;
+  woStatus();
+  $("wo-back").onclick = closeWorkout;
+  $("wo-finish").onclick = finishWorkout;
+  if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
+  const at = s => s.split(":").map(Number);
+  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const i = +b.dataset.tick, e = w.exercises[i]; if (!e) return;
+    e.done = !e.done; woDiscardAsk = false;
+    if (e.done){ try { navigator.vibrate && navigator.vibrate(10); } catch(_){}
+      const nx = w.exercises.findIndex((x, j) => j > i && !x.done); woOpenEx = nx >= 0 ? nx : (woOpenEx === i ? null : woOpenEx); }
+    woChanged(true); });
+  main().querySelectorAll("[data-openex]").forEach(b => b.onclick = () => { const i = +b.dataset.openex; woOpenEx = woOpenEx === i ? null : i; render(); });
+  main().querySelectorAll("[data-reps],[data-kg]").forEach(f => {
+    f.oninput = () => { const [i, j] = at(f.dataset.reps || f.dataset.kg), s = w.exercises[i]?.sets?.[j]; if (!s) return;
+      if (f.dataset.reps) s.reps = numIn(f.value); else s.kg = numIn(f.value, true); woChanged(false); };
+    f.onfocus = () => { try { f.select(); } catch(_){} };
+  });
+  main().querySelectorAll("[data-addset]").forEach(b => b.onclick = () => { const e = w.exercises[+b.dataset.addset]; if (!e) return;
+    const prev = e.sets[e.sets.length - 1]; e.sets.push(prev ? { ...prev } : { reps: null, kg: null }); woChanged(true); });
+  main().querySelectorAll("[data-rmset]").forEach(b => b.onclick = () => { const [i, j] = at(b.dataset.rmset); w.exercises[i]?.sets.splice(j, 1); woChanged(true); });
+  main().querySelectorAll("[data-rmex]").forEach(b => b.onclick = () => { w.exercises.splice(+b.dataset.rmex, 1); woOpenEx = null; woChanged(true); });
+  if ($("wo-add")) $("wo-add").onclick = () => { woAdding = true; render(); const f = $("wo-newex"); if (f) f.focus(); };
+  const addEx = name => { name = String(name || "").trim().slice(0, 60); if (!name) return;
+    const l = lastFor(name, w.day);
+    w.exercises.push({ name, done: false, sets: l ? l.sets.map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null })) : emptySets(3) });
+    woOpenEx = w.exercises.length - 1; woAdding = false; woChanged(true); };
+  const wireSug = () => main().querySelectorAll("[data-addex]").forEach(b => b.onclick = () => addEx(b.dataset.addex));
+  wireSug();
+  if ($("wo-newex")){ const f = $("wo-newex");
+    f.oninput = () => { $("wo-sug").innerHTML = woSugHtml(w, f.value); wireSug(); };
+    f.onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); addEx(f.value); } };
+    $("wo-addcancel").onclick = () => { woAdding = false; render(); }; }
+}
+
+// Profile: recent workouts (you, or a Bud)
+function woProfileHtml(o){
+  if (!WORKOUTS || !o) return "";
+  const self = o.id === myId; if (!self && !isMutual(o)) return "";
+  const list = woOf(o.id).filter(w => woDone(w).length).slice(0, 3);
+  if (!list.length) return self ? "" : "";
+  const when = k => { const d = parse(k), diff = Math.round((today() - d) / 864e5);
+    return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : diff < 7 ? DAYS_LONG[dow(d)] : d.toLocaleDateString("en-AU", { day: "numeric", month: "short" }); };
+  return `<div class="sec"><h2 class="sign">Workouts</h2><span class="label">${self ? "You + your Buds see this" : "Buds only"}</span></div>
+    <div class="card wolist">${list.map(w => `<div class="wolog"><div class="wologhead"><b>${esc(w.label || "Workout")}</b><span class="note">${when(w.day)}${w.finished_at ? "" : " · in progress"}</span></div>
+      ${woDone(w).map(e => `<div class="wologex"><span>${esc(e.name)}</span><span class="mono note">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>`).join("")}</div>`;
 }
 
 // ================= Chats =================
@@ -1808,7 +2037,7 @@ async function loadMemberCount(){
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId);
+  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay;
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
@@ -2564,6 +2793,7 @@ function viewProfile(inYou){
       <div><b class="sign">${bestStreak(o)}</b><span class="label">Best run</span></div></div>
     ${youBar}
     <button class="cta ghost" id="pf-trophies" style="font-size:18px">See trophies</button>
+    ${woProfileHtml(o)}
     <div class="sec"><h2 class="sign">Split</h2>${o.splitHidden && !self ? '<span class="label">Hidden</span>' : ""}</div>
     ${o.splitHidden && !self ? `<div class="card"><p class="note" style="margin:0">${esc(o.name)} keeps their split private.</p></div>` : `<div class="list">${split}</div>`}`}</div>`;
   if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
@@ -2769,6 +2999,7 @@ function render(){
     $("load-retry").onclick = () => { main().innerHTML = `<div class="skel">Loading the crew…</div>`; loadAll(); }; return; }
   if (!me()){ $("title").textContent = "Welcome"; $("tabbar").hidden = true; profileId = null; chatKey = null; circleId = null; return viewJoin(); }
   if (wnActive) return viewWhatsNew();
+  if (woDay && !profileId && !circleId && !chatKey) return viewWorkout();
   updateChatBadge();
   if (chatKey && !profileId && !circleId) return viewChat(chatKey);
   if (profileId) return viewProfile();
@@ -2779,7 +3010,7 @@ function render(){
   pinBottom();
   maybeShowPushSheet();
 }
-function setTab(t){ if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -2800,7 +3031,7 @@ let sb = null, session = null, authKnown = false;
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
     if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
-      loadGen++; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      loadGen++; workouts = []; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
       messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
       document.documentElement.classList.remove("chat-open");
     }
@@ -2814,7 +3045,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b35";   // bump together with version.json on every release
+const APP_VERSION = "b36";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
