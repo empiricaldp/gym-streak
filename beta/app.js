@@ -570,7 +570,7 @@ function viewYou(){
       </div>
       <p class="note" style="text-align:center">Goals, height and weight are in ⚙️ Settings → Goal &amp; body.</p></div>`;
       main().querySelectorAll("[data-edit]").forEach(b => b.onclick = () => startOnboarding(true, b.dataset.edit));
-      $("you-back").onclick = () => { youView = "profile"; render(); pageTop(); };
+      $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
       return;
     }
     $("title").textContent = "Settings";
@@ -586,7 +586,7 @@ function viewYou(){
       <div class="card"><p class="note" style="margin:0 0 10px">See the quick tour of Buds, Profiles, Circles and Chats again.</p><button class="cta ghost" id="wn-replay" style="font-size:18px">Replay the tour</button></div>
       <div class="sec"><h2 class="sign">Invite</h2></div>
       ${invite}${WORKOUTS ? `<div class="sec"><h2 class="sign">Account</h2></div>` : ""}${acct}</div>`;
-    $("you-back").onclick = () => { youView = "profile"; render(); pageTop(); };
+    $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
     $("wn-replay").onclick = startTour;
     wireNotifCard();
     wireHealth();
@@ -599,7 +599,7 @@ function viewYou(){
     });
   }
   $("copylink").onclick = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied"); } catch(e){ toast("Copy failed"); } };
-  if ($("del-open")) $("del-open").onclick = () => { youView = "delete"; render(); pageTop(); };
+  if ($("del-open")) $("del-open").onclick = () => { youView = "delete"; render(); window.scrollTo(0,0); };
   $("logout").onclick = async () => {
     // stop this device getting your notifications once you've logged out
     try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager?.getSubscription();
@@ -1323,7 +1323,7 @@ function wireSplitStep(){
   main().querySelectorAll("[data-level]").forEach(b => b.onclick = () => { ob.splitLevel = b.dataset.level; render(); });
   main().querySelectorAll("[data-split]").forEach(b => b.onclick = () => {
     const x = SPLITS.find(s => s.name === b.dataset.split); if (!x) return;
-    ob.plan = [...x.days]; ob.opt = ob.opt.map(() => false); ob.splitMode = "review"; render(); pageTop(); });
+    ob.plan = [...x.days]; ob.opt = ob.opt.map(() => false); ob.splitMode = "review"; render(); window.scrollTo(0,0); });
   main().querySelectorAll("[data-day]").forEach(b => b.onclick = () => { const i = +b.dataset.day; ob.active = ob.active === i ? -1 : i; ob.focusType = ob.active === i; render(); });
   // Typing a day: show the tidied name live WITHOUT re-drawing the screen (that would close the keyboard);
   // save + re-draw when they press Enter or tap away.
@@ -1438,7 +1438,7 @@ function viewDelete(){
       <label class="label" for="del-word" style="display:block;margin-top:12px">Type DELETE to confirm</label>
       <input class="field" id="del-word" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="DELETE">
       <button class="cta sfdanger" id="del-go" disabled style="margin-top:12px">Delete my account</button></div></div>`;
-  $("del-back").onclick = () => { youView = "settings"; render(); pageTop(); };
+  $("del-back").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); };
   $("del-word").oninput = e => { $("del-go").disabled = e.target.value.trim() !== "DELETE"; };
   $("del-go").onclick = async () => {
     const btn = $("del-go"); btn.disabled = true; btn.textContent = "Deleting…";
@@ -1726,7 +1726,7 @@ const namesList = () => `<datalist id="wo-names">${myNames().map(n => `<option v
 function editPlan(label, then, day){
   const p = planFor(label);
   woPlan = { label, then, day, exercises: p ? p.exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })) : [blankEx()] };
-  woDay = then === "workout" ? woDay : null; render(); pageTop();
+  woDay = then === "workout" ? woDay : null; render(); window.scrollTo(0, 0);
   if (!p) setTimeout(() => { const f = main().querySelector("[data-name]"); if (f) f.focus(); }, 50);
 }
 function viewPlan(){
@@ -1745,7 +1745,7 @@ function viewPlan(){
     <button type="button" class="cta ghost woadd" id="pl-add">+ Add exercise</button>${namesList()}
     <p class="note wopriv">${LOCK} Your plan is private. Buds only see workouts you finish.</p>
     <div class="wofoot"><button class="cta" id="pl-save" ${ok() ? "" : "disabled"}>${p.then === "start" ? "Save & start" : "Save plan"}</button></div></div>`;
-  $("pl-back").onclick = () => { const back = p.then === "workout"; woPlan = null; if (!back) woDay = null; render(); pageTop(); };
+  $("pl-back").onclick = () => { const back = p.then === "workout"; woPlan = null; if (!back) woDay = null; render(); window.scrollTo(0, 0); };
   $("pl-add").onclick = () => { p.exercises.push(blankEx()); render(); const f = main().querySelectorAll("[data-name]"); f[f.length - 1]?.focus(); };
   $("pl-save").onclick = savePlan;
   main().querySelectorAll("[data-name]").forEach(f => f.oninput = () => { const e = p.exercises[+f.dataset.name]; if (e) e.name = f.value; $("pl-save").disabled = !ok(); });
@@ -1768,7 +1768,7 @@ async function savePlan(){
   if (p.then === "workout"){ const w = myWo(woDay);
     if (w && !woDone(w).length && !w.finished_at){ w.exercises = planFor(p.label).exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })); woChanged(false); }
     toast("Plan saved"); render(); return; }
-  toast("Plan saved"); render(); pageTop();
+  toast("Plan saved"); render(); window.scrollTo(0, 0);
 }
 
 // ================= The workout =================
@@ -1927,9 +1927,9 @@ function startWorkout(d){
     workouts.push(w); woDay = k; woChanged(false);
   }
   woDay = k; woAdding = false; woDiscardAsk = false; woOpenEx = null; woSummary = null;
-  render(); pageTop();
+  render(); window.scrollTo(0, 0);
 }
-function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; restSheet = null; render(); pageTop(); }
+function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; restSheet = null; render(); window.scrollTo(0, 0); }
 async function finishWorkout(){
   const w = myWo(woDay); if (!w) return;
   if (w.finished_at) return closeWorkout();                          // already finished: "Done" just closes (edits are saved)
@@ -1946,7 +1946,7 @@ async function finishWorkout(){
   woSummary = { label: w.label, day: w.day, mins: duration_s ? Math.round(duration_s / 60) : 0, ex: woDone(w).length, sets, askPlan: named.length > 0 && !had, exercises: w.exercises };
   const d = parse(w.day); woDay = null; woAdding = false; restSheet = null;
   if (!ticked(me(), d)) await toggleDay(d);                          // logs the day → streak + the one notification
-  render(); pageTop();
+  render(); window.scrollTo(0, 0);
 }
 async function discardWorkout(){
   const w = myWo(woDay); if (!w) return;
@@ -1985,7 +1985,7 @@ function viewSummary(){
       <div class="row2"><button class="cta ghost ssm" id="sum-no">Not now</button><button class="cta ssm" id="sum-yes">Save</button></div></div>` : ""}
     <p class="note" style="text-align:center">Your crew got one notification. Nice work.</p>
     <button class="cta" id="sum-done">Done</button></div>`;
-  $("sum-done").onclick = () => { woSummary = null; render(); pageTop(); };
+  $("sum-done").onclick = () => { woSummary = null; render(); window.scrollTo(0, 0); };
   if ($("sum-no")) $("sum-no").onclick = () => { s.askPlan = false; render(); };
   if ($("sum-yes")) $("sum-yes").onclick = async () => { $("sum-yes").disabled = true;
     const { error } = await putPlan(s.label, s.exercises); if (error) { $("sum-yes").disabled = false; return showWarn(oops("save your plan", error)); }
@@ -2505,7 +2505,7 @@ function viewChat(k){
   main().innerHTML = `<div class="chatscreen" id="chatscreen"><div class="chatinner">
     <div class="chatbar"><button type="button" class="chatback" id="chat-back" aria-label="Back to chats">‹</button>${who}${SAFETY && o ? moreBtn(o, "chatmore") : ""}</div>
     <div class="chatlog" id="chatlog">${chatLogHtml(k)}</div>${composer}</div></div>`;
-  $("chat-back").onclick = () => { chatKey = null; document.documentElement.classList.remove("chat-open"); render(); pageTop(); };
+  $("chat-back").onclick = () => { chatKey = null; document.documentElement.classList.remove("chat-open"); render(); window.scrollTo(0, 0); };
   const inp = $("chat-input"), form = $("chat-form");
   if (inp){
     const grow = () => { const end = chatAtBottom(); inp.style.height = "auto"; inp.style.height = Math.min(inp.scrollHeight, 140) + "px"; if (end) chatToBottom(); };
@@ -3160,7 +3160,7 @@ function viewCirclesTab(seg){
       <div class="joinrow"><input class="field" id="join-q" placeholder="Invite code" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="chip" id="join-go">Join</button></div></div></div>`;
   $("join-go").onclick = () => { const m = $("join-q").value.match(/([a-f0-9]{10})/i);
     if (!m) return toast("That code doesn't look right"); pendingJoin = m[1].toLowerCase(); render(); };
-  $("circle-new").onclick = () => { circleDraft = { name: "", emoji: "🔥", picked: new Set() }; circleMode = "new"; circleId = null; render(); pageTop(); };
+  $("circle-new").onclick = () => { circleDraft = { name: "", emoji: "🔥", picked: new Set() }; circleMode = "new"; circleId = null; render(); window.scrollTo(0,0); };
   main().querySelectorAll("[data-crewview]").forEach(b => b.onclick = () => { crewView = b.dataset.crewview; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} render(); });
   { const v = main().querySelector(".view"); if (v){ v.setAttribute("role", "tabpanel"); v.setAttribute("aria-labelledby", "crewtab-" + crewView); } }
 }
@@ -3209,7 +3209,7 @@ function viewCircleNew(){
     const { data, error } = await sb.rpc("create_circle", { p_name: d.name.trim(), p_emoji: d.emoji, p_members: [...d.picked] });
     if (error){ go.disabled = false; go.textContent = "Create circle"; return showWarn(oops("create the circle", error)); }
     circleDraft = null; circleMode = "view"; circleId = data; toast(`${circleLabel({ emoji: d.emoji, name: d.name })} created`);
-    await loadAll(); pageTop();
+    await loadAll(); window.scrollTo(0,0);
   };
 }
 function viewCircleAdd(c){
@@ -3292,9 +3292,9 @@ function viewCircle(c){
     const { error } = await sb.rpc("mute_circle", { p_circle: c.id, p_muted: to });
     if (error){ if (mine) mine.muted = !to; render(); return showWarn(oops("change that", error)); }
     toast(to ? "Circle muted" : "Circle notifications on"); };
-  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleMode = "edit"; render(); pageTop(); };
-  if ($("c-addppl")) $("c-addppl").onclick = () => { circleDraft = { picked: new Set() }; circleMode = "add"; render(); pageTop(); };
-  $("c-leave").onclick = () => { circleAsk = "leave"; render(); pageTop(); };
+  if ($("c-edit")) $("c-edit").onclick = () => { circleDraft = null; circleMode = "edit"; render(); window.scrollTo(0,0); };
+  if ($("c-addppl")) $("c-addppl").onclick = () => { circleDraft = { picked: new Set() }; circleMode = "add"; render(); window.scrollTo(0,0); };
+  $("c-leave").onclick = () => { circleAsk = "leave"; render(); window.scrollTo(0,0); };
   if ($("c-ask-no")) $("c-ask-no").onclick = () => { circleAsk = null; render(); };
   if ($("c-leave-yes")) $("c-leave-yes").onclick = async () => {
     const { error } = await sb.rpc("leave_circle", { p_circle: c.id });
@@ -3304,7 +3304,7 @@ function viewCircle(c){
     const who = circleAsk; const { error } = await sb.rpc("remove_from_circle", { p_circle: c.id, p_user: who });
     if (error) return showWarn(oops("remove", error));
     toast(`Removed ${nameOf(who)}`); circleAsk = null; await loadAll(); };
-  main().querySelectorAll("[data-remove]").forEach(b => b.onclick = e => { e.stopPropagation(); circleAsk = b.dataset.remove; render(); pageTop(); });
+  main().querySelectorAll("[data-remove]").forEach(b => b.onclick = e => { e.stopPropagation(); circleAsk = b.dataset.remove; render(); window.scrollTo(0,0); });
   main().querySelectorAll("[data-role]").forEach(b => b.onclick = async e => {
     e.stopPropagation(); const { error } = await sb.rpc("set_circle_role", { p_circle: c.id, p_user: b.dataset.role, p_role: b.dataset.to });
     if (error) return showWarn(oops("change that", error));
@@ -3341,13 +3341,13 @@ function viewJoinCircle(){
     $("j-yes").disabled = true;
     const { data, error } = await sb.rpc("join_circle", { p_code: j.code });
     if (error){ $("j-yes").disabled = false; return showWarn(oops("join", error)); }
-    joinPreview = null; circleId = data; tab = "crew"; crewView = "circles"; toast(`Joined ${circleLabel(j)}`); await loadAll(); pageTop(); };
+    joinPreview = null; circleId = data; tab = "crew"; crewView = "circles"; toast(`Joined ${circleLabel(j)}`); await loadAll(); window.scrollTo(0,0); };
 }
 checkJoinLink();
 window.addEventListener("hashchange", () => { checkJoinLink(); if (pendingJoin) render(); });   // link opened while the app is already open
 document.addEventListener("click", e => {          // open a circle from any card
   const c = e.target.closest("[data-circle]"); if (!c || !c.closest("#main")) return;
-  circleId = c.dataset.circle; circleMode = "view"; circleAsk = null; if (tab !== "crew" && !chatKey){ tab = "crew"; crewView = "circles"; } render(); pageTop();
+  circleId = c.dataset.circle; circleMode = "view"; circleAsk = null; if (tab !== "crew" && !chatKey){ tab = "crew"; crewView = "circles"; } render(); window.scrollTo(0,0);
 });
 
 // ================= Buds: actions =================
@@ -3394,7 +3394,7 @@ function openProfile(id){
     fetchIn("checkins", "user_id,day", "user_id", [id], q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))
       .then(rows => { const m = members.get(id); if (m){ rows.forEach(r => m.days[r.day] = 1); if (profileId === id) render(); } }, () => {});
   }
-  profileId = id; unbudAsk = null; render(); pageTop();
+  profileId = id; unbudAsk = null; render(); window.scrollTo(0,0);
 }
 function goFind(){ profileId = null; crewView = "everyone"; try { localStorage.setItem("gs-crewview", crewView); } catch(e){} setTab("crew"); }   // no auto-keyboard: tapping the search box is enough
 // One click handler for the whole app: profiles, bud buttons, requests (works on every screen)
@@ -3405,7 +3405,7 @@ document.addEventListener("click", e => {
   if (t.hasAttribute("data-profile") && (wnActive || (inner && inner !== t))) return;   // a button inside a row does its own thing
   e.stopPropagation();
   if (t.dataset.bud) budUp(t.dataset.bud);
-  else if (t.dataset.unbud){ if (!profileId && members.get(t.dataset.unbud)?.iBud === "accepted"){ profileId = t.dataset.unbud; unbudAsk = t.dataset.unbud; render(); pageTop(); } else unBud(t.dataset.unbud); }
+  else if (t.dataset.unbud){ if (!profileId && members.get(t.dataset.unbud)?.iBud === "accepted"){ profileId = t.dataset.unbud; unbudAsk = t.dataset.unbud; render(); window.scrollTo(0,0); } else unBud(t.dataset.unbud); }
   else if (t.dataset.unbudYes) unBud(t.dataset.unbudYes, true);
   else if (t.hasAttribute("data-unbud-no")){ unbudAsk = null; render(); }
   else if (t.dataset.accept) answerRequest(t.dataset.accept, true);
@@ -3414,7 +3414,7 @@ document.addEventListener("click", e => {
   else if (t.dataset.pnudge){ t.disabled = true; sendNudge(t.dataset.pnudge); }
   else if (t.hasAttribute("data-goto-find")) goFind();
   else if (t.hasAttribute("data-goto-buds")){ crewView = "buds"; setTab("crew"); }
-  else if (t.dataset.list){ youView = "list:" + t.dataset.list; render(); pageTop(); }
+  else if (t.dataset.list){ youView = "list:" + t.dataset.list; render(); window.scrollTo(0,0); }
   else if (t.dataset.profile) openProfile(t.dataset.profile);
 });
 
@@ -3470,8 +3470,8 @@ function viewProfile(inYou){
   if ($("pf-back")) $("pf-back").onclick = () => { profileId = null; render(); };
   main().querySelectorAll("[data-editplan]").forEach(b => b.onclick = () => editPlan(b.dataset.editplan, "back"));
   if ($("pf-trophies")) $("pf-trophies").onclick = () => { trophyFor = o.id; profileId = null; setTab("trophies"); };
-  if (inYou){ $("you-edit").onclick = () => { youView = "edit"; render(); pageTop(); };
-              $("you-settings").onclick = () => { youView = "settings"; render(); pageTop(); }; }
+  if (inYou){ $("you-edit").onclick = () => { youView = "edit"; render(); window.scrollTo(0,0); };
+              $("you-settings").onclick = () => { youView = "settings"; render(); window.scrollTo(0,0); }; }
 }
 
 // Buds · Spotting · Spotters, like Instagram's followers/following. On your own profile they open the lists.
@@ -3492,7 +3492,7 @@ function viewPeopleList(kind){
     <p class="note" style="margin:0">${sub}</p>
     ${list.length ? `<div class="list peoplelist">${list.map(personRow).join("")}</div>`
       : `<div class="card"><p class="note" style="margin:0">No one here yet.</p><button class="cta ghost" data-goto-find style="margin-top:10px;font-size:18px">Find people</button></div>`}</div>`;
-  $("you-back").onclick = () => { youView = "profile"; render(); pageTop(); };
+  $("you-back").onclick = () => { youView = "profile"; render(); window.scrollTo(0,0); };
 }
 
 // ================= What's new (shown once to existing members) =================
@@ -3519,10 +3519,10 @@ const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch
 async function finishShortTour(){
   markTourHere(); wnActive = false; wnDone = true; wnShort = false; document.documentElement.classList.remove("wn-open"); tab = "today";
   const m = me(); if (m) m.seenUpdate = TOUR_V;
-  render(); pageTop();
+  render(); window.scrollTo(0,0);
   await retryNet(() => sb.from("profiles").update({ seen_update: TOUR_V }).eq("id", myId)).catch(() => {});
 }
-function startTour(){ wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); pageTop(); }
+function startTour(){ wnShort = false; wnActive = true; wnStep = 1; wnPv = null; youView = "profile"; render(); window.scrollTo(0,0); }
 if (/whatsnew/.test(location.hash)){ try { history.replaceState(null, "", location.pathname + location.search); } catch(e){} setTimeout(() => { const go = () => (ready && me()) ? startTour() : setTimeout(go, 300); go(); }, 0); }
 function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
@@ -3549,8 +3549,8 @@ function viewWhatsNew(){
     const fit = () => { const h = $("wn")?.querySelector(".wnbig"); if (!h) return; h.style.fontSize = "";
       let fs = parseFloat(getComputedStyle(h).fontSize); while (h.scrollWidth > h.clientWidth + 1 && fs > 34){ fs -= 3; h.style.fontSize = fs + "px"; } };
     fit(); if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
-    $("wn-next").onclick = () => { if (wnShort && wnStep === PRIV - 1) return finishShortTour(); wnStep++; render(); pageTop(); };
-    if ($("wn-skip")) $("wn-skip").onclick = () => { if (wnShort) return finishShortTour(); wnStep = PRIV; render(); pageTop(); };
+    $("wn-next").onclick = () => { if (wnShort && wnStep === PRIV - 1) return finishShortTour(); wnStep++; render(); window.scrollTo(0,0); };
+    if ($("wn-skip")) $("wn-skip").onclick = () => { if (wnShort) return finishShortTour(); wnStep = PRIV; render(); window.scrollTo(0,0); };
     return;
   }
   document.documentElement.classList.remove("wn-open");
@@ -3568,8 +3568,8 @@ function viewWhatsNew(){
   if (wnStep === FIND) wireFind();
   $("wn-next").onclick = async () => {
     if (wnStep === PRIV){ if (wnPv.priv === null) return; $("wn-next").disabled = true; if (!await savePrivacy(wnPv, { seen_update: TOUR_V })){ $("wn-next").disabled = false; return; } }
-    if (wnStep === FIND){ markTourHere(); document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); pageTop(); return; }
-    wnStep++; render(); pageTop();
+    if (wnStep === FIND){ markTourHere(); document.documentElement.classList.remove("wn-open"); wnActive = false; wnDone = true; findQ = ""; tab = "today"; render(); window.scrollTo(0,0); return; }
+    wnStep++; render(); window.scrollTo(0,0);
   };
 }
 
@@ -3587,16 +3587,14 @@ if (window.visualViewport) visualViewport.addEventListener("resize", () => {   /
 // screen by ~59pt and never gives it back, so the bottom bar / text box float above a gap. Fix: once the
 // keyboard has closed, hide and re-show the whole page in one go (no paint in between) so iOS re-measures.
 const standalone = () => device.iphone && device.standalone;     // iPhone Home Screen app only (Android/desktop are fine)
-// The page no longer scrolls (see .scroller in styles.css): "go to top" scrolls the content box instead.
-function pageTop(){ const sc = document.getElementById("scroller"); if (sc) sc.scrollTop = 0; else window.scrollTo(0, 0); }
 let fullH = Math.max(window.innerHeight, standalone() ? (screen.height || 0) : 0);
 window.addEventListener("resize", () => { fullH = Math.max(fullH, window.innerHeight); });
 function typing(){ const a = document.activeElement; return !!(a && a.matches && a.matches("input, textarea, select")); }
 function remeasure(){
   if (!standalone() || typing() || fullH - window.innerHeight <= 4) return;          // only when actually stuck
-  const sc = $("scroller"), y = sc ? sc.scrollTop : 0, log = $("chatlog"), ly = log ? log.scrollTop : 0;
+  const y = window.scrollY, log = $("chatlog"), ly = log ? log.scrollTop : 0;
   document.body.style.display = "none"; void document.body.offsetHeight; document.body.style.display = "";
-  if (sc) sc.scrollTop = y; if (log) log.scrollTop = ly;
+  window.scrollTo(0, y); if (log) log.scrollTop = ly;
   if (typeof fitChat === "function") fitChat();
 }
 // Belt and braces: if iOS still hasn't given the space back, measure the gap ourselves and push everything that
@@ -3616,14 +3614,8 @@ document.addEventListener("focusout", () => { setTimeout(settle, 150); setTimeou
 document.addEventListener("focusin", () => setTimeout(pinBottom, 50));
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") setTimeout(settle, 200); });
 window.addEventListener("load", () => setTimeout(settle, 300));
-// Only re-check right after the keyboard opened/closed. Plain scrolling must never move the tab bar
-// (before b43 every tiny height change while scrolling re-ran this and nudged the bar up/down).
-let lastKb = 0;
-document.addEventListener("focusin", () => { lastKb = Date.now(); });
-document.addEventListener("focusout", () => { lastKb = Date.now(); });
-const kbRecent = () => typing() || Date.now() - lastKb < 2500;
-window.addEventListener("resize", () => { if (kbRecent()) setTimeout(pinBottom, 50); });
-if (window.visualViewport) visualViewport.addEventListener("resize", () => { if (kbRecent()) setTimeout(pinBottom, 50); });
+window.addEventListener("resize", () => setTimeout(pinBottom, 50));
+if (window.visualViewport) visualViewport.addEventListener("resize", () => setTimeout(pinBottom, 50));
 // A background refresh shouldn't redraw the screen while you're typing (it closed the keyboard and wiped
 // half-typed text in search boxes, the join code, weight/height...). Redraw as soon as you're done instead.
 let renderPending = false;
@@ -3697,7 +3689,7 @@ function render(){
 }
 let trophyBack = "you";
 { const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
-function setTab(t){ if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); pageTop(); }
+function setTab(t){ if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -3732,7 +3724,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b43";   // bump together with version.json on every release
+const APP_VERSION = "b44";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

@@ -989,15 +989,3 @@ header.top .me{grid-area:me;justify-self:end}
 .online.hcount[hidden]{display:none}
 header.top .me{max-width:34vw;min-width:0}
 header.top .me .menm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-
-/* ---- App shell (beta b43): the page is locked to the screen and only .scroller scrolls ----
-   Why: on iPhone Home Screen apps the whole page used to scroll, and its rubber-band bounce (plus a keyboard
-   workaround reacting to every height change) dragged the bottom tab bar up and down. Now the page never moves;
-   the bounce happens inside .scroller only, under a tab bar that is fixed to the screen. */
-html{height:100%;min-height:calc(100% + var(--kbgap,0px));overflow:hidden;overscroll-behavior:none;background:var(--bg)}   /* taller only while iOS's keyboard bug is active */
-html body{height:100%;min-height:0;overflow:hidden;overscroll-behavior:none;padding:0}
-/* absolute (not fixed) on purpose: a fixed box would trap pop-up sheets inside it, under the tab bar */
-.scroller{position:absolute;left:0;right:0;top:0;bottom:calc(0px - var(--kbgap,0px));overflow-x:hidden;overflow-y:auto;
-  overscroll-behavior-y:contain;
-  padding:calc(10px + env(safe-area-inset-top,0px)) 16px calc(var(--tabh,76px) + 40px + env(safe-area-inset-bottom,0px))}
-html.wn-open .scroller{padding-top:10px}
