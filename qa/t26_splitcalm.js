@@ -1,0 +1,12 @@
+const { chromium, open } = require("./h.js");
+const BASE = `window.__seen=2;window.__reactions=[];window.__messages=[];try{localStorage.setItem("gs-tour-beta-2-u1","1");localStorage.setItem("gs-tip-spot-u1","1");localStorage.setItem("gs-split-guide-u1","1");}catch(e){}`;
+(async () => { const b = await chromium.launch();
+  const p = await open(b, { pre: BASE + "window.__workouts=[];", wait: 1500, scheme: "light" });
+  await p.click("#t-split"); await p.waitForTimeout(400);
+  console.log("opened by itself:", await p.$$eval(".sday.open", e => e.length), "| today row:", await p.$eval(".sday.today", e => e.innerText.replace(/\n/g, " ")), "| 'Add' visible:", await p.$$eval(".sadd, .ssoft", e => e.length));
+  await p.screenshot({ path: __dirname + "/shots/split_calm_closed.png" });
+  await p.click(".sday.today .sdhead"); await p.waitForTimeout(250);
+  console.log("tap today →", await p.$eval(".sday.open .sbody", e => e.innerText.replace(/\n/g, " | ")));
+  await p.screenshot({ path: __dirname + "/shots/split_calm_open.png" });
+  await p.click(".sday.today .schg"); await p.waitForTimeout(250); console.log("Change still opens:", !!(await p.$(".chgsheet")));
+  console.log("errors:", p.errs); await b.close(); })();

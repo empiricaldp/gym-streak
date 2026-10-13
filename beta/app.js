@@ -2230,7 +2230,7 @@ document.addEventListener("click", e => {
 });
 
 // ================= Split tab (beta) =================
-// Your week, simplest first: just the days. Tap a day to see it; details are optional ("+ Add details").
+// Your week, simplest first: just the days. Nothing opens by itself; tap a day to see it; exercises are optional.
 // Today opens by itself and moves on at midnight. "Change" swaps a day: just today (a one-off, saved as a
 // day_swap) or every week (your split changes). Start workout sits at the bottom. The ⓘ replays a 3-step guide.
 let splitOpen = null, splitOpenDay = null, chg = null, guideStep = -1, lastDayKey = null;
@@ -2245,8 +2245,8 @@ function splitDayHtml(m, d, tk){
   const tag = swapped ? `<span class="swaptag">${isT ? "swapped today" : "swapped"}</span>` : s?.opt ? `<span class="swaptag opt">optional</span>` : "";
   const right = done ? `<span class="sdot"></span>` : isT ? `<span class="spill">Today</span>` : open || rest ? "" : `<span class="schev">›</span>`;
   const head = `<button type="button" class="sdhead" data-sday="${k}" aria-expanded="${open}"><span class="sdn">${DAYS[dow(d)]}</span><span class="slab">${esc(lab)}${tag}</span>${right}</button>`;
-  if (!open) return `<div class="sday${isT ? " today" : ""}${rest ? " rest" : ""}${done ? " done" : ""}">${head}</div>`;
   const chgBtn = past ? "" : `<button type="button" class="schg" data-chg="${k}">Change</button>`;
+  if (!open) return `<div class="sday${isT ? " today" : ""}${rest ? " rest" : ""}${done ? " done" : ""}">${isT && !done ? `<div class="sdheadrow">${head}${chgBtn}</div>` : head}</div>`;
   let body = "";
   const w = myWo(k);
   if (past && w && woDone(w).length) body = woDone(w).map(e => `<div class="sex"><span>${esc(e.name)}</span><span>${esc(fmtSets(e.sets))}</span></div>`).join("");
@@ -2254,8 +2254,8 @@ function splitDayHtml(m, d, tk){
   else { const p = planFor(lab);
     body = p ? p.exercises.map(e => `<div class="sex"><span>${esc(e.name)}</span><span>${esc(fmtSets(e.sets))}</span></div>`).join("") +
                `<button type="button" class="linkbtn slink" data-editplan="${esc(lab)}">Edit details</button>`
-             : `<div class="ssoft"><b>Just “${esc(lab)}” is fine.</b><span class="note">Want more? Write the exercises, sets and weights once and they're ready every time.</span>
-                <button type="button" class="cta ghost ssm" data-editplan="${esc(lab)}">+ Add details</button></div>`; }
+             : `<p class="note" style="margin:0">Just show up and log it. That's all you need.</p>
+                <button type="button" class="linkbtn slink sadd" data-editplan="${esc(lab)}">+ Add exercises (optional)</button>`; }
   if (swapped && !past) body += `<button type="button" class="linkbtn slink" data-unswap="${k}">Undo swap (back to ${esc(planLabel(m, d) || "Rest")})</button>`;
   return `<div class="sday open${isT ? " today" : ""}${done ? " done" : ""}"><div class="sdheadrow">${head}${chgBtn}</div><div class="sbody">${body}</div></div>`;
 }
@@ -2269,7 +2269,7 @@ function splitGoHtml(m, t){
 function viewSplit(){
   const m = me(); if (!m) return viewJoin();
   const t = today(), tk = key(t), ws = startOfWeek(t);
-  if (splitOpenDay !== tk){ splitOpen = tk; splitOpenDay = tk; }               // today opens by itself, and moves on at midnight
+  if (splitOpenDay !== tk){ splitOpen = null; splitOpenDay = tk; }             // simple first: nothing opens by itself (today is just highlighted)
   try { document.documentElement.style.setProperty("--tabh", ($("tabbar").offsetHeight || 70) + "px"); } catch(_){}
   const info = `<div class="shead"><span class="label">Week of ${fmt(ws)}</span><button type="button" class="sinfo" id="split-info" aria-label="How Split works">i</button></div>`;
   if (m.watcher){
@@ -2281,7 +2281,7 @@ function viewSplit(){
   const go = splitGoHtml(m, t);
   main().innerHTML = `<div class="view split${go ? " hasgo" : ""}" style="${pc(m)}">${info}<div class="sweek">${days}</div>
     <button type="button" class="cta ghost ssm" id="split-edit">✏️ Edit split</button>
-    <p class="note" style="text-align:center">Tap a day to see it. Details are optional.</p>${go}${chgSheetHtml(m)}${guideHtml()}</div>`;
+    <p class="note" style="text-align:center">Tap a day to see it. Exercises are optional.</p>${go}${chgSheetHtml(m)}${guideHtml()}</div>`;
   main().querySelectorAll("[data-sday]").forEach(b => b.onclick = () => { const k = b.dataset.sday; splitOpen = splitOpen === k ? null : k; render(); });
   main().querySelectorAll("[data-editplan]").forEach(b => b.onclick = () => editPlan(b.dataset.editplan, "back"));
   main().querySelectorAll("[data-chg]").forEach(b => b.onclick = () => openChange(b.dataset.chg));
@@ -2368,13 +2368,13 @@ async function unswap(k){
 // ---- The ⓘ guide: 3 short slides ----
 const GUIDE = [
   ["Your week", "This is your split. That's all you need. Today opens by itself.", "week"],
-  ["Details are optional", "Tap a day, then + Add details to write your exercises, sets and weights once. Skip it if you just want to show up.", "details"],
+  ["Exercises are optional", "Just show up and log it. If you want, tap a day, then + Add exercises to write your sets and weights once.", "details"],
   ["At the gym", "Tap Start workout at the bottom and tick ✓ as you go. Your crew hears once, when you finish. Doing something else today? Tap Change.", "gym"]];
 function guideHtml(){
   if (guideStep < 0) return "";
   const [h, p, art] = GUIDE[guideStep], last = guideStep === GUIDE.length - 1;
   const ill = art === "week" ? `<div class="gmini"><span>Mon</span>Push</div><div class="gmini hl"><span>Tue</span>Pull<i>TODAY</i></div><div class="gmini"><span>Wed</span>Legs</div>`
-    : art === "details" ? `<div class="gmini hl"><span>Wed</span>Legs</div><div class="gsoft">Just “Legs” is fine.<b>+ Add details</b></div>`
+    : art === "details" ? `<div class="gmini hl"><span>Wed</span>Legs</div><div class="gsoft">Just show up and log it.<b>+ Add exercises (optional)</b></div>`
     : `<div class="gmini done"><span>✓</span>Lat pulldown<em>3×10</em></div><div class="gmini"><span>○</span>Barbell row<em>3×8</em></div><div class="gbtn">Finish workout</div>`;
   return `<div class="chgwrap"><div class="chgdim" data-gclose></div><div class="chgsheet guide" role="dialog" aria-label="How Split works">
     <div class="grab"></div><span class="label">How Split works · ${guideStep + 1} of ${GUIDE.length}</span>
@@ -3724,7 +3724,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b44";   // bump together with version.json on every release
+const APP_VERSION = "b45";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

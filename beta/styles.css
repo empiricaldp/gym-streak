@@ -857,6 +857,7 @@ html.wn-open header.top{display:none}
 .sex span:first-child{min-width:0;overflow-wrap:anywhere}
 .sex span:last-child{font-family:var(--mono);font-size:12px;color:var(--muted);flex:none;text-align:right}
 .slink{align-self:center;margin-top:4px}
+.sadd{color:var(--muted);font-size:15px}
 .ssoft{border:1px dashed var(--line2);border-radius:12px;padding:12px;text-align:center;display:flex;flex-direction:column;gap:4px;background:var(--card)}
 .cta.ssm{font-size:16px;padding:11px;margin-top:6px}
 .splitgo{position:fixed;left:0;right:0;bottom:calc(var(--tabh,76px) + 0px);padding:10px 16px;background:linear-gradient(to top,var(--bg) 65%,transparent);z-index:4}
