@@ -1841,13 +1841,14 @@ setInterval(() => {
       paintTimers();
     }
   }
-  paintTimers(true);
+  paintTimers(true); paintMini();
 }, 500);
 function paintTimers(numbersOnly){
   const w = myWo(woDay), s = $("ses-t"), r = $("rest-t"), bar = $("rest-bar");
   if (s && w) s.textContent = clock(sesMs(w));
   if (r){ if (rest){ r.textContent = clock(rest.end - nowMs()); if (bar) bar.style.width = Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total))) + "%"; } }
   const ring = $("rest-ring"); if (ring && rest) ring.style.strokeDashoffset = String(RING_C * (1 - Math.max(0, Math.min(1, (rest.end - nowMs()) / rest.total))));
+  if (!numbersOnly && !woDay) renderMini();
   if (!numbersOnly && woDay && w && !w.finished_at && WO_V2){ render(); return; }        // new workout screen: going ↔ resting is a different screen
   if (!numbersOnly && woDay && $("timers")) $("timers").innerHTML = timersHtml(w);
   if (!numbersOnly && woDay) wireTimers();
@@ -2097,6 +2098,46 @@ function viewWorkoutV2(w){
   if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
   wireWorkoutList(w, false);
 }
+// ---- Mini workout bar (like Apple Music's mini player): while a workout is going and you leave its screen,
+// a small bar above the tabs keeps the timer (or the rest countdown) in view. Tap it to go back. ----
+const MINI_C = 2 * Math.PI * 9;
+function activeWo(){
+  if (!WORKOUTS || !myId) return null;
+  const tk = key(today());
+  return workouts.find(w => w.user_id === myId && w.day === tk && !w.finished_at && (w.session_run_at || (w.session_ms || 0) > 0 || woDone(w).length)) || null;
+}
+function renderMini(){
+  const el = $("womini"); if (!el) return;
+  const w = activeWo(), onWeekGo = tab === "split" && splitView === "week";
+  const show = !!w && !!session && authKnown && !ob && !locked && !woDay && !woSummary && !woPlan && !wnActive && !onWeekGo
+    && !(chatKey && !profileId && !circleId) && !$("tabbar").hidden;
+  el.hidden = !show; document.documentElement.classList.toggle("has-mini", show);
+  if (!show) return;
+  el.setAttribute("style", pc(me()));
+  try { const h = $("tabbar").offsetHeight; if (h) document.documentElement.style.setProperty("--tabh", h + "px"); } catch(_){}
+  if (rest){
+    const left = rest.end - nowMs(), frac = Math.max(0, Math.min(1, left / rest.total));
+    el.className = "womini resting";
+    el.setAttribute("aria-label", `Resting, ${clock(left)} left. Open ${w.label || "workout"}`);
+    el.innerHTML = `<svg class="mring" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="trk"/><circle cx="12" cy="12" r="9" class="val" id="mini-ring" style="stroke-dasharray:${MINI_C};stroke-dashoffset:${MINI_C * (1 - frac)}"/></svg>
+      <span class="mtxt"><b>Rest</b><span>${esc(w.label || "Workout")}</span></span><b class="sign mnum" id="mini-t">${clock(left)}</b><span class="mchev" aria-hidden="true">›</span>`;
+  } else {
+    const run = !!w.session_run_at;
+    el.className = "womini" + (run ? " live" : "");
+    el.setAttribute("aria-label", `${w.label || "Workout"} ${run ? "in progress" : "paused"}, ${clock(sesMs(w))}. Open workout`);
+    el.innerHTML = `<span class="mdot" aria-hidden="true"></span><span class="mtxt"><b>${esc(w.label || "Workout")}</b><span>${run ? "In progress" : "Paused"}</span></span>
+      <b class="sign mnum" id="mini-t">${clock(sesMs(w))}</b><span class="mchev" aria-hidden="true">›</span>`;
+  }
+  el.onclick = () => startWorkout(parse(w.day));
+}
+function paintMini(){
+  const t = $("mini-t"); if (!t || $("womini").hidden) return;
+  const w = activeWo(); if (!w) return renderMini();
+  if (rest){ const left = rest.end - nowMs(); t.textContent = clock(left);
+    const r = $("mini-ring"); if (r) r.style.strokeDashoffset = String(MINI_C * (1 - Math.max(0, Math.min(1, left / rest.total)))); }
+  else t.textContent = clock(sesMs(w));
+}
+
 // exercise ticks / sets / adding: shared by both workout screens
 function wireWorkoutList(w, fin){
   main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const i = +b.dataset.tick, e = w.exercises[i]; if (!e) return;
@@ -3800,7 +3841,7 @@ function render(){
   }
   $("tabbar").hidden = !signedIn || !!ob || gate || !authKnown || locked || wnActive;
   for (const k of Object.keys(TITLES)) $("t-"+k).setAttribute("aria-selected", k===tab && !ob);
-  renderOnline(); renderHeaderCount();
+  renderOnline(); renderHeaderCount(); renderMini();
   if (!sb) return viewSetup();
   if (authMode==="newpass") return viewAuth();
   if (gate) return viewInstall();            // phones in a browser: get it on the Home Screen first
@@ -3871,7 +3912,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b48";   // bump together with version.json on every release
+const APP_VERSION = "b49";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=JetBrains+Mono:wght@500;700&display=swap">
-<link rel="stylesheet" href="styles.css?v=b48">
+<link rel="stylesheet" href="styles.css?v=b49">
 </head>
 <body>
 <canvas id="fx" aria-hidden="true"></canvas>
@@ -39,6 +39,9 @@
 <!-- how many people have joined (filled in by app.js) -->
 <div class="online" id="online" role="status" hidden></div>
 
+<!-- mini workout bar: shows a running workout / rest while you use the rest of the app (filled by app.js) -->
+<button type="button" class="womini" id="womini" hidden></button>
+
 <div class="tabbar" id="tabbar"><nav role="tablist">
   <button class="tab" role="tab" id="t-today" aria-selected="true"><svg viewBox="0 0 24 24"><path d="M2 12h3M19 12h3M5 8v8M19 8v8M8 6v12M16 6v12M8 12h8"/></svg>Today</button>
   <button class="tab" role="tab" id="t-crew" aria-selected="false"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c.6-3.3 3-5 6-5s5.4 1.7 6 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14c2.6 0 4.4 1.4 5 4"/></svg>Crew</button>
@@ -49,10 +52,10 @@
 
 <!-- Supabase's official browser library, then our settings, then the app -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=b48"></script>
+<script src="config.js?v=b49"></script>
 <script>window.GYM_BETA = true;   // beta build: push notifications stay on the main app
 window.GYM_SAFETY = true; // block + report (migration 027 applied 2026-10-13). GYM_DELETE stays off until 028 is approved.</script>
-<script src="split.js?v=b48"></script>
-<script src="app.js?v=b48"></script>
+<script src="split.js?v=b49"></script>
+<script src="app.js?v=b49"></script>
 </body>
 </html>
