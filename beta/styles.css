@@ -983,7 +983,7 @@ html.wn-open header.top{display:none}
    so it can never sit on top of content, names or buttons. */
 header.top{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"date count" "title me";align-items:end;column-gap:12px}
 header.top .date{grid-area:date;align-self:center}
-header.top .hcount{grid-area:count;justify-self:end;align-self:center}
+header.top .hright{grid-area:count;justify-self:end;align-self:center;display:flex;align-items:center;gap:8px}
 header.top h1{grid-area:title;min-width:0}
 header.top .me{grid-area:me;justify-self:end}
 .online.hcount{position:static;transform:none;z-index:auto;box-shadow:none;opacity:1;padding:4px 10px 4px 9px}
@@ -1100,3 +1100,77 @@ html.has-mini body{padding-bottom:calc(136px + env(safe-area-inset-bottom,0px))}
 .wdadd{display:block;width:100%;text-align:left;font:600 15px var(--body);color:var(--fg);padding:16px;border-radius:18px;cursor:pointer}
 .wdadd .note{font-weight:400}
 .wdnote{text-align:center;margin:0}
+
+/* Health (b52): heart pill in the Today header + Health pages */
+.hhealth{position:relative;overflow:hidden;display:flex;align-items:center;height:28px;min-width:28px;box-sizing:border-box;padding:0 10px 0 8px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--fg);cursor:pointer;font:700 13px var(--mono);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.hhealth[hidden]{display:none}
+.hhealth:not(:has(b)){padding:0;width:28px;justify-content:center}
+.hhealth .hhfill{position:absolute;left:0;top:0;bottom:0;background:color-mix(in srgb,var(--p-red) 20%,transparent)}
+.hhealth .hhin{position:relative;display:flex;align-items:center;gap:5px}
+.hhealth svg{fill:var(--p-red);stroke:var(--p-red);stroke-width:1.5;stroke-linejoin:round;flex:none}
+.hhealth::before{content:"";position:absolute;inset:-9px -2px}   /* bigger tap area */
+.hview{display:flex;flex-direction:column;gap:12px}
+.hback{align-self:flex-start;border:0;background:none;color:var(--muted);font:600 17px var(--body);padding:4px 0;margin-top:-6px;cursor:pointer;min-height:44px}
+.hnote{margin:0}
+.hentry{display:flex;flex-direction:column;gap:10px;text-align:left;color:var(--fg);cursor:pointer;font:inherit;width:100%}
+.hehead{display:flex;align-items:center;justify-content:space-between}
+.hehead .sign{font-size:28px}
+.hchev{flex:none;fill:none;stroke:var(--line2);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.hebig{display:flex;align-items:baseline;gap:8px;min-width:0}
+.hebig b.sign{font-size:52px}
+.hebig .heside{margin-left:auto;text-align:right}
+.hcal{border-left:6px solid var(--p-red);display:flex;flex-direction:column;gap:12px}
+.hcal .hcalnum{font-size:64px}
+.hline{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.hbar{display:block;height:10px;border-radius:99px;background:var(--card2);overflow:hidden}
+.hbar span{display:block;height:100%;border-radius:99px;background:var(--p-red)}
+.hseg{display:inline-flex;padding:3px;border-radius:999px;border:1.5px solid var(--line2);flex:none}
+.hseg button{border:0;background:none;color:var(--muted);padding:6px 13px;border-radius:999px;font:700 13px var(--mono);cursor:pointer;min-height:32px}
+.hseg button.on{background:var(--iron);color:var(--on-iron)}
+.hsechead{display:flex;justify-content:space-between;align-items:baseline;margin-top:8px}
+.hsechead h2{margin:0;font-size:28px}
+.hsec{margin-top:6px}
+.hlist{padding:0;overflow:hidden}
+.hrow{display:flex;align-items:center;gap:12px;padding:12px 14px;min-height:52px;box-sizing:border-box;width:100%;border:0;border-bottom:1px solid var(--line);background:none;color:var(--fg);font:inherit;text-align:left}
+.hrow:last-child{border-bottom:0}
+button.hrow{cursor:pointer}
+.hrow > b,.hrow label b{font-size:16px}
+.hrow > .label,.hrow > .hmuted{margin-left:auto}
+.hrow.cur{background:color-mix(in srgb,var(--p-red) 10%,transparent)}
+.hrow.cur b{color:var(--fg)}
+.hrow .htime{margin-left:auto;border:1px solid var(--line2);background:var(--card2);color:var(--fg);border-radius:8px;padding:5px 8px;font:600 15px var(--body)}
+.hrow .htime:disabled{opacity:.45}
+.hmname{display:flex;flex-direction:column;gap:4px;min-width:0}
+.hmname b{font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hmval{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;flex:none}
+.hmval b.sign{font-size:30px}
+.hmunit{font:700 9px var(--mono);letter-spacing:.12em;color:var(--muted);margin-top:3px}
+.hmuted{color:var(--muted);font-weight:600}
+.hadd{font-weight:800;font-size:16px;gap:10px}
+.hplus{width:22px;height:22px;border-radius:50%;background:var(--iron);display:grid;place-items:center;flex:none}
+.hplus svg{stroke:var(--on-iron);stroke-width:2;stroke-linecap:round;fill:none}
+.hbmi{display:flex;flex-direction:column;gap:12px}
+.hband{font-weight:700;font-size:16px}
+.hscale{position:relative;padding-top:14px}
+.hmark{position:absolute;top:0;width:0;height:0;margin-left:-6px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid var(--fg)}
+.hsegs{display:grid;grid-template-columns:18.5fr 6.5fr 5fr 10fr;gap:3px}
+.hsegs span{height:8px;border-radius:99px;background:var(--card2)}
+.hsegs span.on{background:var(--p-red)}
+.hsegs.hticks{gap:0;margin-top:6px}
+.hsegs.hticks span{height:auto;background:none;font:700 9px var(--mono);letter-spacing:.1em;color:var(--muted);text-align:right;padding-right:2px}
+.hempty{display:flex;flex-direction:column;gap:8px}
+.htiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.htile{display:flex;flex-direction:column;gap:6px;text-align:left;color:var(--fg);cursor:pointer;font:inherit;padding:12px;border-radius:14px;min-width:0}
+.htile b.sign{font-size:34px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hedit{font-size:14px;font-weight:700;color:var(--muted)}
+.hsheet .chgtitle{font-size:40px}
+.hamounts{display:flex;gap:10px}
+.hamount{display:flex;align-items:baseline;gap:10px;border:1.5px solid var(--fg);border-radius:12px;padding:8px 14px;flex:1;min-width:0}
+.hamount input{border:0;background:none;color:var(--fg);font-family:var(--display);font-stretch:62%;font-weight:900;font-size:52px;line-height:1;width:100%;min-width:0;padding:0;outline:none}
+.hamount input::placeholder{color:var(--line2)}
+.hamount input::-webkit-outer-spin-button,.hamount input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.hamount input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.hamount .heside{margin-left:auto;white-space:nowrap}
+.hamount.half input{font-size:44px}
+.hdel{align-self:center;color:var(--p-red)}
+@media (max-width:350px){ .hebig b.sign{font-size:44px} .hcal .hcalnum{font-size:54px} .htile b.sign{font-size:28px} .hamount input{font-size:44px} }

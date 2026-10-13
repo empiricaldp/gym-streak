@@ -205,6 +205,12 @@ export function reminderNote(me: Ctx, now = new Date()): Note {
   const w = slotOf(me, dayIn(me.tz))?.w;
   return { title: `${U(w || "Gym day")}. NOT LOGGED.`, body: join(streakBit(streak(me)) || "Start a streak", leftToday(me.tz, now) + " today"), tag: "remind" };
 }
+// Tonight's calorie summary: "TODAY: 1,900 KCAL" / "4 meals · 600 left of 2,500"   (kJ users see kJ)
+export function calNote(totalKcal: number, meals: number, unit: string, goal?: number | null): Note {
+  const kj = unit === "kj", f = (k: number) => Math.round(kj ? k * 4.184 : k).toLocaleString("en-AU"), u = kj ? "kJ" : "kcal";
+  const g = goal ? (totalKcal <= goal ? `${f(goal - totalKcal)} ${u} left of ${f(goal)}` : `${f(totalKcal - goal)} ${u} over ${f(goal)}`) : "";
+  return { title: `TODAY: ${f(totalKcal)} ${u.toUpperCase()}`, body: join(`${meals} meal${meals === 1 ? "" : "s"}`, g), tag: "cal" };
+}
 export const circleAddNote = (adder: string, circle: string, tally?: string | null): Note => ({ title: `YOU'RE IN ${U(circle)}`,
   body: join(`Added by ${adder}`, tally && `${tally} trained today`), tag: "circle" });
 // A chat message: "MEHA" / "you coming tonight?"   or   "MEHA · 🔥 UNI GYM BOYS" / "gym at 6"
@@ -376,7 +382,13 @@ async function onReminders(){
   const ctx = await contexts(due.map((d: any) => d.uid));
   let sent = 0;
   for (const d of due){ const me = ctx.get(d.uid); if (me) sent += (await send([d.uid], reminderNote(me))).sent; }
-  return { due: due.length, sent };
+  // nightly calorie summaries ride on the same 5-minute timer; if the meals feature isn't in the database yet, skip quietly
+  let cal = 0;
+  try {
+    const sums = await rest("rpc/due_cal_summaries", { method: "POST", body: "{}" });   // also marks them as sent today
+    if (Array.isArray(sums)) for (const c of sums) cal += (await send([c.uid], calNote(Number(c.total_kcal), c.meals, c.unit, c.goal))).sent;
+  } catch (_) { /* not set up yet */ }
+  return { due: due.length, sent, cal };
 }
 async function onTest(req: Request){
   const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");

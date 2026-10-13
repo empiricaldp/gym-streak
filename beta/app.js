@@ -1639,6 +1639,10 @@ async function toggleDay(d){
 // Buds see your workouts (the database enforces that). Plans are private. Weights are stored in kg, shown in kg or lb.
 const WORKOUTS = !!window.GYM_BETA;                     // beta only for now
 const DELETE_ON = WORKOUTS && !!window.GYM_DELETE;   // 'Delete my account' — switched on once migration 028 is applied
+// Health (b52): calories, BMI, height & weight. Also needs migration 029 — until it's applied the heart button stays hidden.
+const HEALTH = WORKOUTS && !!window.GYM_HEALTH;
+let meals = [], hp = { goal: null, unit: "kcal", notify: false, at: "22:00" }, healthOk = false, healthView = null, healthBack = "today";
+let mealSheet = null, bodySheet = null;   // the "Add meal" sheet and the height / weight / goal sheet
 let workouts = [], plans = [], unit = "kg", woDay = null, woSaveT = null, woErr = null, woAdding = false, woDiscardAsk = false, woOpenEx = null;
 let woPlan = null;                                       // the plan being written: { label, exercises, then: "start"|"back"|"workout", day }
 const lc = s => String(s || "").trim().toLowerCase();
@@ -3893,6 +3897,7 @@ function render(){
   if (profileId) return viewProfile();
   if (joinPreview || (pendingJoin && me())) return viewJoinCircle();
   if (circleId || circleMode === "new") return viewCircleRoute();
+  if (HEALTH && healthView) return viewHealth();
   $("title").textContent = TITLES[tab];
   if (!TITLES[tab] && tab !== "trophies") tab = "today";
   $("title").textContent = TITLES[tab] || "Trophies";
@@ -3902,7 +3907,7 @@ function render(){
 }
 let trophyBack = "you";
 { const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
-function setTab(t){ if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ healthView = null; mealSheet = null; bodySheet = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -3937,7 +3942,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b51";   // bump together with version.json on every release
+const APP_VERSION = "b52";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -3961,3 +3966,253 @@ setInterval(() => { if (key(today()) !== lastDay){ lastDay = key(today()); rende
 
 // Offline app shell (makes it installable and load instantly)
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+
+// ================= Health (b52): calories, BMI, height & weight =================
+// Opened from the heart pill in the Today header. Everything here is private to you (database rules in 029).
+const KJ = 4.184;
+const MEAL_KINDS = [["breakfast","Breakfast"],["lunch","Lunch"],["dinner","Dinner"],["snack","Snack"]];
+const HEART = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>';
+const HPLUS = '<span class="hplus" aria-hidden="true"><svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 1v10M1 6h10"/></svg></span>';
+const HCHEV = '<svg class="hchev" viewBox="0 0 8 14" width="8" height="14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>';
+const kindName = k => (MEAL_KINDS.find(x => x[0] === k) || [k, k])[1];
+const kcalOf = x => x.unit === "kj" ? x.amount / KJ : x.amount;
+const mealsOn = d => meals.filter(x => x.day === d);
+const todayKcal = () => mealsOn(key(today())).reduce((s, x) => s + kcalOf(x), 0);
+const inUnit = (kcal, u = hp.unit) => u === "kj" ? kcal * KJ : kcal;
+const nf = n => Math.round(n).toLocaleString("en-AU");
+const uName = u => u === "kj" ? "kJ" : "kcal";
+const timeOf = ts => new Date(ts).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }).replace(/\s/g, " ");
+const hDay = d => parse(d).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+const HLB = 2.20462;
+let hUnit = (() => { try { return localStorage.getItem("gs-hunit") || "cm"; } catch(_){ return "cm"; } })();
+const wUnit = () => unit === "lb" ? "lb" : "kg";
+const hW = kg => wUnit() === "lb" ? `${(kg * HLB).toFixed(1)} lb` : `${Number(kg).toFixed(1).replace(/\.0$/, "")} kg`;
+const ftIn = cm => { const t = Math.round(cm / 2.54); return [Math.floor(t / 12), t % 12]; };
+const fmtH = cm => hUnit === "ft" ? `${ftIn(cm)[0]} ft ${ftIn(cm)[1]} in` : `${String(cm).replace(/\.0$/, "")} cm`;
+const fmtHs = cm => hUnit === "ft" ? `${ftIn(cm)[0]}′${ftIn(cm)[1]}″` : fmtH(cm);   // short, for the big tile
+function guessKind(){ const h = new Date().getHours(); return h < 11 ? "breakfast" : h < 15 ? "lunch" : h < 17 ? "snack" : h < 22 ? "dinner" : "snack"; }
+const hBar = f => `<span class="hbar"><span style="width:${Math.max(0, Math.min(100, f * 100)).toFixed(0)}%"></span></span>`;
+const unitSeg = (id, opts, on) => `<span class="hseg" id="${id}" role="group">${opts.map(([v, l]) => `<button type="button" data-u="${v}" class="${v === on ? "on" : ""}" aria-pressed="${v === on}">${l}</button>`).join("")}</span>`;
+
+async function loadHealth(){
+  if (!HEALTH || !sb || !myId) return;
+  const [p, m] = await Promise.all([
+    sb.from("profiles").select("cal_goal,energy_unit,cal_notify,cal_notify_at").eq("id", myId).maybeSingle(),
+    sb.from("meals").select("id,day,kind,name,amount,unit,created_at").gte("day", key(addDays(today(), -30))).order("created_at")]);
+  if (p.error || m.error){ healthOk = false; return; }            // migration 029 not applied yet: keep Health hidden
+  healthOk = true;
+  if (p.data) hp = { goal: p.data.cal_goal ?? null, unit: p.data.energy_unit || "kcal", notify: !!p.data.cal_notify, at: String(p.data.cal_notify_at || "22:00").slice(0, 5) };
+  meals = (m.data || []).map(r => ({ ...r, amount: Number(r.amount) }));
+}
+{ const core = loadAll; loadAll = async function(){ const r = await core.apply(this, arguments); if (HEALTH){ try { await loadHealth(); } catch(_){} renderHeaderCount(); if (healthView) renderSoft(); } return r; }; }
+{ const core = renderHeaderCount; renderHeaderCount = function(){ core(); renderHealthPill(); }; }
+
+// The pill in the Today header: heart + today's total; with a goal it fills up in red as you eat.
+function renderHealthPill(){
+  const el = $("hhealth"); if (!el) return;
+  const show = HEALTH && healthOk && !!session && ready && !!me() && !ob && !locked && !wnActive && tab === "today"
+    && !healthView && !woDay && !woPlan && !woSummary && !profileId && !circleId && !chatKey;
+  el.hidden = !show; if (!show) return;
+  const k = todayKcal(), has = mealsOn(key(today())).length > 0, pct = has && hp.goal ? Math.min(100, k / hp.goal * 100) : 0;
+  el.setAttribute("aria-label", has ? `Health: ${nf(inUnit(k))} ${uName(hp.unit)} today` : "Health");
+  el.innerHTML = `${pct ? `<span class="hhfill" style="width:${pct.toFixed(0)}%"></span>` : ""}<span class="hhin">${HEART}${has ? `<b>${nf(inUnit(k))}</b>` : ""}</span>`;
+}
+document.addEventListener("click", e => { if (e.target.closest && e.target.closest("#hhealth")) openHealth("hub"); });
+function openHealth(v){ if (!HEALTH) return; healthBack = tab; healthView = v || "hub"; mealSheet = null; bodySheet = null; render(); window.scrollTo(0, 0); }
+
+function viewHealth(){
+  const v = healthView, T = { hub: "Health", cal: "Calories", bmi: "BMI", body: "Height\u00a0&\u00a0weight" };   // no-break spaces: one line (the title shrinks to fit)
+  $("title").textContent = T[v] || "Health";
+  const back = v === "hub" ? `‹ ${TITLES[healthBack] || "Today"}` : "‹ Health";
+  const inner = !healthOk ? `<div class="card"><b>Health isn't ready yet</b><p class="note" style="margin:6px 0 0">Check your connection and try again in a bit.</p></div>`
+    : v === "cal" ? hCalHtml() : v === "bmi" ? hBmiHtml() : v === "body" ? hBodyHtml() : hHubHtml();
+  main().innerHTML = `<div class="view hview"><button type="button" class="hback" id="h-back">${esc(back)}</button>${inner}</div>${mealSheetHtml()}${bodySheetHtml()}`;
+  wireHealth2();
+}
+function hHubHtml(){
+  const k = todayKcal(), n = mealsOn(key(today())).length, lw = latestWeight(), b = bmiOf(lw?.kg, body.height);
+  const entry = (go, title, num, unitL, side, extra = "") => `<button type="button" class="card hentry" data-hgo="${go}">
+    <span class="hehead"><span class="sign">${title}</span>${HCHEV}</span>
+    <span class="hebig"><b class="sign">${num}</b>${unitL ? `<span class="label">${unitL}</span>` : ""}<span class="label heside">${side}</span></span>${extra}</button>`;
+  return `<p class="note hnote">Only you can see this.</p>`
+    + entry("cal", "Calories", nf(inUnit(k)), `${uName(hp.unit)} today`, `${n} meal${n === 1 ? "" : "s"}`, hp.goal ? hBar(k / hp.goal) : "")
+    + entry("bmi", "BMI", b ? b.toFixed(1) : "—", "", b ? `${bmiName(b)} range` : "Add height &amp; weight")
+    + entry("body", "Height &amp; weight", lw ? hW(lw.kg).split(" ")[0] : "—", lw ? wUnit() : "", body.height ? esc(fmtH(body.height)) : "Add height");
+}
+const bmiIdx = b => b < 18.5 ? 0 : b < 25 ? 1 : b < 30 ? 2 : 3;
+const bmiName = b => ["Under", "Normal", "Over", "High"][bmiIdx(b)];
+
+function hCalHtml(){
+  const list = mealsOn(key(today())), k = todayKcal(), u = hp.unit, o = u === "kj" ? "kcal" : "kj", n = list.length;
+  const left = hp.goal ? hp.goal - k : null;
+  const status = hp.goal ? (left >= 0 ? `${nf(inUnit(left))} left of ${nf(inUnit(hp.goal))}` : `${nf(inUnit(-left))} over ${nf(inUnit(hp.goal))}`) : "";
+  const rows = list.map(x => `<button type="button" class="hrow hmeal" data-meal="${esc(x.id)}">
+      <span class="hmname"><b>${esc(x.name || kindName(x.kind))}</b><span class="label">${x.name ? esc(kindName(x.kind)) + " · " : ""}${timeOf(x.created_at)}</span></span>
+      <span class="hmval"><b class="sign">${nf(x.amount)}</b><span class="hmunit">${x.unit === "kj" ? `KJ · ${nf(x.amount / KJ)} KCAL` : "KCAL"}</span></span></button>`).join("");
+  return `<section class="card hcal"><div class="hline"><span class="label">Today</span>${unitSeg("h-unit", [["kcal", "kcal"], ["kj", "kJ"]], u)}</div>
+      <div class="hebig"><b class="sign hcalnum">${nf(inUnit(k))}</b><span class="label">${uName(u)}</span><span class="label heside">${nf(inUnit(k, o))} ${uName(o)}</span></div>
+      ${hp.goal ? hBar(k / hp.goal) : ""}<div class="hline"><span class="label">${n} meal${n === 1 ? "" : "s"}</span><span class="label">${status}</span></div></section>
+    <div class="hsechead"><h2 class="sign">Today's meals</h2><span class="label">Only you</span></div>
+    <div class="card hlist">${rows}<button type="button" class="hrow hadd" id="h-addmeal">${HPLUS}Add meal</button></div>
+    <div class="card hlist">
+      <button type="button" class="hrow" id="h-goal"><b>Daily goal</b><span class="hmuted">${hp.goal ? `${nf(inUnit(hp.goal))} ${uName(u)}` : "Not set"}</span>${HCHEV}</button>
+      <div class="hrow"><label for="h-notify"><b>Nightly total</b></label><input type="time" id="h-at" class="htime" value="${esc(hp.at)}" step="300" aria-label="Time for the nightly total" ${hp.notify ? "" : "disabled"}><input type="checkbox" class="sw" id="h-notify" ${hp.notify ? "checked" : ""}></div></div>
+    <p class="note hnote">${hp.notify ? `At ${esc(hp.at)} you'll get a notification with the day's total (only on days you log a meal).` : "Turn on to get your day's total as a notification."}</p>`;
+}
+function hBmiHtml(){
+  const lw = latestWeight(), b = bmiOf(lw?.kg, body.height);
+  if (!b) return `<div class="card hempty"><b>Add your height and weight</b><p class="note">Your BMI is worked out from them.</p><button class="cta" data-hgo="body">Height &amp; weight</button></div>`;
+  const i = bmiIdx(b), pos = Math.max(1, Math.min(99, b / 40 * 100));
+  const ranges = [["Under", "Below 18.5"], ["Normal", "18.5 – 24.9"], ["Over", "25 – 29.9"], ["High", "30 and up"]];
+  return `<section class="card hbmi"><div class="hebig"><b class="sign">${b.toFixed(1)}</b><span class="hband">${bmiName(b)} range</span></div>
+      <div class="hscale"><span class="hmark" style="left:${pos.toFixed(1)}%"></span>
+        <div class="hsegs">${[0, 1, 2, 3].map(j => `<span class="${j === i ? "on" : ""}"></span>`).join("")}</div>
+        <div class="hsegs hticks"><span>18.5</span><span>25</span><span>30</span><span></span></div></div>
+      <p class="note">From your height (${esc(fmtH(body.height))}) and latest weight (${esc(hW(lw.kg))}). A rough guide, not a health check.</p></section>
+    <span class="label hsec">Ranges</span>
+    <div class="card hlist">${ranges.map(([nm, v], j) => `<div class="hrow${j === i ? " cur" : ""}"><b>${nm}</b><span class="label">${v}</span></div>`).join("")}</div>`;
+}
+function hBodyHtml(){
+  const lw = latestWeight(), hist = body.weights.slice(-8).reverse();
+  const tile = (k, l, val, has) => `<button type="button" class="card htile" data-bedit="${k}"><span class="hline"><span class="label">${l}</span><span class="hedit">${has ? "Edit" : "Add"}</span></span><b class="sign">${val}</b></button>`;
+  const rows = hist.map((w, j) => { const prev = hist[j + 1], d = prev ? w.kg - prev.kg : 0;
+    return `<div class="hrow"><span class="hmname"><b>${esc(hW(w.kg))}</b><span class="label">${hDay(w.day)}</span></span>${prev && Math.abs(d) >= 0.05 ? `<span class="hmuted">${d > 0 ? "+" : "−"}${esc(hW(Math.abs(d)))}</span>` : ""}</div>`; }).join("");
+  return `<div class="htiles">${tile("height", "Height", body.height ? esc(fmtHs(body.height)) : "—", !!body.height)}${tile("weight", "Weight", lw ? esc(hW(lw.kg)) : "—", !!lw)}</div>
+    <span class="label hsec">History</span>
+    <div class="card hlist">${rows || `<div class="hrow"><span class="hmuted">No weigh-ins yet</span></div>`}<button type="button" class="hrow hadd" data-bedit="weight">${HPLUS}Log weight</button></div>`;
+}
+
+// ---------- the "Add meal" sheet ----------
+function openMeal(x){
+  mealSheet = x ? { id: x.id, kind: x.kind, name: x.name || "", amount: String(x.amount), unit: x.unit, delArm: false }
+                : { id: null, kind: guessKind(), name: "", amount: "", unit: hp.unit, delArm: false };
+  render(); setTimeout(() => $("m-amt")?.focus({ preventScroll: true }), x ? 9999999 : 150);
+}
+const otherLine = (amt, u) => { const n = parseFloat(amt); return n > 0 ? (u === "kj" ? `= ${nf(n / KJ)} kcal` : `= ${nf(n * KJ)} kJ`) : ""; };
+function mealSheetHtml(){
+  const s = mealSheet; if (!s) return "";
+  return `<div class="chgwrap" id="mealwrap"><div class="chgdim" data-hclose></div><div class="chgsheet hsheet" role="dialog" aria-label="${s.id ? "Edit meal" : "Add a meal"}">
+    <div class="grab"></div><span class="label">${s.id ? "Edit meal" : "Add a meal"}</span><h3 class="sign chgtitle">What did you eat?</h3>
+    <div class="chgchips" role="group">${MEAL_KINDS.map(([k, l]) => `<button type="button" class="chip${s.kind === k ? " on" : ""}" data-mkind="${k}" aria-pressed="${s.kind === k}">${l}</button>`).join("")}</div>
+    <input id="m-name" class="woin" placeholder="Name it (optional)" maxlength="60" value="${esc(s.name)}" autocomplete="off" enterkeyhint="next" aria-label="Meal name">
+    <div class="hline"><span class="label">Energy</span>${unitSeg("m-unit", [["kcal", "kcal"], ["kj", "kJ"]], s.unit)}</div>
+    <label class="hamount"><input id="m-amt" type="number" inputmode="decimal" min="1" step="any" placeholder="0" value="${esc(s.amount)}" aria-label="Energy" enterkeyhint="done"><span class="label" id="m-u">${uName(s.unit)}</span><span class="label heside" id="m-other">${otherLine(s.amount, s.unit)}</span></label>
+    <button class="cta" id="m-save" ${parseFloat(s.amount) > 0 ? "" : "disabled"}>${s.id ? "Save" : "Add meal"}</button>
+    ${s.id ? `<button type="button" class="linkbtn hdel" id="m-del">${s.delArm ? "Tap again to delete" : "Delete meal"}</button>` : `<button type="button" class="linkbtn" data-hclose style="align-self:center">Cancel</button>`}</div></div>`;
+}
+async function saveMeal(){
+  const s = mealSheet; if (!s) return;
+  const amt = Math.round(parseFloat($("m-amt").value) * 10) / 10, name = $("m-name").value.trim().slice(0, 60) || null;
+  if (!(amt > 0)) return;
+  const max = s.unit === "kj" ? 41840 : 10000;
+  if (amt > max) return showWarn(`That's a lot for one meal. The most is ${nf(max)} ${uName(s.unit)}.`);
+  const btn = $("m-save"); btn.disabled = true; btn.textContent = "Saving…";
+  const row = { kind: s.kind, name, amount: amt, unit: s.unit }, cols = "id,day,kind,name,amount,unit,created_at";
+  const { data, error } = s.id ? await sb.from("meals").update(row).eq("id", s.id).select(cols).single()
+                               : await sb.from("meals").insert({ ...row, day: key(today()) }).select(cols).single();
+  if (error){ btn.disabled = false; btn.textContent = s.id ? "Save" : "Add meal"; return showWarn(oops("save the meal", error)); }
+  const r = { ...data, amount: Number(data.amount) };
+  meals = s.id ? meals.map(x => x.id === s.id ? r : x) : [...meals, r];
+  mealSheet = null; toast(s.id ? "Saved" : "Meal added"); render();
+}
+async function deleteMeal(){
+  const s = mealSheet; if (!s?.id) return;
+  if (!s.delArm){ s.delArm = true; const b = $("m-del"); if (b) b.textContent = "Tap again to delete"; return; }
+  const { error } = await sb.from("meals").delete().eq("id", s.id);
+  if (error) return showWarn(oops("delete the meal", error));
+  meals = meals.filter(x => x.id !== s.id); mealSheet = null; toast("Meal deleted"); render();
+}
+
+// ---------- the height / weight / daily goal sheet ----------
+function openBody(kind){
+  const lw = latestWeight();
+  if (kind === "height") bodySheet = { kind, unit: hUnit, v: body.height ? (hUnit === "ft" ? String(ftIn(body.height)[0]) : String(body.height)) : "", v2: body.height && hUnit === "ft" ? String(ftIn(body.height)[1]) : "" };
+  else if (kind === "weight") bodySheet = { kind, unit: wUnit(), v: lw ? (wUnit() === "lb" ? (lw.kg * HLB).toFixed(1) : String(lw.kg)) : "", v2: "" };
+  else bodySheet = { kind: "goal", unit: hp.unit, v: hp.goal ? String(Math.round(inUnit(hp.goal))) : "", v2: "" };
+  render(); setTimeout(() => $("b-v")?.focus({ preventScroll: true }), 150);
+}
+function bodyValue(s){            // what's typed, converted to cm / kg / kcal (null if empty or not a number)
+  const a = parseFloat(s.v), b = parseFloat(s.v2) || 0;
+  if (s.kind === "height") return s.unit === "ft" ? (a > 0 || b > 0 ? Math.round(((a || 0) * 12 + b) * 2.54 * 10) / 10 : null) : (a > 0 ? Math.round(a * 10) / 10 : null);
+  if (s.kind === "weight") return a > 0 ? Math.round((s.unit === "lb" ? a / HLB : a) * 10) / 10 : null;
+  return a > 0 ? Math.round(s.unit === "kj" ? a / KJ : a) : null;
+}
+function bodyOther(s){
+  const x = bodyValue(s); if (x == null) return "";
+  if (s.kind === "height") return s.unit === "ft" ? `= ${String(x).replace(/\.0$/, "")} cm` : `= ${ftIn(x)[0]} ft ${ftIn(x)[1]} in`;
+  if (s.kind === "weight") return s.unit === "lb" ? `= ${x} kg` : `= ${(x * HLB).toFixed(1)} lb`;
+  return s.unit === "kj" ? `= ${nf(x)} kcal` : `= ${nf(x * KJ)} kJ`;
+}
+function bodySheetHtml(){
+  const s = bodySheet; if (!s) return "";
+  const c = { height: ["Your height", [["cm", "cm"], ["ft", "ft in"]], "Used for your BMI."],
+              weight: ["Your weight", [["kg", "kg"], ["lb", "lb"]], "Saved as today's weigh-in."],
+              goal:   ["Daily goal", [["kcal", "kcal"], ["kj", "kJ"]], "Optional. Shows how much is left each day."] }[s.kind];
+  const ft = s.kind === "height" && s.unit === "ft";
+  const field = (id, val, u, ph) => `<label class="hamount${ft ? " half" : ""}"><input id="${id}" type="number" inputmode="decimal" min="0" step="any" placeholder="${ph}" value="${esc(val)}" aria-label="${u}" enterkeyhint="done"><span class="label">${u}</span></label>`;
+  return `<div class="chgwrap" id="bodywrap"><div class="chgdim" data-hclose></div><div class="chgsheet hsheet" role="dialog" aria-label="${c[0]}">
+    <div class="grab"></div><span class="label">${s.kind === "goal" ? "Calories" : "Edit"}</span><h3 class="sign chgtitle">${c[0]}</h3>
+    <div class="hline"><span class="label">Unit</span>${unitSeg("b-unit", c[1], s.unit)}</div>
+    <div class="hamounts">${ft ? field("b-v", s.v, "ft", "5") + field("b-v2", s.v2, "in", "10") : field("b-v", s.v, c[1].find(x => x[0] === s.unit)[1], s.kind === "height" ? "178" : s.kind === "weight" ? "72.5" : "2500")}</div>
+    <p class="note hnote"><span id="b-other" class="mono">${bodyOther(s)}</span> ${c[2]}</p>
+    <button class="cta" id="b-save">Save</button>
+    ${s.kind === "goal" && hp.goal ? `<button type="button" class="linkbtn hdel" id="b-clear">Remove goal</button>` : `<button type="button" class="linkbtn" data-hclose style="align-self:center">Cancel</button>`}</div></div>`;
+}
+async function saveBody(clear){
+  const s = bodySheet; if (!s) return;
+  const x = clear ? null : bodyValue(s), btn = $("b-save");
+  const lim = { height: [100, 250, "Height should be between 100 and 250 cm (3 ft 4 in – 8 ft 2 in)."], weight: [25, 350, "Weight should be between 25 and 350 kg."], goal: [500, 10000, "A daily goal should be between 500 and 10,000 kcal."] }[s.kind];
+  if (!clear && (x == null || x < lim[0] || x > lim[1])) return showWarn(lim[2]);
+  if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  let error;
+  if (s.kind === "height"){ ({ error } = await sb.from("profiles").update({ height_cm: x }).eq("id", myId)); if (!error){ body.height = x; hUnit = s.unit; try { localStorage.setItem("gs-hunit", hUnit); } catch(_){} } }
+  else if (s.kind === "weight"){ const day = key(today()); ({ error } = await sb.from("bodyweight").upsert({ user_id: myId, day, kg: x }));
+    if (!error){ body.weights = [...body.weights.filter(w => w.day !== day), { day, kg: x }].sort((a, b) => a.day.localeCompare(b.day)); if (s.unit !== unit && typeof setUnit === "function") setUnit(s.unit); } }
+  else { ({ error } = await sb.from("profiles").update({ cal_goal: x }).eq("id", myId)); if (!error) hp.goal = x; }
+  if (error){ if (btn){ btn.disabled = false; btn.textContent = "Save"; } return showWarn(oops("save that", error)); }
+  bodySheet = null; toast(clear ? "Goal removed" : "Saved"); render();
+}
+async function saveHp(patch){
+  const before = { ...hp }; Object.assign(hp, patch);
+  const row = {}; for (const [k, v] of Object.entries(patch)) row[{ goal: "cal_goal", unit: "energy_unit", notify: "cal_notify", at: "cal_notify_at" }[k]] = v;
+  const { error } = await sb.from("profiles").update(row).eq("id", myId);
+  if (error){ hp = before; showWarn(oops("save that", error)); }
+  render();
+}
+function wireSeg(id, on){
+  const g = $(id); if (!g) return;
+  g.querySelectorAll("[data-u]").forEach(b => b.onclick = () => { g.querySelectorAll("[data-u]").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b); }); on(b.dataset.u); });
+}
+function wireHealth2(){
+  $("h-back").onclick = () => { if (healthView === "hub") setTab(healthBack); else { healthView = "hub"; render(); window.scrollTo(0, 0); } };
+  main().querySelectorAll("[data-hgo]").forEach(b => b.onclick = () => { healthView = b.dataset.hgo; render(); window.scrollTo(0, 0); });
+  $("h-addmeal")?.addEventListener("click", () => openMeal());
+  main().querySelectorAll("[data-meal]").forEach(b => b.onclick = () => openMeal(meals.find(x => x.id === b.dataset.meal)));
+  main().querySelectorAll(".hview [data-bedit]").forEach(b => b.onclick = () => openBody(b.dataset.bedit));
+  $("h-goal")?.addEventListener("click", () => openBody("goal"));
+  wireSeg("h-unit", u => saveHp({ unit: u }));
+  const nt = $("h-notify"), at = $("h-at");
+  if (nt) nt.onchange = () => { saveHp({ notify: nt.checked }); if (nt.checked && typeof pushState === "function" && pushState() !== "on") showPushSheet(); };
+  if (at) at.onchange = () => { if (at.value) saveHp({ at: at.value }); };
+  main().querySelectorAll("[data-hclose]").forEach(b => b.onclick = () => { mealSheet = null; bodySheet = null; render(); });
+  if (mealSheet){
+    const s = mealSheet, amt = $("m-amt"), sync = () => { s.amount = amt.value; $("m-other").textContent = otherLine(amt.value, s.unit); $("m-save").disabled = !(parseFloat(amt.value) > 0); };
+    main().querySelectorAll("[data-mkind]").forEach(b => b.onclick = () => { s.kind = b.dataset.mkind; main().querySelectorAll("[data-mkind]").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b); }); });
+    $("m-name").oninput = e => { s.name = e.target.value; };
+    $("m-name").onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); amt.focus(); } };
+    wireSeg("m-unit", u => { s.unit = u; $("m-u").textContent = uName(u); sync(); });
+    amt.oninput = sync; amt.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); saveMeal(); } };
+    $("m-save").onclick = saveMeal;
+    $("m-del")?.addEventListener("click", deleteMeal);
+  }
+  if (bodySheet){
+    const s = bodySheet, sync = () => { s.v = $("b-v")?.value ?? ""; s.v2 = $("b-v2")?.value ?? ""; $("b-other").textContent = bodyOther(s); };
+    wireSeg("b-unit", u => { const x = bodyValue(s); s.unit = u;
+      if (x != null){ if (s.kind === "height"){ if (u === "ft"){ [s.v, s.v2] = ftIn(x).map(String); } else { s.v = String(x); s.v2 = ""; } }
+        else if (s.kind === "weight") s.v = u === "lb" ? (x * HLB).toFixed(1) : String(x); else s.v = String(Math.round(u === "kj" ? x * KJ : x)); }
+      render(); });
+    ["b-v", "b-v2"].forEach(id => { const f = $(id); if (f){ f.oninput = sync; f.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); saveBody(); } }; } });
+    $("b-save").onclick = () => saveBody(false);
+    $("b-clear")?.addEventListener("click", () => saveBody(true));
+  }
+}

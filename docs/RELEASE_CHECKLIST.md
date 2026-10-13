@@ -17,6 +17,7 @@ Rule: **one change at a time, DP approves each database change separately, and e
 | 026 | Undo a log also resets that day's workout (with 30-day backup) | **Live 2026-10-13** (test 8/8 on prod; rollback: supabase/rollback/026_rollback.sql) | Remove beta's own client reset afterwards (optional) |
 | 027 | Block + report | **Live 2026-10-13** (test 29/29 on prod; rollback: supabase/rollback/027_rollback.sql, exact pre-027 definitions) | `GYM_SAFETY` flag, then deploy push function's block filter |
 | 028 | Delete my account | Ready, waiting | `GYM_DELETE` flag |
+| 029 | Health: meals + calories, nightly total | Ready, waiting (local test 22/22; rollback: supabase/rollback/029_rollback.sql — deletes logged meals) | `GYM_HEALTH` flag (on in b52; heart stays hidden until 029 is live), then deploy push function (nightly total; tolerates 029 missing; previous version saved in supabase/rollback/push_index_before_meals.ts) |
 
 For each one:
 1. [ ] DP says yes to this specific migration.
