@@ -3736,6 +3736,8 @@ function viewPeopleList(kind){
 function wnArt(kind, m){
   const me = `--c:var(--p-${PLATES.some(p => p.id === m.plate) ? m.plate : "red"})`, bud = "--c:var(--p-blue)", b2 = "--c:var(--p-yellow)", b3 = "--c:var(--p-green)", b4 = "--c:var(--p-pink)";
   const disc = (st, cls = "") => `<span class="wdisc ${cls}" style="${st}"></span>`;
+  if (kind === "lift"){ const side = st => [["big", me], ["mid", bud], ["sm", b2]].map(([c, x], i) => `<span class="wl-p ${c}" style="${x};--i:${i}"></span>`).join("");
+    return `<div class="wa-lift"><div class="wl-bar"><span class="wl-rod"></span><span class="wl-side l">${side()}</span><span class="wl-side r">${side()}</span></div><span class="wl-shadow"></span></div>`; }
   if (kind === "hello") return `<div class="wa-hello">${disc(b2, "s1")}${disc(me, "s2")}${disc(bud, "s3")}<span class="wa-bar"></span></div>`;
   if (kind === "buds") return `<div class="wa-buds">${disc(me)}<span class="wa-link"><span>BUDS</span></span>${disc(bud)}</div>
       <div class="wa-caps"><span>You</span><span>Your gym mate</span></div>`;
@@ -3769,9 +3771,7 @@ const UPDATES = [
   { v: 2, kind: "circles",  title: "Circles",  line: "Private groups for your crew, like a WhatsApp group." },
   { v: 2, kind: "chats",    title: "Chats",    line: "Message your Buds and your circles." },
   { v: 3, kind: "workout",  title: "Workouts", line: "Start a timer, tick off exercises, rest between sets." },
-  { v: 3, kind: "safety",   title: "Report & block", line: "Tap ⋯ next to anyone's name. They're never told." },
-  { v: 4, kind: "health",   title: "Health",   line: "Log meals in kcal or kJ. Tap the heart on Today." },
-  { v: 4, kind: "newchat",  title: "Chats",    line: "Start a chat from the top corner. Tap Edit to delete one." }];
+  { v: 4, kind: "health",   title: "Health",   line: "Log meals in kcal or kJ. Tap the heart on Today." }];
 const tourSeenHere = () => { try { return !!localStorage.getItem(tourKey()); } catch(e){ return true; } };
 const markTourHere = () => { try { localStorage.setItem(tourKey(), "1"); } catch(e){} };
 async function finishShortTour(){
@@ -3787,15 +3787,13 @@ function viewWhatsNew(){
   const m = me(); $("title").textContent = "What's new";
   wnPv = wnPv || { ...pvFrom(m), priv: true };            // Private by default; they can switch to Public
   // One new thing per screen, one short line each, full screen with a little picture. Then privacy, then find your buds.
-  let FEATS = UPDATES.filter(u => u.v > wnSince).map(u => [u.kind, u.title, u.line]);
-  if (FEATS.some(f => f[0] === "chats")) FEATS = FEATS.filter(f => f[0] !== "newchat")      // missed both chat updates: one Chats screen
-    .map(f => f[0] === "chats" ? [f[0], f[1], "Message your Buds and circles. Start one from the top corner."] : f);
+  const FEATS = UPDATES.filter(u => u.v > wnSince).map(u => [u.kind, u.title, u.line]);
   const PRIV = 2 + FEATS.length, FIND = PRIV + 1;            // step numbers: 1 hello, 2–5 features, 6 privacy, 7 find buds
   const dots = `<div class="steps">${Array.from({ length: wnShort ? PRIV - 1 : FIND }, (_, i) => `<i class="${i + 1 <= wnStep ? "on" : ""}"></i>`).join("")}</div>`;
   let body = "";
   if (wnStep < PRIV){                                         // the full-screen story part
     document.documentElement.classList.add("wn-open");
-    const art = wnArt(wnStep === 1 ? "hello" : FEATS[wnStep - 2][0], m);
+    const art = wnArt(wnStep === 1 ? (wnShort ? "lift" : "hello") : FEATS[wnStep - 2][0], m);
     const text = wnStep === 1
       ? (wnShort ? `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">What's<br>new</h2><p class="wnline">${FEATS.length} new thing${FEATS.length === 1 ? "" : "s"} since you last opened CREW.</p>`
                  : `<span class="wnkick">New in CREW</span><h2 class="sign wnbig">Big<br>update</h2><p class="wnline">Your crew just got more personal.</p>`)

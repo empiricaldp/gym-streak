@@ -751,7 +751,20 @@ html.wn-open header.top{display:none}
 .wa-bub{max-width:82%;padding:11px 15px;border-radius:20px;font-size:17px;background:var(--card2);align-self:flex-start;animation:wnin .45s cubic-bezier(.2,.8,.2,1) both}
 .wa-bub.me{align-self:flex-end;background:var(--c);color:var(--on-c,#fff);animation-delay:.25s}
 .wa-bub:nth-child(3){animation-delay:.5s}
-/* b54 update screens: workouts, report & block, health, chats */
+/* b54 update hello: plates slide onto both ends, then the bar gets pressed up twice */
+.wa-lift{position:relative;width:290px;height:190px;display:flex;align-items:center;justify-content:center}
+.wl-bar{position:relative;width:290px;height:130px;display:flex;align-items:center;justify-content:space-between;animation:wlpress 1.5s 1.1s cubic-bezier(.45,0,.3,1) 2 both}
+.wl-rod{position:absolute;left:0;right:0;top:50%;height:10px;margin-top:-5px;border-radius:5px;background:var(--line2)}
+.wl-side{position:relative;display:flex;align-items:center;gap:4px;padding:0 14px}
+.wl-side.l{flex-direction:row-reverse}
+.wl-p{display:block;width:20px;border-radius:6px;background:var(--c);box-shadow:inset 0 0 0 2.5px color-mix(in srgb,#000 14%,var(--c));animation:wlon .55s calc(.15s + var(--i) * .16s) cubic-bezier(.3,1.35,.5,1) both}
+.wl-p.big{height:122px}.wl-p.mid{height:96px}.wl-p.sm{height:66px;width:16px}
+.wl-side.l .wl-p{--from:-90px}.wl-side.r .wl-p{--from:90px}
+.wl-shadow{position:absolute;bottom:0;left:50%;width:220px;height:14px;margin-left:-110px;border-radius:50%;background:color-mix(in srgb,var(--fg) 12%,transparent);filter:blur(4px);animation:wlshadow 1.5s 1.1s cubic-bezier(.45,0,.3,1) 2 both}
+@keyframes wlon{from{transform:translateX(var(--from));opacity:0}to{transform:none;opacity:1}}
+@keyframes wlpress{0%,100%{transform:none}45%,60%{transform:translateY(-30px)}}
+@keyframes wlshadow{0%,100%{transform:none;opacity:1}45%,60%{transform:scale(.75);opacity:.5}}
+/* b54 update screens: workouts, health */
 .wa-lab{font:700 11px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
 .wa-wo{gap:10px}
 .wa-wo .wa-row{gap:8px}
@@ -782,7 +795,7 @@ html.wn-open header.top{display:none}
 .wa-ncbar svg{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .wa-ncrow{display:flex;align-items:center;gap:10px;padding:13px 0;border-top:1px solid var(--line);font-size:17px}
 .wa-del{margin-left:auto;color:var(--bad);font-size:13px;font-weight:700;border:1px solid color-mix(in srgb,var(--bad) 45%,var(--line));border-radius:999px;padding:6px 12px}
-@media (prefers-reduced-motion: reduce){ .wnstage,.wa-hello .wdisc,.wa-bub,.wa-pill,.wa-live{animation:none} }
+@media (prefers-reduced-motion: reduce){ .wnstage,.wa-hello .wdisc,.wa-bub,.wa-pill,.wa-live,.wl-bar,.wl-p,.wl-shadow{animation:none} }
 @media (max-height:620px){ .wnart{min-height:170px;transform:scale(.8)} .wnbig{font-size:64px} .wnstage{gap:16px} }
 .wnbig{display:block;width:100%;overflow:hidden}
 .wnsmall{margin:12px 0 0;font-size:13px;line-height:1.4;color:var(--muted);max-width:30ch}
