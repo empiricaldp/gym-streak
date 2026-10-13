@@ -2234,6 +2234,7 @@ document.addEventListener("click", e => {
 // Today opens by itself and moves on at midnight. "Change" swaps a day: just today (a one-off, saved as a
 // day_swap) or every week (your split changes). Start workout sits at the bottom. The ⓘ replays a 3-step guide.
 let splitOpen = null, splitOpenDay = null, chg = null, guideStep = -1, lastDayKey = null;
+let splitView = "today";   // Split tab: "today" (default: just today's workout) | "details" (today's exercises) | "week" (the whole week)
 const splitLabels = m => [...new Set([...(m.plan || []).filter(s => s && s.w).map(s => s.w), ...plans.map(p => p.label)])];
 const planLabel = (m, d) => { const s = (m.plan || [])[dow(d)]; return s ? (s.w || "Gym day") : null; };   // the split, ignoring swaps
 // Real time: when the date changes (midnight, or opening the app the next morning), redraw so "today" moves on
@@ -2277,9 +2278,10 @@ function viewSplit(){
       <button class="cta" id="split-start">Start training</button></div></div>`;
     $("split-start").onclick = () => startOnboarding(true, "split"); $("split-info").onclick = () => { guideStep = 0; render(); }; return;
   }
+  if (splitView === "today" || splitView === "details") return viewSplitToday(m, t, splitView === "details");
   const days = Array.from({ length: 7 }, (_, i) => splitDayHtml(m, addDays(ws, i), tk)).join("");
   const go = splitGoHtml(m, t);
-  main().innerHTML = `<div class="view split${go ? " hasgo" : ""}" style="${pc(m)}">${info}<div class="sweek">${days}</div>
+  main().innerHTML = `<div class="view split${go ? " hasgo" : ""}" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="split-back">‹ Today</button>${info}<div class="sweek">${days}</div>
     <button type="button" class="cta ghost ssm" id="split-edit">✏️ Edit split</button>
     <p class="note" style="text-align:center">Tap a day to see it. Exercises are optional.</p>${go}${chgSheetHtml(m)}${guideHtml()}</div>`;
   main().querySelectorAll("[data-sday]").forEach(b => b.onclick = () => { const k = b.dataset.sday; splitOpen = splitOpen === k ? null : k; render(); });
@@ -2287,12 +2289,58 @@ function viewSplit(){
   main().querySelectorAll("[data-chg]").forEach(b => b.onclick = () => openChange(b.dataset.chg));
   main().querySelectorAll("[data-unswap]").forEach(b => b.onclick = () => unswap(b.dataset.unswap));
   $("split-edit").onclick = () => startOnboarding(true, "split");
+  $("split-back").onclick = () => { splitView = "today"; render(); window.scrollTo(0, 0); };
   $("split-info").onclick = () => { guideStep = 0; render(); };
   if ($("split-go")) $("split-go").onclick = () => startWorkout(t);
   wireChgSheet(m); wireGuide();
   // First time here: show the guide once by itself
   if (guideStep < 0){ let seen = true; try { seen = !!localStorage.getItem("gs-split-guide-" + myId); } catch(_){}
     if (!seen){ try { localStorage.setItem("gs-split-guide-" + myId, "1"); } catch(_){} guideStep = 0; render(); } }
+}
+
+// Split tab, simple first (DP's design): just today's workout and one big button. Someone who has written
+// exercises for this workout also gets a "Details" row; nobody picks a "mode": it follows whether a plan exists.
+function viewSplitToday(m, t, details){
+  const tk = key(t), s = slot(m, t), lab = s ? (s.w || "Gym day") : null, p = lab ? planFor(lab) : null;
+  const w = myWo(tk), done = ticked(m, t), swapped = swaps.has(myId + "|" + tk);
+  if (details && !p) details = false;                                       // plan was removed: back to the card
+  const goTxt = w && !w.finished_at ? `Continue workout${w.exercises.length ? ` · ${woDone(w).length}/${w.exercises.length}` : ""}`
+    : w && w.finished_at ? "See today's workout" : "Start workout";
+  const goBtn = lab ? `<button class="cta stgo" id="split-go">${esc(goTxt)}</button>` : "";
+  const nEx = p ? p.exercises.length : 0;
+  if (details){
+    main().innerHTML = `<div class="view split stoday" style="${pc(m)}">
+      <div class="stnav"><button type="button" class="linkbtn" id="split-back">‹ Split</button><button type="button" class="linkbtn" id="split-editplan">Edit</button></div>
+      <div><span class="label">Today · ${nEx} exercise${nEx === 1 ? "" : "s"}</span><div class="work sign stname">${esc(lab)}</div></div>
+      <div class="stlist">${p.exercises.map(e => `<div class="stex"><span>${esc(e.name)}</span><span class="mono">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>
+      <p class="note" style="margin:0">Tap Edit to change exercises, sets or weights.</p>
+      ${goBtn}${guideHtml()}</div>`;
+    $("split-back").onclick = () => { splitView = "today"; render(); window.scrollTo(0, 0); };
+    $("split-editplan").onclick = () => editPlan(lab, "back");
+  } else {
+    const sub = swapped ? `<span class="note stsub">Swapped from ${esc(planLabel(m, t) || "Rest")} · <button type="button" class="linkbtn stundo" id="split-unswap">Undo</button></span>`
+      : done ? `<span class="note stsub">Logged ✓ Nice.</span>` : "";
+    const detailsRow = p ? `<button type="button" class="stdet" id="split-details"><span class="grow"><b>Details</b><span class="note">${nEx} exercise${nEx === 1 ? "" : "s"}</span></span><span class="schev" aria-hidden="true">›</span></button>` : "";
+    const restBits = !lab ? `<span class="note stsub">Rest day. Training anyway?</span>` : "";
+    main().innerHTML = `<div class="view split stoday" style="${pc(m)}">
+      <section class="card stcard" aria-label="Today's split"><span class="label">Today</span>
+        <div class="work sign stbig">${esc(lab || "Rest")}</div>${sub}${restBits}
+        ${detailsRow}${goBtn}
+        <button type="button" class="linkbtn stchg" id="split-change">${lab ? "Change today's workout" : "Change"}</button></section>
+      <div class="stlinks">${lab && !p ? `<button type="button" class="linkbtn" id="split-add">+ Add exercises</button>` : ""}<button type="button" class="linkbtn" id="split-week">See my week</button></div>
+      ${chgSheetHtml(m)}${guideHtml()}</div>`;
+    if ($("split-details")) $("split-details").onclick = () => { splitView = "details"; render(); window.scrollTo(0, 0); };
+    if ($("split-unswap")) $("split-unswap").onclick = () => unswap(tk);
+    if ($("split-add")) $("split-add").onclick = () => editPlan(lab, "back");
+    $("split-week").onclick = () => { splitView = "week"; render(); window.scrollTo(0, 0); };
+    $("split-change").onclick = () => openChange(tk);
+    wireChgSheet(m);
+  }
+  if ($("split-go")) $("split-go").onclick = () => startWorkout(t);
+  wireGuide();
+  // the big name: shrink until its longest word fits on one line ("SHOULDERS" must never split mid-word)
+  const big = main().querySelector(".stbig, .stname");
+  if (big){ let px = parseFloat(getComputedStyle(big).fontSize); while (big.scrollWidth > big.clientWidth + 1 && px > 34){ px -= 4; big.style.fontSize = px + "px"; } }
 }
 
 // ---- Change a day ----
@@ -2367,7 +2415,7 @@ async function unswap(k){
 
 // ---- The ⓘ guide: 3 short slides ----
 const GUIDE = [
-  ["Your week", "This is your split. That's all you need. Today opens by itself.", "week"],
+  ["Today's workout", "Split shows what you're training today. Tap See my week for the rest.", "week"],
   ["Exercises are optional", "Just show up and log it. If you want, tap a day, then + Add exercises to write your sets and weights once.", "details"],
   ["At the gym", "Tap Start workout at the bottom and tick ✓ as you go. Your crew hears once, when you finish. Doing something else today? Tap Change.", "gym"]];
 function guideHtml(){
@@ -3689,7 +3737,7 @@ function render(){
 }
 let trophyBack = "you";
 { const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
-function setTab(t){ if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -3724,7 +3772,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b45";   // bump together with version.json on every release
+const APP_VERSION = "b46";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
