@@ -1424,9 +1424,9 @@ async function loadAll(){
         soft(fetchAll("reactions", "from_user,to_user,day,emoji", q => q.gte("day", key(addDays(today(), -8))))),
         soft(fetchAll("nudges", "from_user,to_user,day,seen,created_at", q => q.gte("day", key(addDays(today(), -2))))),
         soft(fetchAll("nudges", "to_user", q => q.eq("from_user", myId))),
-        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz" + (WORKOUTS ? ",weight_unit" : "")).eq("id", myId).maybeSingle(),
+        sb.from("profiles").select("goal,goals,height_cm,trained_since,notif_nudge,notif_react,notif_crew,notif_remind,notif_chat,notif_buds,remind_at,tz" + (WORKOUTS ? ",weight_unit,rest_s,rest_auto" : "")).eq("id", myId).maybeSingle(),
         soft(fetchAll("bodyweight", "day,kg", q => q.order("day"))),
-        WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at", q => q.gte("day", key(addDays(today(), -120))))) : null,
+        WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at,session_ms,session_run_at,duration_s", q => q.gte("day", key(addDays(today(), -120))))) : null,
         WORKOUTS ? soft(fetchAll("workout_plans", "label,exercises,updated_at")) : null,
         WORKOUTS ? soft(fetchAll("day_swaps", "user_id,day,label", q => q.gte("day", key(addDays(today(), -60))))) : null]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
@@ -1466,6 +1466,8 @@ async function loadAll(){
       if (planRows) plans = planRows;
       if (swapRows) swaps = new Map(swapRows.map(r => [r.user_id + "|" + r.day, r.label]));
       if (WORKOUTS && mine.data?.weight_unit) unit = mine.data.weight_unit;
+      if (WORKOUTS && mine.data && "rest_s" in mine.data) restPrefs = { s: mine.data.rest_s ?? 90, auto: mine.data.rest_auto !== false };
+      if (WORKOUTS && !rest) loadRestLocal();
       // If I ticked/unticked a day while this was loading, its copy of MY days is already out of date:
       // keep what's on my screen and load once more (otherwise a slow load "unlogs" a session I just logged)
       if (editSeq !== seq0 || busy.size){ const cur = members.get(myId), n = next.get(myId); if (cur && n) n.days = { ...cur.days }; reloadAgain = true; }
@@ -1586,7 +1588,8 @@ function lastFor(name, beforeDay){
 }
 const numIn = (v, dec) => { const n = dec ? parseFloat(String(v).replace(",", ".")) : parseInt(v, 10); return Number.isFinite(n) && n >= 0 && n < 1000 ? (dec ? Math.round(n * 1000) / 1000 : n) : null; };
 const cleanEx = ex => (ex || []).slice(0, 30).map(e => ({ name: String(e.name || "").trim().slice(0, 60) || "Exercise", done: !!e.done,
-  sets: (e.sets || []).slice(0, 20).map(s => ({ reps: numIn(s.reps), kg: numIn(s.kg, true) })) }));
+  ...(Number.isFinite(e.rest) && e.rest >= 0 && e.rest <= 600 ? { rest: e.rest } : {}),
+  sets: (e.sets || []).slice(0, 20).map(s => ({ reps: numIn(s.reps), kg: numIn(s.kg, true), ...(s.done ? { done: true } : {}) })) }));
 const copySets = sets => (sets || []).map(s => ({ reps: s.reps ?? null, kg: s.kg ?? null }));
 const blankEx = () => ({ name: "", done: false, sets: [{ reps: 10, kg: null }, { reps: 10, kg: null }, { reps: 10, kg: null }] });
 
@@ -1653,7 +1656,7 @@ function viewPlan(){
   wireSets(p.exercises, structural => { if (structural) render(); });
 }
 async function putPlan(label, exercises){
-  const ex = cleanEx(exercises.filter(e => String(e.name || "").trim())).map(e => ({ name: e.name, sets: e.sets }));
+  const ex = cleanEx(exercises.filter(e => String(e.name || "").trim())).map(e => ({ name: e.name, ...(e.rest != null ? { rest: e.rest } : {}), sets: e.sets.map(s => ({ reps: s.reps, kg: s.kg })) }));
   if (!ex.length) return { error: null, ex };
   const { error } = await sb.from("workout_plans").upsert({ user_id: myId, label, exercises: ex }, { onConflict: "user_id,key" });
   if (!error){ plans = plans.filter(x => lc(x.label) !== lc(label)); plans.push({ label, exercises: ex, updated_at: new Date().toISOString() }); }
@@ -1673,10 +1676,131 @@ async function savePlan(){
 }
 
 // ================= The workout =================
+// Two timers, separate, and neither starts by itself:
+//  * Session: how long you're in the gym. ▶ Start / ❚❚ Pause. Saved on the workout as "time banked" + "running since".
+//  * Rest: between sets. Ticking a set starts it (if that's switched on), or tap ▶ Start yourself. +30s / Skip.
+//    When it ends: a banner + beep in the app; if the phone's locked, the server sends "REST'S UP · Next: …".
+// Timers are timestamps, not counters: "started at 6:41:05", so a sleeping phone still shows the right time.
+let restPrefs = { s: 90, auto: true }, rest = null, restSheet = null, woSummary = null, audioCtx = null;
+const nowMs = () => Date.now();
+const sesMs = w => (w?.session_ms || 0) + (w?.session_run_at ? Math.max(0, nowMs() - Date.parse(w.session_run_at)) : 0);
+const clock = ms => { const s = Math.max(0, Math.round(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
+const restLabel = s => !s ? "Off" : clock(s * 1000);
+const restFor = e => e && e.rest != null ? e.rest : restPrefs.s;
+const restKey = () => "gs-rest-" + myId;
+function saveRestLocal(){ try { rest ? localStorage.setItem(restKey(), JSON.stringify(rest)) : localStorage.removeItem(restKey()); } catch(_){} }
+function loadRestLocal(){ try { const r = JSON.parse(localStorage.getItem(restKey()) || "null"); if (r && r.end > nowMs() - 60000) rest = r; } catch(_){} }
+// A short beep. iPhones only allow sound after a tap, so the context is unlocked on the tap that started the rest.
+function unlockAudio(){ try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch(_){} }
+function beep(){ try { if (!audioCtx) return; const t = audioCtx.currentTime;
+  [0, .22].forEach(d => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+    g.gain.setValueAtTime(.0001, t + d); g.gain.exponentialRampToValueAtTime(.35, t + d + .02); g.gain.exponentialRampToValueAtTime(.0001, t + d + .18); o.start(t + d); o.stop(t + d + .2); }); } catch(_){} }
+
+// What's next after set j of exercise i (for the "rest's up" message)
+function nextUp(w, i, j){
+  const ex = w?.exercises || [];
+  const fmtSet = s => s ? [s.reps != null ? `${s.reps} reps` : "", s.kg != null ? fmtW(s.kg) : ""].filter(Boolean).join(" × ") : "";
+  const order = [];
+  for (let a = 0; a < ex.length; a++){ const ii = (i + a) % ex.length; (ex[ii].sets || []).forEach((s, jj) => { if (!(a === 0 && jj <= j && ii === i)) order.push([ii, jj]); }); }
+  const hit = order.find(([a, b]) => !ex[a].done && !ex[a].sets[b].done);
+  if (!hit) return ex.length ? "That's every set. Tap Finish 💪" : "Next set. Let's go.";
+  const [a, b] = hit, s = ex[a].sets[b], f = fmtSet(s);
+  return `Next: ${ex[a].name}, set ${b + 1}${f ? " · " + f : ""}`;
+}
+// ---- rest timer ----
+function startRest(secs, next){
+  if (!secs) return;
+  unlockAudio();
+  rest = { end: nowMs() + secs * 1000, total: secs * 1000, next: next || "Next set. Let's go.", cancelled: false };
+  saveRestLocal(); bookAlarm(); paintTimers();
+}
+function bookAlarm(){
+  if (!rest || !sb) return;
+  sb.from("rest_alarms").upsert({ user_id: myId, due_at: new Date(rest.end).toISOString(), title: "REST'S UP", body: String(rest.next).slice(0, 140), fired_at: null }, { onConflict: "user_id" })
+    .then(() => {}, () => {});
+}
+function cancelAlarm(){ if (sb && myId) sb.from("rest_alarms").delete().eq("user_id", myId).then(() => {}, () => {}); }
+function restPlus(){ if (!rest) return; rest.end += 30000; rest.total += 30000; rest.cancelled = false; saveRestLocal(); bookAlarm(); paintTimers(); }
+function restSkip(){ rest = null; saveRestLocal(); cancelAlarm(); paintTimers(); }
+// ---- session timer ----
+function sesStart(){ const w = myWo(woDay); if (!w || w.finished_at) return; unlockAudio(); w.session_run_at = new Date().toISOString(); woChanged(true); }
+function sesPause(){ const w = myWo(woDay); if (!w || !w.session_run_at) return; w.session_ms = sesMs(w); w.session_run_at = null; woChanged(true); }
+
+// Every half second: update the numbers on screen (no full redraw) and catch the end of a rest.
+setInterval(() => {
+  if (rest){
+    const left = rest.end - nowMs();
+    if (left < 3500 && !rest.cancelled && document.visibilityState === "visible"){ rest.cancelled = true; cancelAlarm(); }   // app is open: the app tells you, not the server
+    if (left <= 0){
+      const late = -left, next = rest.next; rest = null; saveRestLocal();
+      if (late < 5000 && document.visibilityState === "visible"){ beep(); showBanner({ style: me() ? pc(me()) : "", title: "REST'S UP", sub: next });
+        const c = $("t-rest"); if (c){ c.classList.add("flash"); setTimeout(() => c.classList.remove("flash"), 1600); } }
+      paintTimers();
+    }
+  }
+  paintTimers(true);
+}, 500);
+function paintTimers(numbersOnly){
+  const w = myWo(woDay), s = $("ses-t"), r = $("rest-t"), bar = $("rest-bar");
+  if (s && w) s.textContent = clock(sesMs(w));
+  if (r){ if (rest){ r.textContent = clock(rest.end - nowMs()); if (bar) bar.style.width = Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total))) + "%"; } }
+  if (!numbersOnly && woDay && $("timers")) $("timers").innerHTML = timersHtml(w);
+  if (!numbersOnly && woDay) wireTimers();
+}
+function timersHtml(w){
+  const run = !!w?.session_run_at, ms = sesMs(w), fin = !!w?.finished_at;
+  const ses = `<div class="tcard ses${run ? " live" : ""}" id="t-ses"><span class="label">${run ? '<i class="ldot"></i>Session' : ms ? "Paused" : "Session"}</span>
+    <span class="tnum mono${run || ms ? "" : " mut"}" id="ses-t">${clock(ms)}</span>
+    <div class="tacts">${fin ? `<span class="note">${ms ? "Done" : "Not timed"}</span>` : run ? `<button type="button" class="tbtn" data-tses="pause">❚❚ Pause</button>`
+      : `<button type="button" class="tbtn go" data-tses="start">▶ ${ms ? "Resume" : "Start"}</button>`}</div></div>`;
+  const on = restPrefs.s > 0;
+  const rst = rest ? `<div class="tcard rest live" id="t-rest"><span class="label">Resting</span><span class="tnum mono" id="rest-t">${clock(rest.end - nowMs())}</span>
+      <div class="tbar"><i id="rest-bar" style="width:${Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total)))}%"></i></div>
+      <div class="tacts"><button type="button" class="tbtn" data-trest="plus">+30s</button><button type="button" class="tbtn" data-trest="skip">Skip</button></div></div>`
+    : `<div class="tcard rest" id="t-rest"><span class="label">Rest${on ? `<button type="button" class="tlink" data-trest="change">Change</button>` : ""}</span><span class="tnum mono mut">${restLabel(restPrefs.s)}</span>
+      <div class="tacts">${on ? `<button type="button" class="tbtn go" data-trest="start">▶ Start</button>` : `<button type="button" class="tbtn" data-trest="change">Turn on</button>`}</div></div>`;
+  return ses + rst;
+}
+function wireTimers(){
+  main().querySelectorAll("[data-tses]").forEach(b => b.onclick = () => b.dataset.tses === "start" ? sesStart() : sesPause());
+  main().querySelectorAll("[data-trest]").forEach(b => b.onclick = () => { const a = b.dataset.trest, w = myWo(woDay);
+    if (a === "plus") restPlus(); else if (a === "skip") restSkip();
+    else if (a === "start") startRest(restPrefs.s || 90, nextUp(w, 0, -1));
+    else { restSheet = { ex: null }; render(); } });
+}
+
+// ---- the rest sheet: one place to change it ----
+function restSheetHtml(w){
+  if (!restSheet) return "";
+  const e = restSheet.ex != null ? w?.exercises?.[restSheet.ex] : null, cur = e ? restFor(e) : restPrefs.s;
+  const chips = [0, 45, 60, 90, 120, 180];
+  return `<div class="chgwrap"><div class="chgdim" data-rsclose></div><div class="chgsheet" role="dialog" aria-label="Rest timer">
+    <div class="grab"></div><span class="label">${e ? esc(e.name) : "Rest timer"}</span><h3 class="sign chgtitle">Rest between sets</h3>
+    <div class="chgchips">${chips.map(c => `<button type="button" class="chip${cur === c ? " on" : ""}" data-rspick="${c}">${c ? restLabel(c) : "Off"}</button>`).join("")}
+      ${e && e.rest != null ? `<button type="button" class="chip add" data-rspick="default">Use my default (${restLabel(restPrefs.s)})</button>` : ""}</div>
+    ${e ? `<p class="note">Just for ${esc(e.name)}. Saved to your plan, so it's set next time.</p>`
+        : `<label class="rsrow"><span>Start rest when I tick a set</span><input type="checkbox" class="sw" id="rs-auto" ${restPrefs.auto ? "checked" : ""}></label>
+           <p class="note">Your default for every exercise. Tap an exercise's REST tag to give it its own.</p>`}
+    <button class="cta" data-rsclose>Done</button></div></div>`;
+}
+function wireRestSheet(w){
+  if (!restSheet) return;
+  main().querySelectorAll("[data-rsclose]").forEach(b => b.onclick = () => { restSheet = null; render(); });
+  main().querySelectorAll("[data-rspick]").forEach(b => b.onclick = () => {
+    const v = b.dataset.rspick, e = restSheet.ex != null ? w?.exercises?.[restSheet.ex] : null;
+    if (e){ e.rest = v === "default" ? null : +v; if (e.rest == null) delete e.rest; woChanged(false); render(); return; }
+    restPrefs.s = +v; render();
+    sb.from("profiles").update({ rest_s: restPrefs.s }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save your rest time", error)); });
+  });
+  const a = $("rs-auto"); if (a) a.onchange = () => { restPrefs.auto = a.checked;
+    sb.from("profiles").update({ rest_auto: restPrefs.auto }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save that", error)); }); };
+}
+
 function woStatus(){
   const el = $("wo-status"), w = myWo(woDay); if (!el || !w) return;
   const n = woDone(w).length, tot = w.exercises.length;
-  el.textContent = `${n}/${tot} done` + (!n && !w.finished_at && !woErr ? " · tick ✓ each one as you finish it" : "") + (woErr ? " · not saved yet, will retry" : w.dirty ? " · saving…" : "");
+  el.textContent = (tot ? `${n}/${tot} exercises done` : "") + (woErr ? `${tot ? " · " : ""}not saved yet, will retry` : w.dirty ? `${tot ? " · " : ""}saving…` : "");
   el.classList.toggle("bad", !!woErr);
 }
 function woChanged(structural){
@@ -1688,45 +1812,69 @@ function woChanged(structural){
 async function woSave(finish){
   clearTimeout(woSaveT);
   const w = myWo(woDay) || (finish && finish.w); if (!w) return true;
-  const row = { user_id: myId, day: w.day, label: w.label, exercises: cleanEx(w.exercises) };
-  if (finish) row.finished_at = new Date().toISOString();
+  const row = { user_id: myId, day: w.day, label: w.label, exercises: cleanEx(w.exercises),
+    session_ms: Math.min(86400000, Math.round(w.session_ms || 0)), session_run_at: w.session_run_at || null };
+  if (finish){ row.finished_at = new Date().toISOString(); row.duration_s = finish.duration_s ?? null; }
   const { error } = await sb.from("workouts").upsert(row, { onConflict: "user_id,day" });
   if (error){ woErr = error; woSaveT = setTimeout(woSave, 5000); woStatus(); return false; }   // keep it on the phone, try again soon
   woErr = null; w.dirty = false; woStatus(); return true;
 }
+// Start always starts: your plan if you've written one, otherwise an empty session (timers + add as you go).
 function startWorkout(d){
   const m = me(); if (!m || !WORKOUTS) return;
   const k = key(d); let w = myWo(k);
   if (!w){
     const label = woLabelFor(m, d), plan = planFor(label);
-    if (!plan) return editPlan(label, "start", k);                    // first time for this day: write the plan first
-    w = { user_id: myId, day: k, label, exercises: plan.exercises.map(e => ({ name: e.name, done: false, sets: copySets(e.sets) })), started_at: new Date().toISOString(), finished_at: null };
+    w = { user_id: myId, day: k, label, session_ms: 0, session_run_at: null, started_at: new Date().toISOString(), finished_at: null,
+      exercises: plan ? plan.exercises.map(e => ({ name: e.name, done: false, ...(e.rest != null ? { rest: e.rest } : {}), sets: copySets(e.sets) })) : [] };
     workouts.push(w); woDay = k; woChanged(false);
   }
-  woDay = k; woAdding = false; woDiscardAsk = false; woOpenEx = null;
+  woDay = k; woAdding = false; woDiscardAsk = false; woOpenEx = null; woSummary = null;
   render(); window.scrollTo(0, 0);
 }
-function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; render(); window.scrollTo(0, 0); }
+function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; restSheet = null; render(); window.scrollTo(0, 0); }
 async function finishWorkout(){
   const w = myWo(woDay); if (!w) return;
   if (w.finished_at) return closeWorkout();                          // already finished: "Done" just closes (edits are saved)
-  if (!woDone(w).length) return;
   const btn = $("wo-finish"); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
-  const ok = await woSave({ w });
+  const ms = sesMs(w); w.session_ms = ms; w.session_run_at = null;
+  const duration_s = ms >= 60000 ? Math.round(ms / 1000) : null;
+  const ok = await woSave({ w, duration_s });
   if (!ok){ if (btn){ btn.disabled = false; btn.textContent = "Finish workout"; } return showWarn(oops("finish the workout", woErr)); }
-  w.finished_at = new Date().toISOString();
-  putPlan(w.label, w.exercises).catch(() => {});                     // next time opens with today's numbers
-  const d = parse(w.day); woDay = null; woAdding = false;
+  w.finished_at = new Date().toISOString(); w.duration_s = duration_s;
+  if (rest){ rest = null; saveRestLocal(); cancelAlarm(); }
+  const named = w.exercises.filter(e => e.name), had = planFor(w.label);
+  if (named.length && had) putPlan(w.label, w.exercises).catch(() => {});      // plan follows today's numbers
+  const sets = w.exercises.reduce((n, e) => n + (e.sets || []).filter(s => s.done || e.done).length, 0);
+  woSummary = { label: w.label, day: w.day, mins: duration_s ? Math.round(duration_s / 60) : 0, ex: woDone(w).length, sets, askPlan: named.length > 0 && !had, exercises: w.exercises };
+  const d = parse(w.day); woDay = null; woAdding = false; restSheet = null;
   if (!ticked(me(), d)) await toggleDay(d);                          // logs the day → streak + the one notification
-  else { render(); toast(`Workout saved · ${woDone(w).length} exercise${woDone(w).length === 1 ? "" : "s"}`); }
-  window.scrollTo(0, 0);
+  render(); window.scrollTo(0, 0);
 }
 async function discardWorkout(){
   const w = myWo(woDay); if (!w) return;
   if (!woDiscardAsk){ woDiscardAsk = true; return render(); }
-  const k = w.day; workouts = workouts.filter(x => x !== w); clearTimeout(woSaveT); woErr = null; woDay = null; woDiscardAsk = false; render();
+  const k = w.day; workouts = workouts.filter(x => x !== w); clearTimeout(woSaveT); woErr = null; woDay = null; woDiscardAsk = false;
+  if (rest){ rest = null; saveRestLocal(); cancelAlarm(); } render();
   const { error } = await sb.from("workouts").delete().eq("user_id", myId).eq("day", k);
   if (error) showWarn(oops("delete the workout", error)); else toast("Workout deleted");
+}
+// After Finish: a small summary, and (first time for this day) "save as your plan?"
+function viewSummary(){
+  const s = woSummary; $("title").textContent = "Done"; $("tabbar").hidden = true;
+  main().innerHTML = `<div class="view wo" style="${pc(me())}">
+    <div class="card wosum"><span class="label">Workout done</span><div class="work sign">${esc(s.label)} ✓</div>
+      <div class="wostats"><div><b class="mono">${s.mins ? s.mins + "m" : "–"}</b><span class="label">Session</span></div>
+        <div><b class="mono">${s.ex}</b><span class="label">Exercises</span></div><div><b class="mono">${s.sets}</b><span class="label">Sets</span></div></div></div>
+    ${s.askPlan ? `<div class="card" id="sum-ask"><b>Save as your ${esc(s.label)} plan?</b><p class="note" style="margin:4px 0 10px">Next ${esc(s.label)} opens with these exercises and today's numbers.</p>
+      <div class="row2"><button class="cta ghost ssm" id="sum-no">Not now</button><button class="cta ssm" id="sum-yes">Save</button></div></div>` : ""}
+    <p class="note" style="text-align:center">Your crew got one notification. Nice work.</p>
+    <button class="cta" id="sum-done">Done</button></div>`;
+  $("sum-done").onclick = () => { woSummary = null; render(); window.scrollTo(0, 0); };
+  if ($("sum-no")) $("sum-no").onclick = () => { s.askPlan = false; render(); };
+  if ($("sum-yes")) $("sum-yes").onclick = async () => { $("sum-yes").disabled = true;
+    const { error } = await putPlan(s.label, s.exercises); if (error) { $("sum-yes").disabled = false; return showWarn(oops("save your plan", error)); }
+    s.askPlan = false; toast(`Saved as your ${s.label} plan`); render(); };
 }
 
 // The Today card's workout button (under "Log today's session")
@@ -1735,19 +1883,25 @@ function woTodayHtml(m, t){
   const w = myWo(key(t)), done = ticked(m, t);
   if (w && !w.finished_at){ const n = woDone(w).length;
     return `<button class="cta wo-go" id="wo-go">Continue workout${w.exercises.length ? ` · ${n}/${w.exercises.length}` : ""}</button>`; }
-  if (w && woDone(w).length) return `<button type="button" class="linkbtn wo-link" id="wo-go">See today's workout · ${woDone(w).length} exercise${woDone(w).length === 1 ? "" : "s"}</button>`;
+  if (w && w.finished_at) return `<button type="button" class="linkbtn wo-link" id="wo-go">See today's workout${woDone(w).length ? ` · ${woDone(w).length} exercise${woDone(w).length === 1 ? "" : "s"}` : ""}${w.duration_s ? ` · ${Math.round(w.duration_s / 60)} min` : ""}</button>`;
   if (done) return `<button type="button" class="linkbtn wo-link" id="wo-go">+ Add workout details</button>`;
   return `<button class="cta ghost wo-go" id="wo-go">🏋️ Start workout</button>`;
 }
 
 function woExHtml(e, i, w){
   const open = !e.done || woOpenEx === i, last = lastFor(e.name, w.day), sum = fmtSets(e.sets);
-  const sub = e.done ? (sum || "Done") : last ? `Last: ${fmtSets(last.sets)}` : `${(e.sets || []).length} sets`;
+  const sub = e.done ? (sum || "Done") : last ? `Last: ${fmtSets(last.sets)}` : `${(e.sets || []).length} set${(e.sets || []).length === 1 ? "" : "s"}`;
+  const rs = restFor(e);
+  const rows = (e.sets || []).map((s, j) => `<div class="wosrow${s.done ? " sdone" : ""}"><span class="won mono">${j + 1}</span>
+    <label class="wopick">${repSel(i + ":" + j, s.reps)}<span>reps</span></label>
+    <label class="wopick">${wSel(i + ":" + j, s.kg)}<span>${unit}</span></label>
+    <button type="button" class="setck${s.done ? " on" : ""}" data-tickset="${i}:${j}" aria-label="Set ${j + 1} ${s.done ? "done" : "not done"}">${s.done ? CHECK : ""}</button></div>`).join("");
   return `<div class="card woex${e.done ? " done" : ""}${open ? " open" : ""}">
     <div class="woexhead"><button type="button" class="wotick" data-tick="${i}" aria-label="${e.done ? "Not done" : "Done"}: ${esc(e.name)}">${e.done ? CHECK : ""}</button>
-      <button type="button" class="woname" data-openex="${i}"><b>${esc(e.name)}</b><span class="note">${esc(sub)}</span></button></div>
-    ${open ? `<div class="wosets">${setRows(e, i)}
-      <div class="woexfoot"><button type="button" class="linkbtn" data-addset="${i}">+ Add set</button>
+      <button type="button" class="woname" data-openex="${i}"><b>${esc(e.name)}</b><span class="note">${esc(sub)}</span></button>
+      ${open && !w.finished_at ? `<button type="button" class="restpill mono" data-restex="${i}">REST ${restLabel(rs).toUpperCase()}</button>` : ""}</div>
+    ${open ? `<div class="wosets">${rows}
+      <div class="woexfoot"><span><button type="button" class="linkbtn" data-addset="${i}">+ Set</button>${(e.sets || []).length ? `<button type="button" class="linkbtn" data-rmset="${i}:${e.sets.length - 1}">− Set</button>` : ""}</span>
       <button type="button" class="linkbtn" data-rmex="${i}">Remove</button></div></div>` : ""}</div>`;
 }
 function viewWorkout(){
@@ -1755,29 +1909,37 @@ function viewWorkout(){
   $("title").textContent = "Workout"; $("tabbar").hidden = true;
   const n = woDone(w).length, fin = !!w.finished_at, d = parse(w.day);
   const when = key(d) === key(today()) ? "Today" : DAYS_LONG[dow(d)];
+  const empty = !w.exercises.length;
   main().innerHTML = `<div class="view wo" style="${pc(me())}">
     <button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>
-    <div class="wohead"><span class="label">${fin ? "Finished" : "In progress"} · ${when}</span>
-      <div class="work sign">${esc(w.label || "Workout")}</div>
-      <p class="note" id="wo-status"></p></div>
-    <div class="worow">${unitToggle()}<button type="button" class="linkbtn" id="wo-plan">Edit plan</button></div>
+    <div class="wohead"><span class="label">${fin ? "Finished" : w.session_run_at || n ? "In progress" : "Ready"} · ${when}</span>
+      <div class="work sign">${esc(w.label || "Workout")}</div><p class="note" id="wo-status"></p></div>
+    <div class="timers" id="timers">${timersHtml(w)}</div>
+    <div class="worow">${unitToggle()}<button type="button" class="linkbtn" id="wo-plan">${planFor(w.label) ? "Edit plan" : "Write a plan"}</button></div>
+    ${empty && !woAdding ? `<div class="ssoft"><b>No details for ${esc(w.label)} yet</b><span class="note">That's fine. Start the timer and go, or add exercises as you do them.</span></div>` : ""}
     ${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}
     ${woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise name" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
         <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
       : `<button type="button" class="cta ghost woadd" id="wo-add">+ Add exercise</button>`}${namesList()}
     <p class="note wopriv">${LOCK} Only you and your Buds see this.${fin ? "" : " Your crew gets one notification when you finish."}</p>
     ${fin ? "" : `<button type="button" class="linkbtn wodiscard" id="wo-discard">${woDiscardAsk ? "Tap again to delete this workout" : "Discard workout"}</button>`}
-    <div class="wofoot"><button class="cta" id="wo-finish" ${fin || n ? "" : "disabled"}>${fin ? "Done" : "Finish workout"}</button></div></div>`;
-  woStatus();
+    <div class="wofoot"><button class="cta" id="wo-finish">${fin ? "Done" : "Finish workout"}</button></div>${restSheetHtml(w)}</div>`;
+  woStatus(); wireTimers(); wireRestSheet(w);
   $("wo-back").onclick = closeWorkout;
   $("wo-finish").onclick = finishWorkout;
   $("wo-plan").onclick = () => editPlan(w.label, "workout", w.day);
   if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
-  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const e = w.exercises[+b.dataset.tick]; if (!e) return;
-    e.done = !e.done; woDiscardAsk = false; woOpenEx = null;
-    if (e.done) try { navigator.vibrate && navigator.vibrate(10); } catch(_){}
+  // whole exercise ✓ (simple) — ticks every set; set ✓ (detailed) — starts the rest timer
+  main().querySelectorAll("[data-tick]").forEach(b => b.onclick = () => { const i = +b.dataset.tick, e = w.exercises[i]; if (!e) return;
+    unlockAudio(); e.done = !e.done; (e.sets || []).forEach(s => s.done = e.done); woDiscardAsk = false; woOpenEx = null;
+    if (e.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, (e.sets || []).length - 1));
+    woChanged(true); });
+  main().querySelectorAll("[data-tickset]").forEach(b => b.onclick = () => { const [i, j] = b.dataset.tickset.split(":").map(Number), e = w.exercises[i], s = e?.sets?.[j]; if (!s) return;
+    unlockAudio(); s.done = !s.done; e.done = e.sets.length > 0 && e.sets.every(x => x.done);
+    if (s.done && restPrefs.auto && restFor(e) && !fin) startRest(restFor(e), nextUp(w, i, j));
     woChanged(true); });
   main().querySelectorAll("[data-openex]").forEach(b => b.onclick = () => { const i = +b.dataset.openex; if (!w.exercises[i]?.done) return; woOpenEx = woOpenEx === i ? null : i; render(); });
+  main().querySelectorAll("[data-restex]").forEach(b => b.onclick = () => { restSheet = { ex: +b.dataset.restex }; render(); });
   wireSets(w.exercises, woChanged);
   if ($("wo-add")) $("wo-add").onclick = () => { woAdding = true; render(); $("wo-newex")?.focus(); };
   const addEx = () => { const name = String($("wo-newex")?.value || "").trim().slice(0, 60); if (!name) return $("wo-newex")?.focus();
@@ -1804,7 +1966,7 @@ function woProfileHtml(o, inYou){
   const when = k => { const d = parse(k), diff = Math.round((today() - d) / 864e5);
     return diff === 0 ? "Today" : diff === 1 ? "Yesterday" : diff < 7 ? DAYS_LONG[dow(d)] : d.toLocaleDateString("en-AU", { day: "numeric", month: "short" }); };
   return out + `<div class="sec"><h2 class="sign">Workouts</h2><span class="label">${self ? "You + your Buds see this" : "Buds only"}</span></div>
-    <div class="card wolist">${list.map(w => `<div class="wolog"><div class="wologhead"><b>${esc(w.label || "Workout")}</b><span class="note">${when(w.day)}${w.finished_at ? "" : " · in progress"}</span></div>
+    <div class="card wolist">${list.map(w => `<div class="wolog"><div class="wologhead"><b>${esc(w.label || "Workout")}</b><span class="note">${when(w.day)}${w.duration_s ? ` · ${Math.round(w.duration_s / 60)} min` : ""}${w.finished_at ? "" : " · in progress"}</span></div>
       ${woDone(w).map(e => `<div class="wologex"><span>${esc(e.name)}</span><span class="mono note">${esc(fmtSets(e.sets))}</span></div>`).join("")}</div>`).join("")}</div>`;
 }
 
@@ -1842,7 +2004,7 @@ function splitGoHtml(m, t){
   if (m.watcher || !slot(m, t)) return "";
   const w = myWo(key(t)), lab = slot(m, t)?.w || "Gym day";
   const txt = w && !w.finished_at ? `Continue workout${w.exercises.length ? ` · ${woDone(w).length}/${w.exercises.length}` : ""}`
-    : w && woDone(w).length ? "See today's workout" : `🏋️ Start ${lab} workout`;
+    : w && w.finished_at ? "See today's workout" : `🏋️ Start ${lab} workout`;
   return `<div class="splitgo"><button class="cta" id="split-go">${esc(txt)}</button></div>`;
 }
 function viewSplit(){
@@ -2256,7 +2418,7 @@ async function loadMemberCount(){
 }
 function renderOnline(){
   const el = $("online"); if (!el) return;
-  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay && !woPlan && !(tab === "split" && !profileId && !circleId && !chatKey);
+  const show = !!session && !ob && memberCount > 0 && !needsInstall() && !locked && authKnown && !wnActive && !(chatKey && !profileId && !circleId) && !woDay && !woPlan && !woSummary && !(tab === "split" && !profileId && !circleId && !chatKey);
   el.hidden = !show; if (!show) return;
   el.setAttribute("aria-label", `${memberCount} ${memberCount === 1 ? "person has" : "people have"} joined CREW`);
   el.innerHTML = `<span class="live" aria-hidden="true"></span><b class="mono">${memberCount}</b><span class="olabel">${memberCount === 1 ? "member" : "members"}</span>`;
@@ -3220,6 +3382,7 @@ function render(){
     $("load-retry").onclick = () => { main().innerHTML = `<div class="skel">Loading the crew…</div>`; loadAll(); }; return; }
   if (!me()){ $("title").textContent = "Welcome"; $("tabbar").hidden = true; profileId = null; chatKey = null; circleId = null; return viewJoin(); }
   if (wnActive) return viewWhatsNew();
+  if (woSummary && !profileId && !circleId && !chatKey) return viewSummary();
   if (woPlan && !profileId && !circleId && !chatKey) return viewPlan();
   if (woDay && !profileId && !circleId && !chatKey) return viewWorkout();
   updateChatBadge();
@@ -3235,7 +3398,7 @@ function render(){
   maybeShowPushSheet();
 }
 let trophyBack = "you";
-function setTab(t){ if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -3256,7 +3419,7 @@ let sb = null, session = null, authKnown = false;
     if (event === "SIGNED_OUT") locked = false;
     authKnown = true;
     if (myId !== was){                                     // signed out or a different person: forget the last one's screens + chats
-      loadGen++; workouts = []; plans = []; swaps = new Map(); splitOpenDay = null; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
+      loadGen++; workouts = []; plans = []; swaps = new Map(); splitOpenDay = null; rest = null; woSummary = null; restSheet = null; woPlan = null; woDay = null; chatKey = null; profileId = null; circleId = null; circleMode = "view"; joinPreview = null; unbudAsk = null;
       messages = []; chatReads = {}; chatDrafts = {}; circles = []; reactions = []; nudges = []; bannerQ = [];
       document.documentElement.classList.remove("chat-open");
     }
@@ -3270,7 +3433,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b38";   // bump together with version.json on every release
+const APP_VERSION = "b39";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

@@ -192,13 +192,13 @@ export function reactionNote(fromName: string, emoji: string, me: Ctx, day: stri
     body: join(w || "Session", today ? (n >= 2 ? `day ${n}` : "today") : dayWord(day, me.tz).replace(/^on /, "")), tag: "react" };
 }
 // circle = "🔥 Uni gym boys" when this came through a circle, tally = "4 of 6" trained today in it
-export function crewNote(who: Ctx, showWorkout: boolean, me: Ctx, circle?: string | null, tally?: string | null, exercises = 0): Note {
+export function crewNote(who: Ctx, showWorkout: boolean, me: Ctx, circle?: string | null, tally?: string | null, exercises = 0, minutes = 0): Note {
   const tw = dayIn(who.tz), t = dayIn(me.tz);                 // their day (what they trained) vs my day (what I've got on)
   const w = showWorkout ? slotOf(who, tw)?.w : null, name = U(who.name);
   const title = me.days.has(t) ? `${name} TRAINED TOO`
     : gymDay(me, t) ? `${name}'S DONE. YOU'RE UP.`
     : `${name} JUST TRAINED`;
-  const body = join(`${w || "Session"} ✓`, exercises > 0 && `${exercises} exercise${exercises === 1 ? "" : "s"}`, circle ? `${circle}${tally ? " " + tally + " today" : ""}` : streakBit(streak(who)));
+  const body = join(`${w || "Session"} ✓`, exercises > 0 && `${exercises} exercise${exercises === 1 ? "" : "s"}`, minutes > 0 && `${minutes} min`, circle ? `${circle}${tally ? " " + tally + " today" : ""}` : streakBit(streak(who)));
   return { title, body, tag: "crew-" + who.id };
 }
 export function reminderNote(me: Ctx, now = new Date()): Note {
@@ -289,16 +289,26 @@ async function onCheckin(b: any){
   const ctx = await contexts([r.user_id, ...to]);
   const showWorkout = who.account ? !who.hide_split : who.share_split;
   // Logged with "Start workout" (beta)? Say how many exercises: "Push ✓ · 5 exercises". Details stay in the app (Buds only).
-  const wo = await rest(`workouts?select=exercises&user_id=eq.${r.user_id}&day=eq.${r.day}`).catch(() => []);
+  const wo = await rest(`workouts?select=exercises,duration_s&user_id=eq.${r.user_id}&day=eq.${r.day}`).catch(() => []);
   const nEx = Array.isArray(wo?.[0]?.exercises) ? wo[0].exercises.filter((e: any) => e && e.done === true).length : 0;
+  const mins = Number.isFinite(wo?.[0]?.duration_s) && wo[0].duration_s >= 60 ? Math.round(wo[0].duration_s / 60) : 0;
   let sent = 0;
   const tallies = new Map<string, string | null>();              // one count per circle, shared by everyone in it
   for (const id of to){
     const me = ctx.get(id), via = recips.get(id); if (!me) continue;
     if (via && !tallies.has(via.cid)) tallies.set(via.cid, await circleTally(via.cid).catch(() => null));
-    sent += (await send([id], crewNote(ctx.get(r.user_id)!, showWorkout, me, via?.label, via ? tallies.get(via.cid) : null, nEx))).sent;
+    sent += (await send([id], crewNote(ctx.get(r.user_id)!, showWorkout, me, via?.label, via ? tallies.get(via.cid) : null, nEx, mins))).sent;
   }
   return { to: to.length, sent };
+}
+// Rest timer finished (booked by the phone, fired by the 5-second job). Re-read the row: only the job marks it fired.
+export const restNote = (title: string, body: string): Note => ({ title: String(title || "REST'S UP").slice(0, 60), body: String(body || "Next set").slice(0, 140), tag: "rest" });
+async function onRest(b: any){
+  if (!isUuid(b?.user_id)) return { skipped: "bad" };
+  const [a] = await rest(`rest_alarms?select=title,body,fired_at&user_id=eq.${b.user_id}&fired_at=not.is.null`);
+  if (!a || !fresh(a.fired_at)) return { skipped: "not found" };
+  await rest(`rest_alarms?user_id=eq.${b.user_id}`, { method: "DELETE" });          // once only
+  return await send([b.user_id], restNote(a.title, a.body));
 }
 async function onCircleAdd(r: any){
   if (!isUuid(r?.circle_id) || !isUuid(r?.user_id)) return { skipped: "bad" };
@@ -386,6 +396,7 @@ export async function handle(req: Request){
     else if (b.type === "buds") out = await onBud(b.record);
     else if (b.type === "bud_accept") out = await onBudAccept(b.record);
     else if (b.type === "reminders") out = await onReminders();
+    else if (b.type === "rest") out = await onRest(b);
     else if (b.type === "test") out = await onTest(req);
     else if (b.type === "ping") out = { ok: true, vapid: !!(await keys()).priv };
     else out = { error: "unknown type" };
