@@ -2158,8 +2158,33 @@ function wireWorkoutList(w, fin){
   if ($("wo-newex")){ $("wo-addgo").onclick = addEx; $("wo-addcancel").onclick = () => { woAdding = false; render(); };
     $("wo-newex").onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); addEx(); } }; }
 }
+// Finished workout ("See today's workout") — DP's I3: summary on top, a short receipt, exercises optional
+function viewWorkoutDone(w){
+  const m = me(), d = parse(w.day), when = w.day === key(today()) ? "Today" : DAYS_LONG[dow(d)];
+  const secs = w.duration_s || (sesMs(w) >= 60000 ? Math.round(sesMs(w) / 1000) : 0);
+  const at = w.finished_at ? new Date(w.finished_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase() : "";
+  const hasSets = w.exercises.some(e => (e.sets || []).length);
+  main().innerHTML = `<div class="view wo whv wdone" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>
+    <section class="card wdhero"><span class="wdtick" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+      <span class="label">Finished · ${esc(when)}</span><div class="work sign wdname">${esc(w.label || "Workout")} done</div>
+      <span class="note">Logged · your crew was told</span></section>
+    <section class="card wdlist">
+      <div><span>Workout time</span><b class="sign whnum">${secs ? clock(secs * 1000) : "–"}</b></div>
+      ${at ? `<div><span>Finished</span><b class="wdat">${esc(at)}</b></div>` : ""}
+      <div><span>Day streak</span><b class="sign whnum" style="color:var(--cti,var(--c))">${dayStreak(m)}</b></div></section>
+    ${w.exercises.length ? `<div class="sec whsec"><span class="label">What you did</span>${hasSets ? unitToggle() : ""}</div>${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}` : ""}
+    ${woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+        <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
+      : `<button type="button" class="card wdadd" id="wo-add">+ Add what you did <span class="note">(optional)</span></button>`}${namesList()}
+    <p class="note wdnote">${LOCK} Only you and your Buds see this. Undo the log on Today to redo it.</p>
+    <div class="wofoot whfoot"><button class="whbtn dark" id="wo-finish">Done</button></div>${restSheetHtml(w)}</div>`;
+  $("title").textContent = "Workout"; $("tabbar").hidden = true;
+  $("wo-back").onclick = closeWorkout; $("wo-finish").onclick = finishWorkout;
+  wireRestSheet(w); wireWorkoutList(w, true);
+}
 function viewWorkout(){
   const w = myWo(woDay); if (!w){ woDay = null; return render(); }
+  if (WO_V2 && w.finished_at) return viewWorkoutDone(w);
   if (WO_V2 && !w.finished_at) return viewWorkoutV2(w);
   $("title").textContent = "Workout"; $("tabbar").hidden = true;
   const n = woDone(w).length, fin = !!w.finished_at, d = parse(w.day);
@@ -3912,7 +3937,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = "b50";   // bump together with version.json on every release
+const APP_VERSION = "b51";   // bump together with version.json on every release
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
