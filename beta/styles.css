@@ -1255,3 +1255,7 @@ button.hrow{cursor:pointer}
 .rfbig{font-size:64px;line-height:1}
 .rfrows{display:flex;flex-direction:column}
 .rfrows div{display:flex;justify-content:space-between;padding:11px 0;border-top:1px solid var(--line);font-size:16px}
+html.rf-open header.top{display:none}
+html.rf-open .rfv{min-height:calc(100dvh - 40px)}
+.rfv .chgsheet .woex{text-align:left}
+.rfv .chgsheet>*{flex-shrink:0}

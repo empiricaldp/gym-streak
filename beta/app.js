@@ -4020,7 +4020,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b61" : "53";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b62" : "53";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4394,7 +4394,7 @@ function viewWorkoutRF(w){
     : `<button type="button" class="linkbtn whlink" id="wo-add">+ Note an exercise</button>`;
   const state = resting ? (paused ? "Rest paused" : "Resting") : run ? "In the gym" : "Paused";
   const top = `<div class="whtop"><span><span class="label whstate${run && !resting ? " live" : ""}">● ${state}</span><span class="sign whsmall">${esc(w.label || "Workout")}</span></span>
-      <span class="whright"><span class="label">Workout</span><b ${NUM} id="ses-t">${clock(ms)}</b></span></div>`;
+      <button type="button" class="whright rfwt" id="wo-time" aria-label="Workout ${clock(ms)}: exercises and finish"><span class="label">Workout</span><b ${NUM} id="ses-t">${clock(ms)}</b></button></div>`;
   const ring = `<div class="whringbox"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="53" class="trk"/>
       <circle cx="60" cy="60" r="53" class="val" id="rest-ring" style="stroke-dasharray:${RING_C};stroke-dashoffset:${RING_C * (1 - frac)}"/></svg>
       <button type="button" class="rfmid" data-trest="change" aria-label="Rest ${clock(left)}. Tap to change"><b ${NUM} id="rest-t" role="timer" aria-live="off">${clock(left)}</b><span class="label">${resting ? (paused ? "Paused" : "Rest left") : "Rest"}</span></button></div>`;
@@ -4407,18 +4407,17 @@ function viewWorkoutRF(w){
     foot = `<div class="whrow2"><button class="whbtn soft" id="rf-reset">Reset</button>
       <button class="whbtn dark" data-trest="skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l10-7zM16 5h3v14h-3z"/></svg>Skip</button></div>`;
   } else {
-    body = `${top}<section class="card whring">${ring}<p class="note">Tap the time to change it</p></section>
-      ${exList}${addBox}
-      <div class="whlinks"><button type="button" class="linkbtn" id="wo-finish2">Finish workout</button><button type="button" class="linkbtn" id="wo-discard">${woDiscardAsk ? "Tap again to delete" : "Discard"}</button></div>`;
+    body = `${top}<section class="card whring">${ring}<p class="note">Tap the time to change it</p></section>`;
     foot = `<button class="whbtn red" id="rf-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start rest</button>`;
   }
   const sheet = woTimeSheet ? `<div class="chgwrap"><div class="chgdim" data-wtclose></div><div class="chgsheet" role="dialog" aria-label="Workout time">
       <div class="grab"></div><span class="label">Workout time</span><b class="sign whnum rfbig" id="ses-t2">${clock(ms)}</b>
       <div class="rfrows"><div><span>Started</span><b class="mono">${esc(new Date(w.started_at || Date.now()).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }))}</b></div>
         <div><span>Rests taken</span><b class="mono">${w._rests || 0}</b></div><div><span>Exercises done</span><b class="mono">${woDone(w).length} of ${w.exercises.length}</b></div></div>
-      <div class="whrow2"><button class="whbtn soft" data-tses="${run ? "pause" : "start"}">${run ? "Pause" : "Resume"}</button><button class="whbtn red" id="wo-finish">Finish workout</button></div>
-      ${!run && ms > 0 ? `<button type="button" class="linkbtn" data-tses="reset" style="align-self:center">Reset workout time</button>` : ""}
-      <button type="button" class="linkbtn" data-wtclose style="align-self:center">Close</button></div></div>` : "";
+      ${exList}${addBox}
+      <button class="whbtn red" id="wo-finish">Finish workout</button>
+      <div class="whlinks"><button type="button" class="linkbtn" id="wo-discard">${woDiscardAsk ? "Tap again to delete" : "Discard workout"}</button><button type="button" class="linkbtn" data-wtclose>Close</button></div></div></div>` : "";
+  document.documentElement.classList.add("rf-open");   // b62: no app header on this screen (DP's mock-up)
   main().innerHTML = `<div class="view wo whv rfv" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>${body}${namesList()}
     <div class="wofoot whfoot">${foot}</div>${restSheetHtml(w)}${sheet}</div>`;
   $("title").textContent = "Workout"; $("tabbar").hidden = true;
@@ -4435,3 +4434,5 @@ function viewWorkoutRF(w){
   if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
   wireWorkoutList(w, false);
 }
+
+{ const core = render; render = function(){ document.documentElement.classList.remove("rf-open"); return core.apply(this, arguments); }; }
