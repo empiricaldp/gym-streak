@@ -1702,9 +1702,10 @@ function repSel(at, v){
   const opts = v != null && !REPS.includes(v) ? [...REPS, v].sort((a, b) => a - b) : REPS;
   return `<select class="wosel mono" data-reps="${at}" aria-label="Reps"><option value=""${v == null ? " selected" : ""}>–</option>${opts.map(n => `<option value="${n}"${n === v ? " selected" : ""}>${n}</option>`).join("")}</select>`;
 }
+// Weight is typed in (feedback: 112.5 wasn't in the list). Any number, decimals with . or , — e.g. 112.5, 22,5
 function wSel(at, kg){
-  const v = showW(kg), base = W_OPTS[unit], opts = v != null && !base.includes(v) ? [...base, v].sort((a, b) => a - b) : base;
-  return `<select class="wosel mono" data-kg="${at}" aria-label="Weight in ${unit}"><option value=""${v == null ? " selected" : ""}>–</option>${opts.map(n => `<option value="${n}"${n === v ? " selected" : ""}>${n}</option>`).join("")}</select>`;
+  const v = showW(kg);
+  return `<input class="wosel woinw mono" type="text" inputmode="decimal" enterkeyhint="done" autocomplete="off" data-kg="${at}" value="${v == null ? "" : v}" placeholder="–" aria-label="Weight in ${unit}">`;
 }
 function setRows(e, i){
   return (e.sets || []).map((s, j) => `<div class="wosrow"><span class="won mono">${j + 1}</span>
@@ -1721,7 +1722,11 @@ function wireSets(list, onChange){
     for (let k = j + 1; k < e.sets.length; k++){ if (e.sets[k][field] !== old) break; e.sets[k][field] = val; spread = true; }
     onChange(spread); };
   main().querySelectorAll("[data-reps]").forEach(f => f.onchange = () => pick(f, "reps", numIn(f.value)));
-  main().querySelectorAll("[data-kg]").forEach(f => f.onchange = () => pick(f, "kg", toKg(f.value)));
+  main().querySelectorAll("[data-kg]").forEach(f => {
+    f.onchange = () => { const n = numIn(f.value, true); if (f.value.trim() && n == null){ f.value = showW(list[at(f.dataset.kg)[0]]?.sets?.[at(f.dataset.kg)[1]]?.kg) ?? ""; return toast("Type a weight, like 112.5"); } pick(f, "kg", n == null ? null : toKg(n)); };
+    f.onkeydown = ev => { if (ev.key === "Enter"){ ev.preventDefault(); f.blur(); } };
+    f.onfocus = () => { try { f.select(); } catch(_){} };
+  });
   main().querySelectorAll("[data-addset]").forEach(b => b.onclick = () => { const e = list[+b.dataset.addset]; if (!e) return;
     const prev = e.sets[e.sets.length - 1]; e.sets.push(prev ? { ...prev } : { reps: 10, kg: null }); onChange(true); });
   main().querySelectorAll("[data-rmset]").forEach(b => b.onclick = () => { const [i, j] = at(b.dataset.rmset); list[i]?.sets.splice(j, 1); onChange(true); });
@@ -4011,7 +4016,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b58" : "52";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b59" : "53";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });

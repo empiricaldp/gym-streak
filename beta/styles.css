@@ -875,6 +875,8 @@ html.wn-open header.top{display:none}
 .wopick span{font-size:12px;color:var(--muted);flex:none}
 .wosel{appearance:none;-webkit-appearance:none;border:0;background:transparent;color:var(--fg);font-size:20px;font-weight:700;padding:10px 0;width:100%;min-width:0;cursor:pointer;text-align:left}
 .wosel:focus{outline:none}
+.woinw{cursor:text;font-family:var(--mono)}
+.woinw::placeholder{color:var(--muted)}
 .wopick:focus-within{outline:2px solid var(--c);border-color:transparent}
 .worow{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .worow .linkbtn{padding-right:0}
