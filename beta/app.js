@@ -4020,7 +4020,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b60" : "53";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b61" : "53";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4384,6 +4384,7 @@ function restPauseToggle(){
 }
 const PEN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>';
 function viewWorkoutRF(w){
+  if (rest && rest.paused != null){ rest.end = nowMs() + rest.paused; delete rest.paused; saveRestLocal(); bookAlarm(); }   // b61 has no Pause: carry on a rest paused in b60
   const m = me(), run = !!w.session_run_at, ms = sesMs(w), resting = !!rest, paused = resting && rest.paused != null;
   const left = resting ? restLeft() : (restPrefs.s || 90) * 1000, frac = resting ? Math.max(0, Math.min(1, left / rest.total)) : 1;
   const hasSets = w.exercises.some(e => (e.sets || []).length);
@@ -4393,7 +4394,7 @@ function viewWorkoutRF(w){
     : `<button type="button" class="linkbtn whlink" id="wo-add">+ Note an exercise</button>`;
   const state = resting ? (paused ? "Rest paused" : "Resting") : run ? "In the gym" : "Paused";
   const top = `<div class="whtop"><span><span class="label whstate${run && !resting ? " live" : ""}">● ${state}</span><span class="sign whsmall">${esc(w.label || "Workout")}</span></span>
-      <button type="button" class="whright rfwt" id="wo-time" aria-label="Workout time ${clock(ms)}, details"><span class="label">Workout ›</span><b ${NUM} id="ses-t">${clock(ms)}</b></button></div>`;
+      <span class="whright"><span class="label">Workout</span><b ${NUM} id="ses-t">${clock(ms)}</b></span></div>`;
   const ring = `<div class="whringbox"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="53" class="trk"/>
       <circle cx="60" cy="60" r="53" class="val" id="rest-ring" style="stroke-dasharray:${RING_C};stroke-dashoffset:${RING_C * (1 - frac)}"/></svg>
       <button type="button" class="rfmid" data-trest="change" aria-label="Rest ${clock(left)}. Tap to change"><b ${NUM} id="rest-t" role="timer" aria-live="off">${clock(left)}</b><span class="label">${resting ? (paused ? "Paused" : "Rest left") : "Rest"}</span></button></div>`;
@@ -4401,12 +4402,12 @@ function viewWorkoutRF(w){
       ? `<span class="note rfof">of ${clock(rest.total)}</span>` : `<button type="button" class="rfchg" data-trest="change">${PEN}Change rest</button>`}<button type="button" class="rfpm" data-radj="15" aria-label="15 seconds more">+15</button></div>`;
   let body, foot;
   if (resting){
-    body = `${top}<section class="card whring">${ring}${adj}<p class="note">${esc(rest.next || "Your phone buzzes when it's time.")}</p></section>
-      <div class="whlinks"><button type="button" class="linkbtn" id="rf-reset">Reset to ${clock(rest.full || rest.total)}</button></div>`;
-    foot = `<div class="whrow2"><button class="whbtn soft" id="rf-pause">${paused ? `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Resume` : `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4.2" height="14" rx="1.2"/><rect x="13.8" y="5" width="4.2" height="14" rx="1.2"/></svg>Pause`}</button>
+    // b61 (DP: "too complicated"): resting = the ring + Reset + Skip. Nothing else.
+    body = `${top}<section class="card whring">${ring}<p class="note">Your phone buzzes when it's time</p></section>`;
+    foot = `<div class="whrow2"><button class="whbtn soft" id="rf-reset">Reset</button>
       <button class="whbtn dark" data-trest="skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l10-7zM16 5h3v14h-3z"/></svg>Skip</button></div>`;
   } else {
-    body = `${top}<section class="card whring">${ring}${adj}<p class="note">Your phone buzzes when rest is up.</p></section>
+    body = `${top}<section class="card whring">${ring}<p class="note">Tap the time to change it</p></section>
       ${exList}${addBox}
       <div class="whlinks"><button type="button" class="linkbtn" id="wo-finish2">Finish workout</button><button type="button" class="linkbtn" id="wo-discard">${woDiscardAsk ? "Tap again to delete" : "Discard"}</button></div>`;
     foot = `<button class="whbtn red" id="rf-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start rest</button>`;
@@ -4423,7 +4424,7 @@ function viewWorkoutRF(w){
   $("title").textContent = "Workout"; $("tabbar").hidden = true;
   wireTimers(); wireRestSheet(w);
   $("wo-back").onclick = () => { woTimeSheet = false; closeWorkout(); };
-  $("wo-time").onclick = () => { woTimeSheet = true; render(); };
+  if ($("wo-time")) $("wo-time").onclick = () => { woTimeSheet = true; render(); };
   main().querySelectorAll("[data-wtclose]").forEach(b => b.onclick = () => { woTimeSheet = false; render(); });
   main().querySelectorAll("[data-radj]").forEach(b => b.onclick = () => restAdj(+b.dataset.radj));
   if ($("rf-start")) $("rf-start").onclick = () => { unlockAudio(); startRest(restPrefs.s || 90, nextUp(w, 0, -1)); render(); };
