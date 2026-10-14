@@ -1241,3 +1241,17 @@ button.hrow{cursor:pointer}
 .chdel{flex:none;padding:7px 12px;font-size:13px}
 .chip.danger{border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
 .ncnew .hplus{width:28px;height:28px}
+
+/* Rest first (b60, beta) */
+.rfwt{border:0;background:none;color:var(--fg);cursor:pointer;padding:4px 0;display:flex;flex-direction:column;gap:4px}
+.rfmid{position:absolute;inset:0;border:0;background:none;color:var(--fg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;border-radius:50%}
+.rfmid b{font-size:clamp(56px,19vw,80px)}
+.rfadj{display:flex;align-items:center;justify-content:center;gap:12px;width:100%}
+.rfpm{width:52px;height:52px;flex:none;border-radius:50%;border:0;background:var(--card2);color:var(--fg);font:800 16px var(--body);cursor:pointer}
+.rfpm:active{transform:scale(.94)}
+.rfchg{display:inline-flex;align-items:center;gap:6px;border:1.5px solid var(--line2);background:transparent;color:var(--fg);border-radius:999px;padding:10px 16px;font:700 15px var(--body);cursor:pointer;min-height:44px}
+.rfchg svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linejoin:round}
+.rfof{width:110px;text-align:center;margin:0}
+.rfbig{font-size:64px;line-height:1}
+.rfrows{display:flex;flex-direction:column}
+.rfrows div{display:flex;justify-content:space-between;padding:11px 0;border-top:1px solid var(--line);font-size:16px}
