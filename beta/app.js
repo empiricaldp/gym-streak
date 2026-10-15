@@ -42,7 +42,15 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt
 // ================= Member maths =================
 // A member doc: {name, plate, plan:[{w,opt}|null x7], since, trackStart, days:{date:1}}
 let swaps = new Map();   // one-day swaps: "userId|2026-10-13" → "Push" (beta). Your split stays as it is.
-const slot = (m,d) => { const sw = m && swaps.size && swaps.get(m.id + "|" + key(d)); return sw ? { w: sw, opt: false, swapped: true } : (m.plan||[])[dow(d)] || null; };
+// Date-stamped splits keep edits from changing earned streaks and weekly recaps.
+// Versions are loaded in date order; the latest applicable one wins.
+function planAt(m, d){
+  const k = key(d), versions = m.splitHistory || [];
+  let plan = versions.length ? versions[0].plan : m.plan;
+  for (const v of versions){ if (v.effective_from > k) break; plan = v.plan; }
+  return plan || [];
+}
+const slot = (m,d) => { const sw = m && swaps.size && swaps.get(m.id + "|" + key(d)); return sw ? { w: sw, opt: false, swapped: true } : planAt(m,d)[dow(d)] || null; };
 const isGym = (m,d) => { const s = slot(m,d); return !!s && !s.opt; };
 const credited = (m,d) => d < parse(m.trackStart) && d >= parse(m.since) && isGym(m,d);
 const ticked = (m,d) => !!(m.days && m.days[key(d)]);
@@ -435,7 +443,22 @@ function wireFind(){
         const { data, error } = await sb.from("people").select(PEOPLE_COLS).ilike("name", `%${safe}%`).order("name").limit(30);
         if (seq !== searchSeq) return;
         if (error) return showWarn(oops("search", error));
-        searchHits = (data || []).filter(p => p.id !== myId).map(p => members.get(p.id) || memberFrom(p)); render();
+        const owner = myId, fresh = (data || []).filter(p => p.id !== myId && !members.has(p.id)), ids = fresh.map(p => p.id);
+        let rows;
+        try { rows = await Promise.all([
+          fetchIn("split_history", "user_id,effective_from,plan", "user_id", ids),
+          fetchIn("checkins", "user_id,day", "user_id", ids, q => q.gte("day", key(addDays(today(), -SINCE_DAYS)))),
+          fetchIn("freezes", "user_id,day", "user_id", ids),
+          WORKOUTS ? fetchIn("day_swaps", "user_id,day,label", "user_id", ids) : []]);
+        } catch (e){ if (seq === searchSeq && owner === myId) showWarn(oops("load streak history", e)); return; }
+        if (seq !== searchSeq || owner !== myId) return;
+        const found = new Map(fresh.map(p => [p.id, memberFrom(p)]));
+        for (const v of rows[0]){ const m = found.get(v.user_id); if (m) (m.splitHistory ||= []).push({effective_from:v.effective_from,plan:tidyPlan(v.plan)}); }
+        for (const m of found.values()) if (m.splitHistory) m.splitHistory.sort((a,b)=>a.effective_from.localeCompare(b.effective_from));
+        for (const r of rows[1]){ const m=found.get(r.user_id); if(m) m.days[r.day]=1; }
+        for (const r of rows[2]){ const m=found.get(r.user_id); if(m) (m.frozen ||= {})[r.day]=1; }
+        for (const r of rows[3]) swaps.set(r.user_id+"|"+r.day,r.label);
+        searchHits = (data || []).filter(p => p.id !== myId).map(p => members.get(p.id) || found.get(p.id)); render();
         const f = $("find-q"); if (f){ f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
         if ($("find-none")) $("find-none").hidden = searchHits.length > 0;
       }, 300); };
@@ -1210,7 +1233,7 @@ function viewOnboarding(){
           <div><span>Crew sees</span><b>${privacySummary({private:ob.pv.priv, splitHidden:ob.pv.hide})}</b></div>`}
         ${ob.watch ? "" : DAYS.map((d,i)=>{ const w = normalizeWorkout(ob.plan[i]); return `<div><span>${d}</span><b>${w?esc(w)+(ob.opt[i]?" (optional)":""):"Rest"}</b></div>`; }).join("")}
       </div>`; }
-  main().innerHTML = `<div class="card ob">${dots}${body}
+  main().innerHTML = `<div class="card ob">${dots}${body}${ob.edit && (k === "split" || isReview) ? '<p class="note">Split changes start tomorrow. Your earned streak and past weeks stay unchanged.</p>' : ""}
     <div class="row2"><button class="cta ghost" id="ob-back">${s===0 && !(k==="split" && (ob.splitMode==="ready" || ob.splitMode==="custom" || (ob.splitMode==="review" && !ob.edit))) ? "Cancel" : "Back"}</button>
     <button class="cta" id="ob-next" ${canNext?"":"disabled"} ${k==="split" && (ob.splitMode===null || ob.splitMode==="ready") ? "hidden" : ""}>${last?(ob.edit?"Save":"Join the crew"):"Next"}</button></div></div>`;
   const nextBtn = $("ob-next");
@@ -1381,7 +1404,7 @@ async function saveOnboarding(){
     const exp = durStart(ob.exp); row.trained_since = key(exp < parse(row.since) ? exp : parse(row.since));
     Object.assign(row, { account: ob.pv.priv ? "private" : "public", hide_split: !!ob.pv.hide, seen_update: TOUR_V,
       is_public: !ob.pv.priv, share_attendance: !ob.pv.priv, share_split: !ob.pv.hide, share_steps: false, privacy_chosen: true }); }
-  const wasEdit = ob.edit;
+  const wasEdit = ob.edit, obOnlySplit = ob.only === "split";
   const btn = $("ob-next"); if (btn) btn.disabled = true;
   // Editing: UPDATE only the changed fields. (An upsert is checked like a brand-new row,
   // and a new row must have a start date, which is why editing used to fail.)
@@ -1401,7 +1424,7 @@ async function saveOnboarding(){
   }
   ob = null; tab = wasEdit ? "you" : "today";
   await loadAll();
-  if (!wasEdit){ toast("Welcome to the crew"); burst(); } else toast("Saved");
+  if (!wasEdit){ toast("Welcome to the crew"); burst(); } else toast(obOnlySplit ? "Split saved. Starts tomorrow; past streaks stay unchanged." : "Saved");
 }
 
 
@@ -1482,13 +1505,15 @@ async function loadAll(){
   loading = (async () => {
     try {
       if (WORKOUTS){ const { data } = await sb.rpc("member_count"); if (typeof data === "number"){ memberCount = data; scoped = data > SCALE_LIMIT; renderHeaderCount(); } }
-      const [profiles, checkins] = scoped
+      const [profiles, checkins, splitRows] = scoped
         ? await scopedIds().then(ids => Promise.all([fetchIn("people", PEOPLE_COLS, "id", ids),
-            fetchIn("checkins", "user_id,day", "user_id", ids, q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))]))
+            fetchIn("checkins", "user_id,day", "user_id", ids, q => q.gte("day", key(addDays(today(), -SINCE_DAYS)))),
+            fetchIn("split_history", "user_id,effective_from,plan", "user_id", ids)]))
         : await Promise.all([
         // "people" (database view) = everyone, with only what I'm allowed to see about each person
         fetchAll("people", PEOPLE_COLS),
-        fetchAll("checkins", "user_id,day")
+        fetchAll("checkins", "user_id,day"),
+        fetchAll("split_history", "user_id,effective_from,plan")
       ]);
       // Steps: only the last ~8 weeks (the database already hides anyone who keeps steps private)
       let stepRows = [];
@@ -1499,6 +1524,8 @@ async function loadAll(){
       }
       const next = new Map();
       for (const p of profiles) next.set(p.id, memberFrom(p));
+      for (const v of splitRows){ const m = next.get(v.user_id); if (m) (m.splitHistory ||= []).push({ effective_from: v.effective_from, plan: tidyPlan(v.plan) }); }
+      for (const m of next.values()) if (m.splitHistory) m.splitHistory.sort((a,b) => a.effective_from.localeCompare(b.effective_from));
       for (const c of checkins){ const m = next.get(c.user_id); if (m) m.days[c.day] = 1; }
       for (const s of stepRows){ const m = next.get(s.user_id); if (m){ m.steps[s.day] = s.count; if (!m.stepsAt || s.updated_at > m.stepsAt) m.stepsAt = s.updated_at; } }
       // Streak freezes (the database only returns your own + people who share attendance)
@@ -1520,7 +1547,7 @@ async function loadAll(){
         WORKOUTS ? soft(fetchAll("workouts", "user_id,day,label,exercises,started_at,active_at,finished_at,session_ms,session_run_at,duration_s", q => q.gte("day", key(addDays(today(), -120))))) : null,
         WORKOUTS ? soft(fetchAll("workout_plans", "label,exercises,updated_at")) : null,
         SAFETY ? soft(fetchAll("blocks", "blocked")) : null,
-        WORKOUTS ? soft(fetchAll("day_swaps", "user_id,day,label", q => q.gte("day", key(addDays(today(), -60))))) : null]);
+        WORKOUTS ? soft(fetchAll("day_swaps", "user_id,day,label")) : null]);
       if (gen !== loadGen) return;                            // signed out / someone else signed in meanwhile
       failed = new Set();
       // Circles I'm in (the database only returns those) and their members
@@ -1559,6 +1586,7 @@ async function loadAll(){
       if (planRows) plans = planRows;
       if (blockRows) blockedIds = new Set(blockRows.map(r => r.blocked));
       if (swapRows) swaps = new Map(swapRows.map(r => [r.user_id + "|" + r.day, r.label]));
+      else if (WORKOUTS) throw new Error("Couldn't load the dated workout swaps. Try again before changing your split.");
       if (WORKOUTS && mine.data?.weight_unit) unit = mine.data.weight_unit;
       if (WORKOUTS && mine.data && "rest_s" in mine.data) restPrefs = { s: mine.data.rest_s ?? 90, auto: mine.data.rest_auto !== false };
       if (WORKOUTS && !rest) loadRestLocal();
@@ -2432,7 +2460,7 @@ document.addEventListener("click", e => {
 let splitOpen = null, splitOpenDay = null, chg = null, guideStep = -1, lastDayKey = null;
 let splitView = "today";   // Split tab: "today" (default: just today's workout) | "details" (today's exercises) | "week" (the whole week)
 const splitLabels = m => [...new Set([...(m.plan || []).filter(s => s && s.w).map(s => s.w), ...plans.map(p => p.label)])];
-const planLabel = (m, d) => { const s = (m.plan || [])[dow(d)]; return s ? (s.w || "Gym day") : null; };   // the split, ignoring swaps
+const planLabel = (m, d) => { const s = planAt(m,d)[dow(d)]; return s ? (s.w || "Gym day") : null; };   // the split, ignoring swaps
 // Real time: when the date changes (midnight, or opening the app the next morning), redraw so "today" moves on
 setInterval(() => { const k = key(today()); if (lastDayKey && k !== lastDayKey && ready && session) renderSoft(); lastDayKey = k; }, 30000);
 
@@ -2555,7 +2583,7 @@ function chgSheetHtml(m){
   const scopeDay = isT ? "Just today" : `Just this ${dayName}`;
   const note = chg.scope === "day"
     ? `${isT ? "Just today" : "Just this " + dayName}: ${esc(planLabel(m, d) || "Rest")} is back next week. Your split doesn't change.${pick && pick !== "Rest" ? ` ${esc(pick)}'s details come with it.` : ""}`
-    : `Every ${dayName} becomes ${esc(pick || "…")} in your split.`;
+    : `Every ${dayName} becomes ${esc(pick || "…")} from tomorrow. Earlier days keep their original split.`;
   const go = !pick ? "Pick one" : chg.scope === "day" ? `Swap to ${pick}` : `Every ${dayName}: ${pick}`;
   return `<div class="chgwrap" id="chgwrap"><div class="chgdim" data-chgclose></div><div class="chgsheet" role="dialog" aria-label="Change ${dayName}">
     <div class="grab"></div><span class="label">${dayName} · was ${esc(curLab)}</span>
@@ -2585,7 +2613,7 @@ async function applyChange(){
   const { k, scope } = chg, label = String(chg.label).trim().slice(0, 40), d = parse(k), dayName = DAYS_LONG[dow(d)], isT = k === key(today());
   const btn = $("chg-go"); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
   // An untouched workout for that day was for the old plan: drop it so Start opens the new one
-  const w = myWo(k); if (w && !w.finished_at && !woDone(w).length){ workouts = workouts.filter(x => x !== w); sb.from("workouts").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); }
+  const w = myWo(k); if ((scope === "day" || k > key(today())) && w && !w.finished_at && !woDone(w).length){ workouts = workouts.filter(x => x !== w); sb.from("workouts").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); }
   let error;
   if (scope === "day"){
     if (lc(label) === lc(planLabel(m, d) || "")) ({ error } = await sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k));   // same as the split = no swap
@@ -2595,12 +2623,12 @@ async function applyChange(){
     const plan = [...(m.plan || [null, null, null, null, null, null, null])], i = dow(d), old = plan[i];
     plan[i] = label === "Rest" ? null : { w: normalizeWorkout(label) || label, opt: !!old?.opt };
     ({ error } = await sb.from("profiles").update({ plan }).eq("id", myId));
-    if (!error){ members.set(myId, { ...m, plan });
-      if (swaps.has(myId + "|" + k)){ swaps.delete(myId + "|" + k); sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); } }
+    if (!error){ await loadAll();
+      if (k > key(today()) && swaps.has(myId + "|" + k)){ swaps.delete(myId + "|" + k); sb.from("day_swaps").delete().eq("user_id", myId).eq("day", k).then(() => {}, () => {}); } }
   }
   if (error){ if (btn){ btn.disabled = false; btn.textContent = "Try again"; } return showWarn(oops("change that day", error)); }
   chg = null; splitOpen = k; render();
-  toast(scope === "day" ? `${isT ? "Today" : dayName}: ${label}` : `Every ${dayName} is now ${label}`);
+  toast(scope === "day" ? `${isT ? "Today" : dayName}: ${label}` : `Saved: ${dayName} becomes ${label} from tomorrow`);
 }
 async function unswap(k){
   const had = swaps.get(myId + "|" + k); swaps.delete(myId + "|" + k); render();
@@ -3651,8 +3679,7 @@ function openProfile(id){
   if (!members.has(id)){
     const hit = (searchHits || []).find(o => o.id === id); if (!hit) return;
     members.set(id, hit); extraIds.add(id);                 // keep them loaded from now on
-    fetchIn("checkins", "user_id,day", "user_id", [id], q => q.gte("day", key(addDays(today(), -SINCE_DAYS))))
-      .then(rows => { const m = members.get(id); if (m){ rows.forEach(r => m.days[r.day] = 1); if (profileId === id) render(); } }, () => {});
+    reloadSoon();   // refresh from the same complete history snapshot as the rest of the crew
   }
   profileId = id; unbudAsk = null; render(); window.scrollTo(0,0);
 }
@@ -4020,7 +4047,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b62" : "53";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b63" : "54";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
