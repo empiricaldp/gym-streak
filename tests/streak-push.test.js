@@ -1,0 +1,13 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const {stripTypeScriptTypes} = require('node:module');
+const src=fs.readFileSync('supabase/functions/push/index.ts','utf8');
+const ctx=vm.createContext({dayIn:()=> '2026-10-15'});
+vm.runInContext(stripTypeScriptTypes(src.slice(src.indexOf('const addDays ='),src.indexOf('// Everything needed to personalise'))) + '\nthis.api={streak,slotOf};',ctx);
+const plan=[null,...Array.from({length:6},()=>({w:'Gym day',opt:false}))];
+const next=plan.map((s,i)=>i===3?null:s);
+const m={id:'test',plan:next,since:'2026-08-24',track_start:'2026-10-12',days:new Set(['2026-10-13','2026-10-14','2026-10-15']),frozen:new Set(),swaps:new Map(),splitHistory:[{effective_from:'2026-08-24',plan},{effective_from:'2026-10-14',plan:next}]};
+assert.equal(ctx.api.streak(m),44);
+assert.equal(ctx.api.streak({...m,splitHistory:[]}),37);
+console.log('PASS push notification streak calculation agrees with app history');
