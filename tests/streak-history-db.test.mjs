@@ -1,0 +1,56 @@
+// Install @electric-sql/pglite in an isolated test directory, then set PGLITE_MODULE to its index.js.
+const {PGlite} = await import(process.env.PGLITE_MODULE || '@electric-sql/pglite');
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const db = new PGlite();
+await db.exec(`
+create role anon; create role authenticated; create role service_role bypassrls;
+create schema auth;
+create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+grant usage on schema public, auth to authenticated, anon, service_role;
+grant execute on function auth.uid() to authenticated, service_role;
+create table profiles(id uuid primary key, name text, plan jsonb not null, since date not null, tz text default 'Australia/Sydney', notif_remind boolean default false, remind_at time default '19:00', reminded_on date, visible boolean default true, split_hidden boolean default false);
+create function local_today(uid uuid) returns date language sql stable security definer as $$select (now() at time zone tz)::date from profiles where id=uid$$;
+create table checkins(user_id uuid, day date);
+create table push_log(day date);
+create table push_subs(user_id uuid);
+create view people as select id, (id=auth.uid() or visible) as visible, split_hidden from profiles where name != 'Blocked' or id=auth.uid();
+grant select on people to authenticated;
+insert into profiles(id,name,plan,since) values ('00000000-0000-0000-0000-000000000001','Owner','[null,{"w":"Push"},{"w":"Pull"},{"w":"Legs"},{"w":"Push"},{"w":"Pull"},{"w":"Legs"}]','2026-08-24');
+insert into profiles select '00000000-0000-0000-0000-000000000002','Hidden',plan,since,tz,false,remind_at,null,true,true from profiles;
+insert into profiles select '00000000-0000-0000-0000-000000000003','Blocked',plan,since,tz,false,remind_at,null,false,false from profiles limit 1;
+`);
+const migration = fs.readFileSync('supabase/031_split_history.sql','utf8');
+await db.exec(migration);
+assert.equal((await db.query('select * from split_versions')).rows.length,3);
+await db.exec(migration); // safe to re-run; no rewritten baselines
+assert.equal((await db.query('select * from split_versions')).rows.length,3);
+const id='00000000-0000-0000-0000-000000000001';
+const [{d, tomorrow}] = (await db.query(`select local_today('${id}')::text as d, (local_today('${id}')+1)::text as tomorrow`)).rows;
+await db.exec(`update profiles set plan=jsonb_set(plan,'{3}','null') where id='${id}'`);
+let rows=(await db.query(`select effective_from::text,plan from split_versions where user_id='${id}' order by effective_from`)).rows;
+assert.equal(rows.length,2); assert.equal(rows[0].plan[3].w,'Legs'); assert.equal(rows[1].plan[3],null); assert.equal(rows[1].effective_from,tomorrow);
+assert.equal((await db.query(`select split_on('${id}','${d}') as p`)).rows[0].p[3].w,'Legs');
+assert.equal((await db.query(`select split_on('${id}','${tomorrow}') as p`)).rows[0].p[3],null);
+await db.exec(`update profiles set plan=jsonb_set(plan,'{4}','null') where id='${id}'`);
+rows=(await db.query(`select plan from split_versions where user_id='${id}' order by effective_from`)).rows;
+assert.equal(rows.length,2);assert.equal(rows[0].plan[4].w,'Push');assert.equal(rows[1].plan[4],null);
+await db.exec(migration);
+assert.equal((await db.query(`select plan from split_versions where user_id='${id}' order by effective_from`)).rows[0].plan[3].w,'Legs');
+await db.exec(`begin; update profiles set plan=jsonb_set(plan,'{5}','null') where id='${id}'; rollback;`);
+assert.equal((await db.query(`select plan from split_versions where user_id='${id}' order by effective_from desc limit 1`)).rows[0].plan[5].w,'Pull');
+await db.exec(`set role authenticated; set request.jwt.claim.sub='${id}';`);
+assert.equal((await db.query('select distinct user_id from split_versions')).rows.length,1,'raw history is owner-only');
+const hidden=(await db.query(`select plan from split_history where user_id='00000000-0000-0000-0000-000000000002'`)).rows[0].plan;
+assert.equal(hidden[1].w,null); assert.equal(hidden[0],null); assert.equal(hidden[1].opt,false);
+assert.equal((await db.query(`select * from split_history where user_id='00000000-0000-0000-0000-000000000003'`)).rows.length,0);
+await assert.rejects(db.query(`update split_versions set plan='[]'`),/permission denied/);
+await assert.rejects(db.query(`select split_on('${id}',current_date)`),/permission denied/);
+await db.exec('reset role; set role anon');
+await assert.rejects(db.query('select * from split_history'),/permission denied/);
+await db.exec('reset role');
+// New accounts also receive a baseline, without any client-side history write.
+await db.exec(`insert into profiles(id,name,plan,since) select '00000000-0000-0000-0000-000000000004','New',plan,since from profiles where id='${id}'`);
+assert.equal((await db.query(`select * from split_versions where user_id='00000000-0000-0000-0000-000000000004'`)).rows.length,1);
+console.log('PASS PostgreSQL: migration repeatability, baseline capture, next-day activation, repeated edits, rollback, new accounts, RLS, hidden labels, blocked profiles, write denial, private helper and anonymous denial');
+await db.close();
