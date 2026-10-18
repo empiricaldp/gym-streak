@@ -1243,7 +1243,9 @@ button.hrow{cursor:pointer}
 .ncnew .hplus{width:28px;height:28px}
 
 /* Rest first (b60, beta) */
-.rfwt{border:0;background:none;color:var(--fg);cursor:pointer;padding:4px 0;display:flex;flex-direction:column;gap:4px}
+.rfwt{border:1px solid var(--line2);background:var(--card);color:var(--fg);cursor:pointer;padding:8px 12px 7px;border-radius:14px;display:flex;flex-direction:column;align-items:flex-end;gap:3px;box-shadow:0 1px 0 var(--line)}
+.rfwt:active{transform:scale(.97);background:var(--card2)}
+.rfwt b{font-size:24px!important}
 .rfmid{position:absolute;inset:0;border:0;background:none;color:var(--fg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;cursor:pointer;border-radius:50%}
 .rfmid b{font-size:clamp(56px,19vw,80px)}
 .rfadj{display:flex;align-items:center;justify-content:center;gap:12px;width:100%}

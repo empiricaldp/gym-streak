@@ -1851,10 +1851,11 @@ function nextUp(w, i, j){
   return `Next: ${ex[a].name}, set ${b + 1}${f ? " · " + f : ""}`;
 }
 // ---- rest timer ----
+const restLeft = () => !rest ? 0 : rest.paused != null ? rest.paused : rest.end - nowMs();   // b60: a rest can be paused
 function startRest(secs, next){
   if (!secs) return;
   unlockAudio();
-  rest = { end: nowMs() + secs * 1000, total: secs * 1000, next: next || "Next set. Let's go.", cancelled: false };
+  rest = { end: nowMs() + secs * 1000, total: secs * 1000, full: secs * 1000, next: next || "Next set. Let's go.", cancelled: false };
   const rw = myWo(woDay); if (rw) rw._rests = (rw._rests || 0) + 1;
   saveRestLocal(); bookAlarm(); paintTimers();
 }
@@ -1872,8 +1873,8 @@ function sesPause(){ const w = myWo(woDay); if (!w || !w.session_run_at) return;
 
 // Every half second: update the numbers on screen (no full redraw) and catch the end of a rest.
 setInterval(() => {
-  if (rest){
-    const left = rest.end - nowMs();
+  if (rest && rest.paused == null){
+    const left = restLeft();
     if (left < 3500 && !rest.cancelled && document.visibilityState === "visible"){ rest.cancelled = true; cancelAlarm(); }   // app is open: the app tells you, not the server
     if (left <= 0){
       const late = -left, next = rest.next; rest = null; saveRestLocal();
@@ -1887,8 +1888,9 @@ setInterval(() => {
 function paintTimers(numbersOnly){
   const w = myWo(woDay), s = $("ses-t"), r = $("rest-t"), bar = $("rest-bar");
   if (s && w) s.textContent = clock(sesMs(w));
-  if (r){ if (rest){ r.textContent = clock(rest.end - nowMs()); if (bar) bar.style.width = Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total))) + "%"; } }
-  const ring = $("rest-ring"); if (ring && rest) ring.style.strokeDashoffset = String(RING_C * (1 - Math.max(0, Math.min(1, (rest.end - nowMs()) / rest.total))));
+  const s2 = $("ses-t2"); if (s2 && w) s2.textContent = clock(sesMs(w));
+  if (r){ if (rest){ r.textContent = clock(restLeft()); if (bar) bar.style.width = Math.max(0, Math.min(100, 100 * (1 - (restLeft()) / rest.total))) + "%"; } }
+  const ring = $("rest-ring"); if (ring && rest) ring.style.strokeDashoffset = String(RING_C * (1 - Math.max(0, Math.min(1, (restLeft()) / rest.total))));
   if (!numbersOnly && !woDay) renderMini();
   if (!numbersOnly && woDay && w && !w.finished_at && WO_V2){ render(); return; }        // new workout screen: going ↔ resting is a different screen
   if (!numbersOnly && woDay && $("timers")) $("timers").innerHTML = timersHtml(w);
@@ -1902,8 +1904,8 @@ function timersHtml(w){
     <div class="tacts">${fin ? `<span class="note">${ms ? "Done" : "Not timed"}</span>` : run ? `<button type="button" class="tbtn" data-tses="pause">❚❚ Pause</button>`
       : `<button type="button" class="tbtn go" data-tses="start">▶ ${ms ? "Resume" : "Start"}</button>`}</div></div>`;
   const on = restPrefs.s > 0;
-  const rst = rest ? `<div class="tcard rest live" id="t-rest"><span class="label">Resting</span><span class="tnum mono" id="rest-t">${clock(rest.end - nowMs())}</span>
-      <div class="tbar"><i id="rest-bar" style="width:${Math.max(0, Math.min(100, 100 * (1 - (rest.end - nowMs()) / rest.total)))}%"></i></div>
+  const rst = rest ? `<div class="tcard rest live" id="t-rest"><span class="label">Resting</span><span class="tnum mono" id="rest-t">${clock(restLeft())}</span>
+      <div class="tbar"><i id="rest-bar" style="width:${Math.max(0, Math.min(100, 100 * (1 - (restLeft()) / rest.total)))}%"></i></div>
       <div class="tacts"><button type="button" class="tbtn" data-trest="plus">+30s</button><button type="button" class="tbtn" data-trest="skip">Skip</button></div></div>`
     : `<div class="tcard rest" id="t-rest"><span class="label">Rest${on ? `<button type="button" class="tlink" data-trest="change">Change</button>` : ""}</span><span class="tnum mono mut">${restLabel(restPrefs.s)}</span>
       <div class="tacts">${on ? `<button type="button" class="tbtn go" data-trest="start">▶ Start</button>` : `<button type="button" class="tbtn" data-trest="change">Turn on</button>`}</div></div>`;
@@ -1990,7 +1992,9 @@ function startWorkout(d){
       exercises: plan ? plan.exercises.map(e => ({ name: e.name, done: false, ...(e.rest != null ? { rest: e.rest } : {}), sets: copySets(e.sets) })) : [] };
     workouts.push(w); woDay = k; woChanged(false);
   }
-  woDay = k; woAdding = false; woDiscardAsk = false; woOpenEx = null; woSummary = null;
+  woDay = k; woAdding = false; woDiscardAsk = false; woOpenEx = null; woSummary = null; woTimeSheet = false;
+  // b60 (beta): no "Start Workout" step — opening today's workout starts the workout time; the screen is all about rest
+  if (REST_FIRST && k === key(today()) && !w.finished_at && !w.session_run_at && !sesMs(w)){ unlockAudio(); w.session_run_at = new Date().toISOString(); woChanged(true); }
   render(); window.scrollTo(0, 0);
 }
 function closeWorkout(){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; woDiscardAsk = false; restSheet = null; render(); window.scrollTo(0, 0); }
@@ -2121,7 +2125,7 @@ function viewWorkoutV2(w){
       <div class="whlinks"><button type="button" class="linkbtn" id="wo-plan">${planFor(w.label) ? "Edit exercises" : "+ Add exercises"}</button></div>`;
     foot = `<button class="whbtn red" id="wo-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start Workout</button>`;
   } else if (rest){                                                      // H3 · resting
-    const left = rest.end - nowMs(), frac = Math.max(0, Math.min(1, left / rest.total));
+    const left = restLeft(), frac = Math.max(0, Math.min(1, left / rest.total));
     body = `<div class="whtop"><span><span class="label whstate">● Resting</span><span class="sign whsmall">${esc(w.label)}</span></span>
         <span class="whright"><span class="label">Workout</span><b ${NUM} id="ses-t">${clock(ms)}</b></span></div>
       <section class="card whring"><div class="whringbox"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="53" class="trk"/>
@@ -2171,7 +2175,7 @@ function renderMini(){
   el.setAttribute("style", pc(me()));
   try { const h = $("tabbar").offsetHeight; if (h) document.documentElement.style.setProperty("--tabh", h + "px"); } catch(_){}
   if (rest){
-    const left = rest.end - nowMs(), frac = Math.max(0, Math.min(1, left / rest.total));
+    const left = restLeft(), frac = Math.max(0, Math.min(1, left / rest.total));
     el.className = "womini resting";
     el.setAttribute("aria-label", `Resting, ${clock(left)} left. Open ${w.label || "workout"}`);
     el.innerHTML = `<svg class="mring" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" class="trk"/><circle cx="12" cy="12" r="9" class="val" id="mini-ring" style="stroke-dasharray:${MINI_C};stroke-dashoffset:${MINI_C * (1 - frac)}"/></svg>
@@ -2188,7 +2192,7 @@ function renderMini(){
 function paintMini(){
   const t = $("mini-t"); if (!t || $("womini").hidden) return;
   const w = activeWo(); if (!w) return renderMini();
-  if (rest){ const left = rest.end - nowMs(); t.textContent = clock(left);
+  if (rest){ const left = restLeft(); t.textContent = clock(left);
     const r = $("mini-ring"); if (r) r.style.strokeDashoffset = String(MINI_C * (1 - Math.max(0, Math.min(1, left / rest.total)))); }
   else t.textContent = clock(sesMs(w));
 }
@@ -2240,7 +2244,7 @@ function viewWorkoutDone(w){
 function viewWorkout(){
   const w = myWo(woDay); if (!w){ woDay = null; return render(); }
   if (WO_V2 && w.finished_at) return viewWorkoutDone(w);
-  if (WO_V2 && !w.finished_at) return viewWorkoutV2(w);
+  if (WO_V2 && !w.finished_at) return REST_FIRST && (w.session_run_at || sesMs(w) > 0 || woDone(w).length || rest) ? viewWorkoutRF(w) : viewWorkoutV2(w);
   $("title").textContent = "Workout"; $("tabbar").hidden = true;
   const n = woDone(w).length, fin = !!w.finished_at, d = parse(w.day);
   const when = key(d) === key(today()) ? "Today" : DAYS_LONG[dow(d)];
@@ -4043,7 +4047,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b63" : "54";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b64" : "55";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4380,3 +4384,83 @@ function viewNewChat(){
   $("nc-back").onclick = () => { newChat = null; render(); window.scrollTo(0, 0); };
   $("nc-circle").onclick = () => { newChat = null; setTab("crew"); crewView = "circles"; circleMode = "new"; circleDraft = null; render(); window.scrollTo(0, 0); };
 }
+
+
+// ================= Rest first (b60, beta): the workout screen is a rest timer =================
+// DP: people don't need to run a session timer — it just runs by itself (top right, tap for details).
+// The screen is for REST: start it, change it easily (−15 / +15 / Change rest), pause, reset, skip; the phone buzzes when it's up.
+const REST_FIRST = WO_V2 && WORKOUTS;   // beta b60+, main app from v55
+let woTimeSheet = false, restPrefT = null;
+function setRestPref(sec){
+  restPrefs.s = Math.max(5, Math.min(600, Math.round(sec))); render();
+  clearTimeout(restPrefT); restPrefT = setTimeout(() => sb.from("profiles").update({ rest_s: restPrefs.s }).eq("id", myId).then(({ error }) => { if (error) showWarn(oops("save your rest time", error)); }), 700);
+}
+function restAdj(sec){
+  if (!rest) return setRestPref((restPrefs.s || 90) + sec);
+  if (rest.paused != null) rest.paused = Math.max(1000, rest.paused + sec * 1000);
+  else rest.end = Math.max(nowMs() + 1000, rest.end + sec * 1000);
+  rest.total = Math.max(1000, rest.total + sec * 1000, restLeft()); rest.cancelled = false;
+  saveRestLocal(); if (rest.paused == null) bookAlarm(); render();
+}
+function restReset(){ if (!rest) return; const f = rest.full || rest.total; rest.total = f; rest.end = nowMs() + f; delete rest.paused; rest.cancelled = false; saveRestLocal(); bookAlarm(); render(); }
+function restPauseToggle(){
+  if (!rest) return;
+  if (rest.paused != null){ rest.end = nowMs() + rest.paused; delete rest.paused; rest.cancelled = false; bookAlarm(); }
+  else { rest.paused = Math.max(0, restLeft()); cancelAlarm(); }
+  saveRestLocal(); render();
+}
+const PEN = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>';
+function viewWorkoutRF(w){
+  if (rest && rest.paused != null){ rest.end = nowMs() + rest.paused; delete rest.paused; saveRestLocal(); bookAlarm(); }   // b61 has no Pause: carry on a rest paused in b60
+  const m = me(), run = !!w.session_run_at, ms = sesMs(w), resting = !!rest, paused = resting && rest.paused != null;
+  const left = resting ? restLeft() : (restPrefs.s || 90) * 1000, frac = resting ? Math.max(0, Math.min(1, left / rest.total)) : 1;
+  const hasSets = w.exercises.some(e => (e.sets || []).length);
+  const exList = w.exercises.length ? `<div class="sec whsec"><span class="label">What you did</span>${hasSets ? unitToggle() : ""}</div>${w.exercises.map((e, i) => woExHtml(e, i, w)).join("")}` : "";
+  const addBox = woAdding ? `<div class="card woaddbox"><input id="wo-newex" class="woin" placeholder="Exercise, e.g. Bench press" maxlength="60" list="wo-names" autocomplete="off" enterkeyhint="done">
+      <div class="row2"><button type="button" class="cta ghost" id="wo-addcancel" style="font-size:16px;padding:10px">Cancel</button><button type="button" class="cta" id="wo-addgo" style="font-size:16px;padding:10px">Add</button></div></div>`
+    : `<button type="button" class="linkbtn whlink" id="wo-add">+ Note an exercise</button>`;
+  const state = resting ? (paused ? "Rest paused" : "Resting") : run ? "In the gym" : "Paused";
+  const top = `<div class="whtop"><span><span class="label whstate${run && !resting ? " live" : ""}">● ${state}</span><span class="sign whsmall">${esc(w.label || "Workout")}</span></span>
+      <button type="button" class="whright rfwt" id="wo-time" aria-label="Workout ${clock(ms)}: exercises and finish"><span class="label">Workout</span><b ${NUM} id="ses-t">${clock(ms)}</b></button></div>`;
+  const ring = `<div class="whringbox"><svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="53" class="trk"/>
+      <circle cx="60" cy="60" r="53" class="val" id="rest-ring" style="stroke-dasharray:${RING_C};stroke-dashoffset:${RING_C * (1 - frac)}"/></svg>
+      <button type="button" class="rfmid" data-trest="change" aria-label="Rest ${clock(left)}. Tap to change"><b ${NUM} id="rest-t" role="timer" aria-live="off">${clock(left)}</b><span class="label">${resting ? (paused ? "Paused" : "Rest left") : "Rest"}</span></button></div>`;
+  const adj = `<div class="rfadj"><button type="button" class="rfpm" data-radj="-15" aria-label="15 seconds less">−15</button>${resting
+      ? `<span class="note rfof">of ${clock(rest.total)}</span>` : `<button type="button" class="rfchg" data-trest="change">${PEN}Change rest</button>`}<button type="button" class="rfpm" data-radj="15" aria-label="15 seconds more">+15</button></div>`;
+  let body, foot;
+  if (resting){
+    // b61 (DP: "too complicated"): resting = the ring + Reset + Skip. Nothing else.
+    body = `${top}<section class="card whring">${ring}<p class="note">Your phone buzzes when it's time</p></section>`;
+    foot = `<div class="whrow2"><button class="whbtn soft" id="rf-reset">Reset</button>
+      <button class="whbtn dark" data-trest="skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l10-7zM16 5h3v14h-3z"/></svg>Skip</button></div>`;
+  } else {
+    body = `${top}<section class="card whring">${ring}<p class="note">Tap the time to change it</p></section>`;
+    foot = `<button class="whbtn red" id="rf-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start rest</button>`;
+  }
+  const sheet = woTimeSheet ? `<div class="chgwrap"><div class="chgdim" data-wtclose></div><div class="chgsheet" role="dialog" aria-label="Workout time">
+      <div class="grab"></div><span class="label">Workout time</span><b class="sign whnum rfbig" id="ses-t2">${clock(ms)}</b>
+      <div class="rfrows"><div><span>Started</span><b class="mono">${esc(new Date(w.started_at || Date.now()).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }))}</b></div>
+        <div><span>Rests taken</span><b class="mono">${w._rests || 0}</b></div>${w.exercises.length ? `<div><span>Exercises done</span><b class="mono">${woDone(w).length} of ${w.exercises.length}</b></div>` : ""}</div>
+      ${exList}${addBox}
+      <button class="whbtn red" id="wo-finish">Finish workout</button>
+      <div class="whlinks"><button type="button" class="linkbtn" id="wo-discard">${woDiscardAsk ? "Tap again to delete" : "Discard workout"}</button><button type="button" class="linkbtn" data-wtclose>Close</button></div></div></div>` : "";
+  document.documentElement.classList.add("rf-open");   // b62: no app header on this screen (DP's mock-up)
+  main().innerHTML = `<div class="view wo whv rfv" style="${pc(m)}"><button type="button" class="linkbtn pfback" id="wo-back">‹ Back</button>${body}${namesList()}
+    <div class="wofoot whfoot">${foot}</div>${restSheetHtml(w)}${sheet}</div>`;
+  $("title").textContent = "Workout"; $("tabbar").hidden = true;
+  wireTimers(); wireRestSheet(w);
+  $("wo-back").onclick = () => { woTimeSheet = false; closeWorkout(); };
+  if ($("wo-time")) $("wo-time").onclick = () => { woTimeSheet = true; render(); };
+  if ($("wo-ex")) $("wo-ex").onclick = () => { woTimeSheet = true; render(); };
+  main().querySelectorAll("[data-wtclose]").forEach(b => b.onclick = () => { woTimeSheet = false; render(); });
+  main().querySelectorAll("[data-radj]").forEach(b => b.onclick = () => restAdj(+b.dataset.radj));
+  if ($("rf-start")) $("rf-start").onclick = () => { unlockAudio(); startRest(restPrefs.s || 90, nextUp(w, 0, -1)); render(); };
+  if ($("rf-pause")) $("rf-pause").onclick = restPauseToggle;
+  if ($("rf-reset")) $("rf-reset").onclick = restReset;
+  if ($("wo-finish")) $("wo-finish").onclick = () => { woTimeSheet = false; finishWorkout(); };
+  if ($("wo-finish2")) $("wo-finish2").onclick = finishWorkout;
+  if ($("wo-discard")) $("wo-discard").onclick = discardWorkout;
+  wireWorkoutList(w, false);
+}
+
+{ const core = render; render = function(){ document.documentElement.classList.remove("rf-open"); return core.apply(this, arguments); }; }

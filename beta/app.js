@@ -4047,7 +4047,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b63" : "54";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b64" : "55";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4389,7 +4389,7 @@ function viewNewChat(){
 // ================= Rest first (b60, beta): the workout screen is a rest timer =================
 // DP: people don't need to run a session timer — it just runs by itself (top right, tap for details).
 // The screen is for REST: start it, change it easily (−15 / +15 / Change rest), pause, reset, skip; the phone buzzes when it's up.
-const REST_FIRST = WO_V2 && !!window.GYM_BETA;
+const REST_FIRST = WO_V2 && WORKOUTS;   // beta b60+, main app from v55
 let woTimeSheet = false, restPrefT = null;
 function setRestPref(sec){
   restPrefs.s = Math.max(5, Math.min(600, Math.round(sec))); render();
@@ -4440,7 +4440,7 @@ function viewWorkoutRF(w){
   const sheet = woTimeSheet ? `<div class="chgwrap"><div class="chgdim" data-wtclose></div><div class="chgsheet" role="dialog" aria-label="Workout time">
       <div class="grab"></div><span class="label">Workout time</span><b class="sign whnum rfbig" id="ses-t2">${clock(ms)}</b>
       <div class="rfrows"><div><span>Started</span><b class="mono">${esc(new Date(w.started_at || Date.now()).toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }))}</b></div>
-        <div><span>Rests taken</span><b class="mono">${w._rests || 0}</b></div><div><span>Exercises done</span><b class="mono">${woDone(w).length} of ${w.exercises.length}</b></div></div>
+        <div><span>Rests taken</span><b class="mono">${w._rests || 0}</b></div>${w.exercises.length ? `<div><span>Exercises done</span><b class="mono">${woDone(w).length} of ${w.exercises.length}</b></div>` : ""}</div>
       ${exList}${addBox}
       <button class="whbtn red" id="wo-finish">Finish workout</button>
       <div class="whlinks"><button type="button" class="linkbtn" id="wo-discard">${woDiscardAsk ? "Tap again to delete" : "Discard workout"}</button><button type="button" class="linkbtn" data-wtclose>Close</button></div></div></div>` : "";
@@ -4451,6 +4451,7 @@ function viewWorkoutRF(w){
   wireTimers(); wireRestSheet(w);
   $("wo-back").onclick = () => { woTimeSheet = false; closeWorkout(); };
   if ($("wo-time")) $("wo-time").onclick = () => { woTimeSheet = true; render(); };
+  if ($("wo-ex")) $("wo-ex").onclick = () => { woTimeSheet = true; render(); };
   main().querySelectorAll("[data-wtclose]").forEach(b => b.onclick = () => { woTimeSheet = false; render(); });
   main().querySelectorAll("[data-radj]").forEach(b => b.onclick = () => restAdj(+b.dataset.radj));
   if ($("rf-start")) $("rf-start").onclick = () => { unlockAudio(); startRest(restPrefs.s || 90, nextUp(w, 0, -1)); render(); };

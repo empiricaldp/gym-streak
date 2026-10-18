@@ -2,8 +2,8 @@
 // It caches the app's own files so the app opens instantly and works on a bad connection.
 // Strategy: "network first" for our files (always try for the newest version, fall back to the cache).
 // Database calls to Supabase are never cached, so your data is always live.
-const CACHE = "gym-streak-v54";
-const SHELL = ["./", "index.html", "styles.css?v=54", "app.js?v=54", "config.js?v=54", "split.js?v=54", "manifest.webmanifest",
+const CACHE = "gym-streak-v55";
+const SHELL = ["./", "index.html", "styles.css?v=55", "app.js?v=55", "config.js?v=55", "split.js?v=55", "manifest.webmanifest",
                "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
