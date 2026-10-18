@@ -268,7 +268,8 @@ function viewToday(){
   }
   const crewAll = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o) && !o.watcher);   // just your buds (who train)
   // Beta: a short preview, people who still need to train first (that's who a nudge helps), then See all
-  const PREVIEW = 5, crew = WORKOUTS ? [...crewAll].sort((a, b) => (isGym(a,t) && !has(a,t) ? 0 : 1) - (isGym(b,t) && !has(b,t) ? 0 : 1)).slice(0, PREVIEW) : crewAll;
+  // "See all" opens the whole list right here (same rows, same Nudge buttons) instead of jumping to the Crew tab
+  const PREVIEW = 5, crew = WORKOUTS ? [...crewAll].sort((a, b) => (isGym(a,t) && !has(a,t) ? 0 : 1) - (isGym(b,t) && !has(b,t) ? 0 : 1)).slice(0, crewMore ? 1e9 : PREVIEW) : crewAll;
   let crewHtml = "";
   if (crew.length){
     crewHtml = `<div class="sec"><h2 class="sign">Your crew today</h2><span class="label">${crewAll.length} ${crewAll.length===1?"person":"people"}</span></div><div class="list">` +
@@ -281,7 +282,7 @@ function viewToday(){
         return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span>${action ? `<span class="rowact">${action}</span>` : ""}</div>
           <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>` +
-      (crewAll.length > crew.length ? `<button type="button" class="cta ghost ssm" id="crew-all">See all ${crewAll.length}</button>` : "");
+      (WORKOUTS && crewAll.length > PREVIEW ? `<button type="button" class="cta ghost ssm" id="crew-all" aria-expanded="${crewMore}">${crewMore ? "Show less" : `See all ${crewAll.length}`}</button>` : "");
   } else crewHtml = WORKOUTS ? `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">CREW works solo too.</p>
       <p class="note">Your streak, week and workouts are yours either way. It's better with friends: you see who's trained, nudge them, and they keep you honest.</p>
       <div class="row2" style="margin-top:10px"><button class="cta ghost ssm" data-goto-find>Find people</button><button class="cta ssm" id="invite-friend">Invite a friend</button></div></div>`
@@ -354,7 +355,8 @@ function viewToday(){
   const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
   main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${m.watcher ? "" : tiles + streakHelpLink() + stepsHtml + q}${WORKOUTS ? circleRow + crewHtml : crewHtml + circleRow}${streakHelpHtml()}</div>`;
   if ($("watch-train")) $("watch-train").onclick = () => startOnboarding(true, "split");
-  if ($("crew-all")) $("crew-all").onclick = () => { crewView = "buds"; setTab("crew"); };
+  if ($("crew-all")) $("crew-all").onclick = () => { const y = scrollY; crewMore = !crewMore; render();
+    if (crewMore) window.scrollTo(0, y); else main().querySelector(".crewrow")?.closest(".list")?.previousElementSibling?.scrollIntoView({ block: "start" }); };
   if ($("invite-friend")) $("invite-friend").onclick = inviteFriend;
   if ($("wo-go")) $("wo-go").onclick = () => startWorkout(t);
   if ($("logbtn")) $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
@@ -1670,6 +1672,7 @@ const WORKOUTS = !!window.GYM_BETA || !!window.GYM_WORKOUTS;   // the new app (w
 const DELETE_ON = WORKOUTS && !!window.GYM_DELETE;   // 'Delete my account' — switched on once migration 028 is applied
 // Health (b52): calories, BMI, height & weight. Also needs migration 029 — until it's applied the heart button stays hidden.
 const HEALTH = WORKOUTS && !!window.GYM_HEALTH;
+let crewMore = false;   // Today: the crew list shows everyone (See all) instead of the first 5
 let meals = [], hp = { goal: null, unit: "kcal", notify: false, at: "22:00", pg: null, cg: null, fg: null }, healthOk = false, macrosOk = false, healthView = null, healthBack = "today";
 let mealSheet = null, bodySheet = null;   // the "Add meal" sheet and the height / weight / goal sheet
 // Chats (b53): a new-chat button, delete a chat (just for you), admins delete a circle. Deleting needs migration 030.
@@ -4012,7 +4015,7 @@ function render(){
 }
 let trophyBack = "you";
 { const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
-function setTab(t){ healthView = null; mealSheet = null; bodySheet = null; chatEdit = false; chatAsk = null; newChat = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t !== "today") crewMore = false; healthView = null; mealSheet = null; bodySheet = null; chatEdit = false; chatAsk = null; newChat = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -4047,7 +4050,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b68" : "55";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b69" : "55";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
