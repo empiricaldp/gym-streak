@@ -1236,6 +1236,7 @@ button.hrow{cursor:pointer}
 .hdaynav button:disabled{color:var(--line2);cursor:default}
 .hdaynav .label{min-width:92px;text-align:center;white-space:nowrap}
 .hpast{cursor:default}
+.hstar{font-size:.5em;vertical-align:top;position:relative;top:-.05em;margin-left:1px}
 /* Macros (b65) */
 .mc-P{--mc:var(--p-red)} .mc-C{--mc:var(--p-yellow)} .mc-F{--mc:var(--p-blue)}
 .hmacmini{display:flex;gap:16px;font:700 11px var(--mono);letter-spacing:.08em;color:var(--muted)}

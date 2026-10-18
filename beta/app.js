@@ -4047,7 +4047,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b66" : "55";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b67" : "55";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4189,7 +4189,7 @@ const mealsTail = (past, n) => past ? (n ? "" : `<div class="hrow"><span class="
 // what a meal row shows on the Calories page
 function mealEnergy(x){
   if (x.amount != null) return `<b class="sign">${nf(x.amount)}</b><span class="hmunit">${x.unit === "kj" ? `KJ · ${nf(x.amount / KJ)} KCAL` : "KCAL"}</span>`;
-  if (hasMac3(x)) return `<b class="sign">≈${nf(inUnit(macKcal(x)))}</b><span class="hmunit">${uName(hp.unit).toUpperCase()}</span>`;
+  if (hasMac3(x)) return `<b class="sign">${nf(inUnit(macKcal(x)))}<sup class="hstar">*</sup></b><span class="hmunit">${uName(hp.unit).toUpperCase()}</span>`;
   return `<span class="hmline">${macLine(x)} g</span><span class="hmunit">NO CALORIES</span>`;
 }
 const bmiIdx = b => b < 18.5 ? 0 : b < 25 ? 1 : b < 30 ? 2 : 3;
@@ -4207,6 +4207,7 @@ function hCalHtml(){
       ${hp.goal ? hBar(k / hp.goal) : ""}<div class="hline"><span class="label">${n} meal${n === 1 ? "" : "s"}</span><span class="label">${status}</span></div></section>
     ${mealsHead(past)}
     <div class="card hlist">${rows}${mealsTail(past, n)}</div>
+    ${list.some(x => x.amount == null && hasMac3(x)) ? `<p class="note hnote">* Worked out from protein, carbs and fat.</p>` : ""}
     <div class="card hlist">
       <button type="button" class="hrow" id="h-goal"><b>Daily goal</b><span class="hmuted">${hp.goal ? `${nf(inUnit(hp.goal))} ${uName(u)}` : "Not set"}</span>${HCHEV}</button>
       <div class="hrow"><label for="h-notify"><b>Nightly total</b></label><input type="time" id="h-at" class="htime" value="${esc(hp.at)}" step="300" aria-label="Time for the nightly total" ${hp.notify ? "" : "disabled"}><input type="checkbox" class="sw" id="h-notify" ${hp.notify ? "checked" : ""}></div></div>
@@ -4247,7 +4248,7 @@ const otherLine = (amt, u) => { const n = parseFloat(amt); return n > 0 ? (u ===
 function mealOther(s){
   if (parseFloat(s.amount) > 0 || !macrosOk) return otherLine(s.amount, s.unit);
   const m = { protein_g: numN(s.p), carbs_g: numN(s.c), fat_g: numN(s.f) };
-  return hasMac3(m) && !isNaN(macKcal(m)) ? `≈ ${nf(inUnit(macKcal(m), s.unit))} ${uName(s.unit)}` : "";
+  return hasMac3(m) && !isNaN(macKcal(m)) ? `${nf(inUnit(macKcal(m), s.unit))} ${uName(s.unit)}* from macros` : "";
 }
 const mealCanSave = s => parseFloat(s.amount) > 0 || (macrosOk && [s.p, s.c, s.f].some(v => parseFloat(v) > 0));
 function mealSheetHtml(){
