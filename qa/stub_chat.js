@@ -40,6 +40,13 @@
   const q = (table) => { const st = {op:"select", vals:null, eqs:{}};
     const res = () => {
       if (st.op !== "select"){ __writes.push({table, op:st.op, vals:st.vals, eqs:st.eqs});
+        if (table === "chat_reads" && st.op === "upsert"){ window.__cr = (window.__cr||[]).filter(x => x.chat !== st.vals.chat); __cr.push({ ...st.vals }); }
+        if (table === "meals"){ window.__meals = window.__meals || [];
+          if (st.op === "insert"){ const r = { ...st.vals, id: "m" + (__meals.length + 1) + Math.random().toString(36).slice(2,6), created_at: new Date().toISOString() }; __meals.push(r); return {data:{...r}, error:null}; }
+          if (st.op === "update"){ const r = __meals.find(x => x.id === st.eqs.id); Object.assign(r, st.vals); return {data:{...r}, error:null}; }
+          if (st.op === "delete"){ window.__meals = __meals.filter(x => x.id !== st.eqs.id); return {data:null, error:null}; } }
+        if (table === "bodyweight" && st.op === "upsert"){ window.__bw = (window.__bw||[]).filter(x => x.day !== st.vals.day); __bw.push({ day: st.vals.day, kg: st.vals.kg }); }
+        if (table === "profiles" && st.op === "update" && Object.keys(st.vals).some(k => /^cal_|^energy_unit|^height_cm|_goal$/.test(k))) Object.assign(window.__profile, st.vals);
         if (table === "messages" && st.op === "insert"){ const r = { ...st.vals, id: 1000 + __messages.length, created_at: new Date().toISOString() }; __messages.push(r); return {data:[{id:r.id, created_at:r.created_at}], error:null}; }
         if (table === "workouts" && st.op === "upsert"){ if (window.__woFail && window.__woFail-- > 0) return {data:null, error:{message:"TypeError: Load failed"}};
           const i = __workouts.findIndex(w => w.user_id === st.vals.user_id && w.day === st.vals.day), old = __workouts[i] || {};
@@ -72,6 +79,11 @@
       const narrow = rows => rows.filter(r => (!st.ins || st.ins.v.includes(r[st.ins.c])) && (!st.like || new RegExp(st.like.v.replace(/%/g, ".*"), "i").test(r[st.like.c]))).slice(0, st.lim || 1e9);
       window.__reads = (window.__reads || []); if (st.ins || st.like) __reads.push({ table, ins: st.ins && st.ins.v.length, like: st.like && st.like.v });
       if (table === "people") return {data: narrow(__people.map(p => ({...p}))), error:null};
+      if (table === "chat_reads"){ if (window.__noChatDel && /cleared_at/.test(st.cols||"")) return {data:null, error:{message:'column chat_reads.cleared_at does not exist'}}; if (window.__cr) return {data: JSON.parse(JSON.stringify(__cr)), error:null}; }
+      if ((table === "meals" || table === "profiles") && window.__noMacros && /protein_/.test(st.cols||"")) return {data:null, error:{message:'column meals.protein_g does not exist'}};
+      if (table === "meals") return window.__noHealth ? {data:null, error:{message:'relation "public.meals" does not exist'}} : {data: JSON.parse(JSON.stringify(window.__meals||[])), error:null};
+      if (table === "bodyweight") return {data: JSON.parse(JSON.stringify(window.__bw||[])), error:null};
+      if (table === "profiles" && window.__noHealth && /cal_goal/.test(st.cols||"")) return {data:null, error:{message:'column profiles.cal_goal does not exist'}};
       if (table === "profiles") return {data:{...__profile}, error:null};
       if (table === "checkins") return {data: narrow(checkins), error:null};
       if (table === "nudges") return {data: (window.__nudges||[]).filter(x => !st.eqs.from_user || x.from_user === st.eqs.from_user), error:null};
@@ -85,7 +97,7 @@
       if (table === "circles") return {data: __circles.filter(c => __cm.some(m => m.circle_id === c.id && m.user_id === me)), error:null};
       if (table === "circle_members") return {data: __cm.filter(m => __cm.some(x => x.circle_id === m.circle_id && x.user_id === me)), error:null};
       return {data: [], error:null}; };
-    const b = { select(){return b;}, in(c,v){ st.ins={c,v}; return b;}, ilike(c,v){ st.like={c,v}; return b;}, limit(n){ st.lim=n; return b;}, eq(c,v){ st.eqs[c]=v; return b;}, gte(){return b;}, order(){return b;}, match(){return b;}, range(){return Promise.resolve(res());},
+    const b = { select(c){ if (st.op === "select") st.cols = c; return b;}, single(){return Promise.resolve(res());}, in(c,v){ st.ins={c,v}; return b;}, ilike(c,v){ st.like={c,v}; return b;}, limit(n){ st.lim=n; return b;}, eq(c,v){ st.eqs[c]=v; return b;}, gte(){return b;}, order(){return b;}, match(){return b;}, range(){return Promise.resolve(res());},
       maybeSingle(){return Promise.resolve(res());}, update(v){st.op="update";st.vals=v;return b;}, upsert(v){st.op="upsert";st.vals=v;return b;}, insert(v){st.op="insert";st.vals=v;return b;}, delete(){st.op="delete";return b;},
       then(f,r){return Promise.resolve(res()).then(f,r);} };
     return b; };
@@ -95,6 +107,7 @@
     rpc: async (fn, args) => { __writes.push({rpc:fn, args});
       if (fn === "accept_bud"){ const r = row(args.p_follower); if (r) r.they_bud = "accepted"; }
       if (fn === "name_taken") return {data:false,error:null};
+      if (fn === "delete_circle"){ if (!__cm.some(m => m.circle_id === args.p_circle && m.user_id === me && m.role === "admin")) return {data:null,error:{message:"only admins can delete a circle"}}; window.__circles = __circles.filter(c => c.id !== args.p_circle); window.__cm = __cm.filter(m => m.circle_id !== args.p_circle); window.__messages = (window.__messages||[]).filter(m => m.circle_id !== args.p_circle); return {data:null,error:null}; }
       if (fn === "my_blocks") return {data:(window.__blocks||[]).map(b => ({ id: b.blocked, name: b.blocked === "u2" ? "Meha" : b.blocked, plate: "pink" })),error:null};
       const now = new Date().toISOString();
       if (fn === "create_circle"){ const id = "c" + Math.random().toString(36).slice(2,6);

@@ -16,9 +16,12 @@ Rule: **one change at a time, DP approves each database change separately, and e
 |---|---|---|---|
 | 026 | Undo a log also resets that day's workout (with 30-day backup) | **Live 2026-10-13** (test 8/8 on prod; rollback: supabase/rollback/026_rollback.sql) | Remove beta's own client reset afterwards (optional) |
 | 027 | Block + report | **Live 2026-10-13** (test 29/29 on prod; rollback: supabase/rollback/027_rollback.sql, exact pre-027 definitions) | `GYM_SAFETY` flag, then deploy push function's block filter |
-| 028 | Delete my account | Ready, waiting | `GYM_DELETE` flag |
+| 028 | Delete my account | Ready, **on hold** (DP). Required before the App Store | `GYM_DELETE` flag |
 | 029 | Health: meals + calories, nightly total | **Live 2026-10-13** (test 22/22 on prod; push function with nightly total deployed 23:35, cron run 200 OK; rollback: supabase/rollback/029_rollback.sql — deletes logged meals) | `GYM_HEALTH` flag (on in b52; heart stays hidden until 029 is live), then deploy push function (nightly total; tolerates 029 missing; previous version saved in supabase/rollback/push_index_before_meals.ts) |
 | 030 | Delete chat (for me) + admins delete circle | **Live 2026-10-13** (test 11/11 on prod; rollback: supabase/rollback/030_rollback.sql) | `GYM_CHATDEL` flag (on in b53; delete options stay hidden until 030 is live) |
+| 031 | Split history (changing your split doesn't rewrite past streaks) | **Live** (applied by another session; `split_history` view confirmed present 2026-10-18). See docs/STREAK_HISTORY_RELEASE.md | Always on (main v54+) |
+| 032 | Macros: protein/carbs/fat per meal, any one field enough; optional daily goals | **Live 2026-10-18** (local test 12/12; rollback: supabase/rollback/032_rollback.sql) | Automatic: app checks for the columns, hides Macros if missing |
+| 033 | Calories = only what's typed (undoes 032's 4/4/9 auto-calculation in the kcal column) | **Live 2026-10-18** (local test kcal_typed_test 12/12; rollback: supabase/rollback/033_rollback.sql) | Nothing to switch |
 
 For each one:
 1. [ ] DP says yes to this specific migration.
