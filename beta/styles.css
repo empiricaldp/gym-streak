@@ -1230,6 +1230,12 @@ button.hrow{cursor:pointer}
 .hamount .heside{margin-left:auto;white-space:nowrap}
 .hamount.half input{font-size:44px}
 .hdel{align-self:center;color:var(--p-red)}
+/* a week back on Calories / Macros (b66) */
+.hdaynav{display:inline-flex;align-items:center;gap:2px;margin-left:-8px}
+.hdaynav button{border:0;background:none;color:var(--fg);font:600 24px var(--body);line-height:1;width:36px;height:36px;border-radius:50%;cursor:pointer}
+.hdaynav button:disabled{color:var(--line2);cursor:default}
+.hdaynav .label{min-width:92px;text-align:center;white-space:nowrap}
+.hpast{cursor:default}
 /* Macros (b65) */
 .mc-P{--mc:var(--p-red)} .mc-C{--mc:var(--p-yellow)} .mc-F{--mc:var(--p-blue)}
 .hmacmini{display:flex;gap:16px;font:700 11px var(--mono);letter-spacing:.08em;color:var(--muted)}
