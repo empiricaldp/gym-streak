@@ -1230,7 +1230,30 @@ button.hrow{cursor:pointer}
 .hamount .heside{margin-left:auto;white-space:nowrap}
 .hamount.half input{font-size:44px}
 .hdel{align-self:center;color:var(--p-red)}
-@media (max-width:350px){ .hebig b.sign{font-size:44px} .hcal .hcalnum{font-size:54px} .htile b.sign{font-size:28px} .hamount input{font-size:44px} }
+/* a week back on Calories / Macros (b66) */
+.hdaynav{display:inline-flex;align-items:center;gap:2px;margin-left:-8px}
+.hdaynav button{border:0;background:none;color:var(--fg);font:600 24px var(--body);line-height:1;width:36px;height:36px;border-radius:50%;cursor:pointer}
+.hdaynav button:disabled{color:var(--line2);cursor:default}
+.hdaynav .label{min-width:92px;text-align:center;white-space:nowrap}
+.hpast{cursor:default}
+.hmval b.hnokcal{font-size:30px;color:var(--muted)}
+.hstar{font-size:.5em;vertical-align:top;position:relative;top:-.05em;margin-left:1px}
+/* Macros (b65) */
+.mc-P{--mc:var(--p-red)} .mc-C{--mc:var(--p-yellow)} .mc-F{--mc:var(--p-blue)}
+.hmacmini{display:flex;gap:16px;font:700 11px var(--mono);letter-spacing:.08em;color:var(--muted)}
+.hmacmini span{display:inline-flex;align-items:center;gap:5px}
+.hmacmini i{width:8px;height:8px;border-radius:50%;background:var(--mc)}
+.hmacmini b{color:var(--fg)}
+.hmacs{display:flex;flex-direction:column;gap:16px}
+.hmacrow{display:flex;flex-direction:column;gap:8px}
+.hmacrow .hbar span{background:var(--mc)}
+.hmacv{display:flex;align-items:baseline;gap:6px}
+.hmacv b.sign{font-size:30px}
+.hmline{font:700 13px var(--mono);letter-spacing:.04em;color:var(--fg);white-space:nowrap}
+.hmacin{gap:8px}
+.hamount.hmac{flex-direction:column;align-items:stretch;gap:2px;padding:8px 10px}
+.hamount.hmac input{font-size:34px}
+@media (max-width:350px){ .hebig b.sign{font-size:44px} .hamount.hmac input{font-size:28px} .hcal .hcalnum{font-size:54px} .htile b.sign{font-size:28px} .hamount input{font-size:44px} }
 
 /* Chats (b53): toolbar with Edit + new chat, delete in edit mode */
 .chtools{display:flex;align-items:center;justify-content:space-between;margin:-6px 0 2px}

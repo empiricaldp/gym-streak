@@ -268,7 +268,8 @@ function viewToday(){
   }
   const crewAll = roster().filter(o => o.id !== myId && isBud(o) && sharesStats(o) && !o.watcher);   // just your buds (who train)
   // Beta: a short preview, people who still need to train first (that's who a nudge helps), then See all
-  const PREVIEW = 5, crew = WORKOUTS ? [...crewAll].sort((a, b) => (isGym(a,t) && !has(a,t) ? 0 : 1) - (isGym(b,t) && !has(b,t) ? 0 : 1)).slice(0, PREVIEW) : crewAll;
+  // "See all" opens the whole list right here (same rows, same Nudge buttons) instead of jumping to the Crew tab
+  const PREVIEW = 5, crew = WORKOUTS ? [...crewAll].sort((a, b) => (isGym(a,t) && !has(a,t) ? 0 : 1) - (isGym(b,t) && !has(b,t) ? 0 : 1)).slice(0, crewMore ? 1e9 : PREVIEW) : crewAll;
   let crewHtml = "";
   if (crew.length){
     crewHtml = `<div class="sec"><h2 class="sign">Your crew today</h2><span class="label">${crewAll.length} ${crewAll.length===1?"person":"people"}</span></div><div class="list">` +
@@ -281,7 +282,7 @@ function viewToday(){
         return `<div class="li crewrow tappable" data-profile="${esc(o.id)}" style="${pc(o)}"><span class="dot"></span><div class="grow"><span class="nm">${esc(o.name)}</span>
           <span class="note">${isGym(o,t)?workLabel(slot(o,t)):"Rest day"} · ${dayStreak(o)} day streak</span>${action ? `<span class="rowact">${action}</span>` : ""}</div>
           <span class="status ${st}">${st==="done"?"Done":st==="todo"?"Not yet":"Rest"}</span></div>`; }).join("") + `</div>` +
-      (crewAll.length > crew.length ? `<button type="button" class="cta ghost ssm" id="crew-all">See all ${crewAll.length}</button>` : "");
+      (WORKOUTS && crewAll.length > PREVIEW ? `<button type="button" class="cta ghost ssm" id="crew-all" aria-expanded="${crewMore}">${crewMore ? "Show less" : `See all ${crewAll.length}`}</button>` : "");
   } else crewHtml = WORKOUTS ? `<div class="card"><span class="label">Your crew</span><p style="margin:6px 0 0;font-weight:600">CREW works solo too.</p>
       <p class="note">Your streak, week and workouts are yours either way. It's better with friends: you see who's trained, nudge them, and they keep you honest.</p>
       <div class="row2" style="margin-top:10px"><button class="cta ghost ssm" data-goto-find>Find people</button><button class="cta ssm" id="invite-friend">Invite a friend</button></div></div>`
@@ -354,7 +355,8 @@ function viewToday(){
   const circleRow = circles.length ? `<div class="sec"><h2 class="sign">Your circles</h2></div><div class="circlerow">${circles.map(c => circleCard(c, true)).join("")}</div>` : "";
   main().innerHTML = `<div class="view">${pvHtml}${topHtml}${hero}${m.watcher ? "" : tiles + streakHelpLink() + stepsHtml + q}${WORKOUTS ? circleRow + crewHtml : crewHtml + circleRow}${streakHelpHtml()}</div>`;
   if ($("watch-train")) $("watch-train").onclick = () => startOnboarding(true, "split");
-  if ($("crew-all")) $("crew-all").onclick = () => { crewView = "buds"; setTab("crew"); };
+  if ($("crew-all")) $("crew-all").onclick = () => { const y = scrollY; crewMore = !crewMore; render();
+    if (crewMore) window.scrollTo(0, y); else main().querySelector(".crewrow")?.closest(".list")?.previousElementSibling?.scrollIntoView({ block: "start" }); };
   if ($("invite-friend")) $("invite-friend").onclick = inviteFriend;
   if ($("wo-go")) $("wo-go").onclick = () => startWorkout(t);
   if ($("logbtn")) $("logbtn").onclick = () => { if (Date.now() - (window.__lastLog || 0) < 500) return; window.__lastLog = Date.now(); toggleDay(t); };
@@ -1670,7 +1672,8 @@ const WORKOUTS = !!window.GYM_BETA || !!window.GYM_WORKOUTS;   // the new app (w
 const DELETE_ON = WORKOUTS && !!window.GYM_DELETE;   // 'Delete my account' — switched on once migration 028 is applied
 // Health (b52): calories, BMI, height & weight. Also needs migration 029 — until it's applied the heart button stays hidden.
 const HEALTH = WORKOUTS && !!window.GYM_HEALTH;
-let meals = [], hp = { goal: null, unit: "kcal", notify: false, at: "22:00" }, healthOk = false, healthView = null, healthBack = "today";
+let crewMore = false;   // Today: the crew list shows everyone (See all) instead of the first 5
+let meals = [], hp = { goal: null, unit: "kcal", notify: false, at: "22:00", pg: null, cg: null, fg: null }, healthOk = false, macrosOk = false, healthView = null, healthBack = "today";
 let mealSheet = null, bodySheet = null;   // the "Add meal" sheet and the height / weight / goal sheet
 // Chats (b53): a new-chat button, delete a chat (just for you), admins delete a circle. Deleting needs migration 030.
 const CHATDEL = WORKOUTS && !!window.GYM_CHATDEL;
@@ -4012,7 +4015,7 @@ function render(){
 }
 let trophyBack = "you";
 { const core = render; render = function(){ core(); if (SAFETY && safetySheet && !document.querySelector('.chgsheet[aria-label="Safety"]')){ main().insertAdjacentHTML("beforeend", safetySheetHtml()); wireSafety(); } }; }
-function setTab(t){ healthView = null; mealSheet = null; bodySheet = null; chatEdit = false; chatAsk = null; newChat = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
+function setTab(t){ if (t !== "today") crewMore = false; healthView = null; mealSheet = null; bodySheet = null; chatEdit = false; chatAsk = null; newChat = null; if (t === "split") splitView = "today"; if (t === "trophies" && tab !== "trophies") trophyBack = tab; woPlan = null; chg = null; guideStep = -1; woSummary = null; restSheet = null; if (woDay){ if (myWo(woDay)?.dirty) woSave(); woDay = null; woAdding = false; } if (t !== tab || t === "you") youView = "profile"; tab=t; ob=null; profileId=null; circleId=null; circleMode="view"; chatKey=null; joinPreview=null; pendingJoin=null; try{localStorage.setItem("gs-tab",t);}catch(e){} render(); window.scrollTo(0,0); }
 for (const k of Object.keys(TITLES)) $("t-"+k).onclick = () => setTab(k);
 
 let sb = null, session = null, authKnown = false;
@@ -4047,7 +4050,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b64" : "55";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b69" : "56";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4080,9 +4083,21 @@ const HEART = '<svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true
 const HPLUS = '<span class="hplus" aria-hidden="true"><svg viewBox="0 0 12 12" width="10" height="10"><path d="M6 1v10M1 6h10"/></svg></span>';
 const HCHEV = '<svg class="hchev" viewBox="0 0 8 14" width="8" height="14" aria-hidden="true"><path d="M1 1l6 6-6 6"/></svg>';
 const kindName = k => (MEAL_KINDS.find(x => x[0] === k) || [k, k])[1];
-const kcalOf = x => x.unit === "kj" ? x.amount / KJ : x.amount;
+// a meal's calories: only what was typed (a macros-only meal counts 0; nothing is worked out)
+const kcalOf = x => x.amount != null ? (x.unit === "kj" ? x.amount / KJ : x.amount) : 0;
+const numN = v => v == null || v === "" ? null : Number(v);
+const MACS = [["protein_g", "Protein", "pg", "P"], ["carbs_g", "Carbs", "cg", "C"], ["fat_g", "Fat", "fg", "F"]];
+const macTot = d => { const t = { protein_g: 0, carbs_g: 0, fat_g: 0 }; for (const x of mealsOn(d)) for (const [k] of MACS) t[k] += x[k] || 0; return t; };
+const gf = n => (Math.round(n * 10) / 10).toLocaleString("en-AU");   // grams: one decimal at most
+const macLine = x => MACS.filter(([k]) => x[k] != null).map(([k, , , l]) => `${l} ${gf(x[k])}`).join(" · ");
 const mealsOn = d => meals.filter(x => x.day === d);
-const todayKcal = () => mealsOn(key(today())).reduce((s, x) => s + kcalOf(x), 0);
+const todayKcal = () => dayKcal(key(today()));
+const dayKcal = d => mealsOn(d).reduce((s, x) => s + kcalOf(x), 0);
+// Calories / Macros pages can look back a week (view only): 0 = today, 6 = six days ago
+let hBackDays = 0;
+const hSel = () => key(addDays(today(), -hBackDays));
+const hDayName = () => hBackDays === 0 ? "Today" : hBackDays === 1 ? "Yesterday" : hDay(hSel());
+const hDayNav = () => `<span class="hdaynav"><button type="button" id="h-prev" aria-label="Previous day" ${hBackDays >= 6 ? "disabled" : ""}>‹</button><span class="label" id="h-dayname">${esc(hDayName())}</span><button type="button" id="h-next" aria-label="Next day" ${hBackDays <= 0 ? "disabled" : ""}>›</button></span>`;
 const inUnit = (kcal, u = hp.unit) => u === "kj" ? kcal * KJ : kcal;
 const nf = n => Math.round(n).toLocaleString("en-AU");
 const uName = u => u === "kj" ? "kJ" : "kcal";
@@ -4099,15 +4114,20 @@ function guessKind(){ const h = new Date().getHours(); return h < 11 ? "breakfas
 const hBar = f => `<span class="hbar"><span style="width:${Math.max(0, Math.min(100, f * 100)).toFixed(0)}%"></span></span>`;
 const unitSeg = (id, opts, on) => `<span class="hseg" id="${id}" role="group">${opts.map(([v, l]) => `<button type="button" data-u="${v}" class="${v === on ? "on" : ""}" aria-pressed="${v === on}">${l}</button>`).join("")}</span>`;
 
+const MEAL_COLS = "id,day,kind,name,amount,unit,created_at", MAC_COLS = ",protein_g,carbs_g,fat_g";
+const mealRow = r => ({ ...r, amount: numN(r.amount), protein_g: numN(r.protein_g), carbs_g: numN(r.carbs_g), fat_g: numN(r.fat_g) });
 async function loadHealth(){
   if (!HEALTH || !sb || !myId) return;
-  const [p, m] = await Promise.all([
-    sb.from("profiles").select("cal_goal,energy_unit,cal_notify,cal_notify_at").eq("id", myId).maybeSingle(),
-    sb.from("meals").select("id,day,kind,name,amount,unit,created_at").gte("day", key(addDays(today(), -30))).order("created_at")]);
+  const get = mac => Promise.all([
+    sb.from("profiles").select("cal_goal,energy_unit,cal_notify,cal_notify_at" + (mac ? ",protein_goal,carbs_goal,fat_goal" : "")).eq("id", myId).maybeSingle(),
+    sb.from("meals").select(MEAL_COLS + (mac ? MAC_COLS : "")).gte("day", key(addDays(today(), -30))).order("created_at")]);
+  let [p, m] = await get(true), mac = !p.error && !m.error;
+  if (!mac) [p, m] = await get(false);                             // migration 032 not applied yet: Health works, Macros hidden
   if (p.error || m.error){ healthOk = false; return; }            // migration 029 not applied yet: keep Health hidden
-  healthOk = true;
-  if (p.data) hp = { goal: p.data.cal_goal ?? null, unit: p.data.energy_unit || "kcal", notify: !!p.data.cal_notify, at: String(p.data.cal_notify_at || "22:00").slice(0, 5) };
-  meals = (m.data || []).map(r => ({ ...r, amount: Number(r.amount) }));
+  healthOk = true; macrosOk = mac;
+  if (p.data) hp = { goal: p.data.cal_goal ?? null, unit: p.data.energy_unit || "kcal", notify: !!p.data.cal_notify, at: String(p.data.cal_notify_at || "22:00").slice(0, 5),
+                     pg: p.data.protein_goal ?? null, cg: p.data.carbs_goal ?? null, fg: p.data.fat_goal ?? null };
+  meals = (m.data || []).map(mealRow);
 }
 { const core = loadAll; loadAll = async function(){ const r = await core.apply(this, arguments); if (HEALTH){ try { await loadHealth(); } catch(_){} renderHeaderCount(); if (healthView) renderSoft(); } return r; }; }
 { const core = renderHeaderCount; renderHeaderCount = function(){ core(); renderHealthPill(); }; }
@@ -4123,14 +4143,14 @@ function renderHealthPill(){
   el.innerHTML = `${pct ? `<span class="hhfill" style="width:${pct.toFixed(0)}%"></span>` : ""}<span class="hhin">${HEART}${has ? `<b>${nf(inUnit(k))}</b>` : ""}</span>`;
 }
 document.addEventListener("click", e => { if (e.target.closest && e.target.closest("#hhealth")) openHealth("hub"); });
-function openHealth(v){ if (!HEALTH) return; healthBack = tab; healthView = v || "hub"; mealSheet = null; bodySheet = null; render(); window.scrollTo(0, 0); }
+function openHealth(v){ if (!HEALTH) return; healthBack = tab; healthView = v || "hub"; hBackDays = 0; mealSheet = null; bodySheet = null; render(); window.scrollTo(0, 0); }
 
 function viewHealth(){
-  const v = healthView, T = { hub: "Health", cal: "Calories", bmi: "BMI", body: "Height\u00a0&\u00a0weight" };   // no-break spaces: one line (the title shrinks to fit)
+  const v = healthView, T = { hub: "Health", cal: "Calories", mac: "Macros", bmi: "BMI", body: "Height\u00a0&\u00a0weight" };   // no-break spaces: one line (the title shrinks to fit)
   $("title").textContent = T[v] || "Health";
   const back = v === "hub" ? `‹ ${TITLES[healthBack] || "Today"}` : "‹ Health";
   const inner = !healthOk ? `<div class="card"><b>Health isn't ready yet</b><p class="note" style="margin:6px 0 0">Check your connection and try again in a bit.</p></div>`
-    : v === "cal" ? hCalHtml() : v === "bmi" ? hBmiHtml() : v === "body" ? hBodyHtml() : hHubHtml();
+    : v === "cal" ? hCalHtml() : v === "mac" && macrosOk ? hMacHtml() : v === "bmi" ? hBmiHtml() : v === "body" ? hBodyHtml() : hHubHtml();
   main().innerHTML = `<div class="view hview"><button type="button" class="hback" id="h-back">${esc(back)}</button>${inner}</div>${mealSheetHtml()}${bodySheetHtml()}`;
   wireHealth2();
 }
@@ -4141,24 +4161,53 @@ function hHubHtml(){
     <span class="hebig"><b class="sign">${num}</b>${unitL ? `<span class="label">${unitL}</span>` : ""}<span class="label heside">${side}</span></span>${extra}</button>`;
   return `<p class="note hnote">Only you can see this.</p>`
     + entry("cal", "Calories", nf(inUnit(k)), `${uName(hp.unit)} today`, `${n} meal${n === 1 ? "" : "s"}`, hp.goal ? hBar(k / hp.goal) : "")
+    + (macrosOk ? hMacEntry(entry) : "")
     + entry("bmi", "BMI", b ? b.toFixed(1) : "—", "", b ? `${bmiName(b)} range` : "Add height &amp; weight")
     + entry("body", "Height &amp; weight", lw ? hW(lw.kg).split(" ")[0] : "—", lw ? wUnit() : "", body.height ? esc(fmtH(body.height)) : "Add height");
+}
+function hMacEntry(entry){
+  const t = macTot(key(today()));
+  const mini = `<span class="hmacmini">${MACS.map(([k, , , l]) => `<span class="mc-${l}"><i></i>${l} <b>${gf(t[k])}</b></span>`).join("")}</span>`;
+  return entry("mac", "Macros", gf(t.protein_g), "g protein", hp.pg ? `of ${hp.pg} g` : "today", (hp.pg ? hBar(t.protein_g / hp.pg) : "") + mini);
+}
+function hMacHtml(){
+  const d = hSel(), t = macTot(d), list = mealsOn(d), past = hBackDays > 0;
+  const bars = MACS.map(([k, nm, g, l]) => `<div class="hmacrow mc-${l}"><div class="hline"><span class="label">${nm}</span><span class="hmacv"><b class="sign">${gf(t[k])}</b><span class="label">${hp[g] ? `/ ${hp[g]} g` : "g"}</span></span></div>${hBar(hp[g] ? t[k] / hp[g] : 0)}</div>`).join("");
+  const rows = list.map(x => `${mealOpen(x, past)}
+      <span class="hmname"><b>${esc(x.name || kindName(x.kind))}</b><span class="label">${x.name ? esc(kindName(x.kind)) + " · " : ""}${timeOf(x.created_at)}</span></span>
+      <span class="hmval hmacval">${macLine(x) ? `<span class="hmline">${macLine(x)}</span><span class="hmunit">GRAMS</span>` : `<span class="hmunit">NO MACROS</span>`}</span>${past ? "</div>" : "</button>"}`).join("");
+  const goals = hp.pg || hp.cg || hp.fg ? MACS.map(([, , g]) => hp[g] || "–").join(" · ") + " g" : "Not set";
+  return `<section class="card hmacs"><div class="hline">${hDayNav()}</div>${bars}</section>
+    ${mealsHead(past)}
+    <div class="card hlist">${rows}${mealsTail(past, list.length)}</div>
+    <div class="card hlist"><button type="button" class="hrow" id="h-macgoal"><b>Daily goals</b><span class="hmuted">${goals}</span>${HCHEV}</button></div>
+    <p class="note hnote">Add protein, carbs or fat to any meal. Calories are optional.</p>`;
+}
+// a meal row: tappable (edit) today, plain (view only) on past days
+const mealOpen = (x, past) => past ? `<div class="hrow hmeal hpast">` : `<button type="button" class="hrow hmeal" data-meal="${esc(x.id)}">`;
+const mealsHead = past => `<div class="hsechead"><h2 class="sign">${past ? "Meals" : "Today's meals"}</h2><span class="label">${past ? "View only" : "Only you"}</span></div>`;
+const mealsTail = (past, n) => past ? (n ? "" : `<div class="hrow"><span class="hmuted">Nothing logged this day</span></div>`) : `<button type="button" class="hrow hadd" id="h-addmeal">${HPLUS}Add meal</button>`;
+// what a meal row shows on the Calories page
+function mealEnergy(x){
+  if (x.amount != null) return `<b class="sign">${nf(x.amount)}</b><span class="hmunit">${x.unit === "kj" ? `KJ · ${nf(x.amount / KJ)} KCAL` : "KCAL"}</span>`;
+  return `<b class="sign hnokcal" aria-label="No calories added">*</b>`;
 }
 const bmiIdx = b => b < 18.5 ? 0 : b < 25 ? 1 : b < 30 ? 2 : 3;
 const bmiName = b => ["Under", "Normal", "Over", "High"][bmiIdx(b)];
 
 function hCalHtml(){
-  const list = mealsOn(key(today())), k = todayKcal(), u = hp.unit, o = u === "kj" ? "kcal" : "kj", n = list.length;
+  const d = hSel(), past = hBackDays > 0, list = mealsOn(d), k = dayKcal(d), u = hp.unit, o = u === "kj" ? "kcal" : "kj", n = list.length;
   const left = hp.goal ? hp.goal - k : null;
-  const status = hp.goal ? (left >= 0 ? `${nf(inUnit(left))} left of ${nf(inUnit(hp.goal))}` : `${nf(inUnit(-left))} over ${nf(inUnit(hp.goal))}`) : "";
-  const rows = list.map(x => `<button type="button" class="hrow hmeal" data-meal="${esc(x.id)}">
+  const status = hp.goal ? (left >= 0 ? `${nf(inUnit(left))} ${past ? "under" : "left of"} ${nf(inUnit(hp.goal))}` : `${nf(inUnit(-left))} over ${nf(inUnit(hp.goal))}`) : "";
+  const rows = list.map(x => `${mealOpen(x, past)}
       <span class="hmname"><b>${esc(x.name || kindName(x.kind))}</b><span class="label">${x.name ? esc(kindName(x.kind)) + " · " : ""}${timeOf(x.created_at)}</span></span>
-      <span class="hmval"><b class="sign">${nf(x.amount)}</b><span class="hmunit">${x.unit === "kj" ? `KJ · ${nf(x.amount / KJ)} KCAL` : "KCAL"}</span></span></button>`).join("");
-  return `<section class="card hcal"><div class="hline"><span class="label">Today</span>${unitSeg("h-unit", [["kcal", "kcal"], ["kj", "kJ"]], u)}</div>
+      <span class="hmval">${mealEnergy(x)}</span>${past ? "</div>" : "</button>"}`).join("");
+  return `<section class="card hcal"><div class="hline">${hDayNav()}${unitSeg("h-unit", [["kcal", "kcal"], ["kj", "kJ"]], u)}</div>
       <div class="hebig"><b class="sign hcalnum">${nf(inUnit(k))}</b><span class="label">${uName(u)}</span><span class="label heside">${nf(inUnit(k, o))} ${uName(o)}</span></div>
       ${hp.goal ? hBar(k / hp.goal) : ""}<div class="hline"><span class="label">${n} meal${n === 1 ? "" : "s"}</span><span class="label">${status}</span></div></section>
-    <div class="hsechead"><h2 class="sign">Today's meals</h2><span class="label">Only you</span></div>
-    <div class="card hlist">${rows}<button type="button" class="hrow hadd" id="h-addmeal">${HPLUS}Add meal</button></div>
+    ${mealsHead(past)}
+    <div class="card hlist">${rows}${mealsTail(past, n)}</div>
+    ${list.some(x => x.amount == null) ? `<p class="note hnote">* No calories added.</p>` : ""}
     <div class="card hlist">
       <button type="button" class="hrow" id="h-goal"><b>Daily goal</b><span class="hmuted">${hp.goal ? `${nf(inUnit(hp.goal))} ${uName(u)}` : "Not set"}</span>${HCHEV}</button>
       <div class="hrow"><label for="h-notify"><b>Nightly total</b></label><input type="time" id="h-at" class="htime" value="${esc(hp.at)}" step="300" aria-label="Time for the nightly total" ${hp.notify ? "" : "disabled"}><input type="checkbox" class="sw" id="h-notify" ${hp.notify ? "checked" : ""}></div></div>
@@ -4189,11 +4238,14 @@ function hBodyHtml(){
 
 // ---------- the "Add meal" sheet ----------
 function openMeal(x){
-  mealSheet = x ? { id: x.id, kind: x.kind, name: x.name || "", amount: String(x.amount), unit: x.unit, delArm: false }
-                : { id: null, kind: guessKind(), name: "", amount: "", unit: hp.unit, delArm: false };
+  const g = v => v == null ? "" : String(v);
+  mealSheet = x ? { id: x.id, kind: x.kind, name: x.name || "", amount: g(x.amount), unit: x.unit || hp.unit, p: g(x.protein_g), c: g(x.carbs_g), f: g(x.fat_g), delArm: false }
+                : { id: null, kind: guessKind(), name: "", amount: "", unit: hp.unit, p: "", c: "", f: "", delArm: false };
   render(); setTimeout(() => $("m-amt")?.focus({ preventScroll: true }), x ? 9999999 : 150);
 }
 const otherLine = (amt, u) => { const n = parseFloat(amt); return n > 0 ? (u === "kj" ? `= ${nf(n / KJ)} kcal` : `= ${nf(n * KJ)} kJ`) : ""; };
+const mealOther = s => otherLine(s.amount, s.unit);
+const mealCanSave = s => parseFloat(s.amount) > 0 || (macrosOk && [s.p, s.c, s.f].some(v => parseFloat(v) > 0));
 function mealSheetHtml(){
   const s = mealSheet; if (!s) return "";
   return `<div class="chgwrap" id="mealwrap"><div class="chgdim" data-hclose></div><div class="chgsheet hsheet" role="dialog" aria-label="${s.id ? "Edit meal" : "Add a meal"}">
@@ -4201,22 +4253,27 @@ function mealSheetHtml(){
     <div class="chgchips" role="group">${MEAL_KINDS.map(([k, l]) => `<button type="button" class="chip${s.kind === k ? " on" : ""}" data-mkind="${k}" aria-pressed="${s.kind === k}">${l}</button>`).join("")}</div>
     <input id="m-name" class="woin" placeholder="Name it (optional)" maxlength="60" value="${esc(s.name)}" autocomplete="off" enterkeyhint="next" aria-label="Meal name">
     <div class="hline"><span class="label">Energy</span>${unitSeg("m-unit", [["kcal", "kcal"], ["kj", "kJ"]], s.unit)}</div>
-    <label class="hamount"><input id="m-amt" type="number" inputmode="decimal" min="1" step="any" placeholder="0" value="${esc(s.amount)}" aria-label="Energy" enterkeyhint="done"><span class="label" id="m-u">${uName(s.unit)}</span><span class="label heside" id="m-other">${otherLine(s.amount, s.unit)}</span></label>
-    <button class="cta" id="m-save" ${parseFloat(s.amount) > 0 ? "" : "disabled"}>${s.id ? "Save" : "Add meal"}</button>
+    <label class="hamount"><input id="m-amt" type="number" inputmode="decimal" min="1" step="any" placeholder="0" value="${esc(s.amount)}" aria-label="Energy" enterkeyhint="done"><span class="label" id="m-u">${uName(s.unit)}</span><span class="label heside" id="m-other">${mealOther(s)}</span></label>
+    ${macrosOk ? `<span class="label">Macros (optional)</span><div class="hamounts hmacin">${[["m-p", "p", "Protein"], ["m-c", "c", "Carbs"], ["m-f", "f", "Fat"]].map(([id, k, l]) =>
+      `<label class="hamount hmac"><span class="label">${l} g</span><input id="${id}" type="number" inputmode="decimal" min="0" max="1000" step="any" placeholder="0" value="${esc(s[k])}" aria-label="${l} in grams" enterkeyhint="done"></label>`).join("")}</div>` : ""}
+    <button class="cta" id="m-save" ${mealCanSave(s) ? "" : "disabled"}>${s.id ? "Save" : "Add meal"}</button>
     ${s.id ? `<button type="button" class="linkbtn hdel" id="m-del">${s.delArm ? "Tap again to delete" : "Delete meal"}</button>` : `<button type="button" class="linkbtn" data-hclose style="align-self:center">Cancel</button>`}</div></div>`;
 }
 async function saveMeal(){
   const s = mealSheet; if (!s) return;
-  const amt = Math.round(parseFloat($("m-amt").value) * 10) / 10, name = $("m-name").value.trim().slice(0, 60) || null;
-  if (!(amt > 0)) return;
+  const r1 = v => { const n = parseFloat(v); return n >= 0 ? Math.round(n * 10) / 10 : null; };
+  const a0 = r1($("m-amt").value), amt = a0 > 0 ? a0 : null, name = $("m-name").value.trim().slice(0, 60) || null;
+  const mac = macrosOk ? { protein_g: r1(s.p), carbs_g: r1(s.c), fat_g: r1(s.f) } : {};
+  if (!mealCanSave(s)) return;
   const max = s.unit === "kj" ? 41840 : 10000;
   if (amt > max) return showWarn(`That's a lot for one meal. The most is ${nf(max)} ${uName(s.unit)}.`);
+  if (Object.values(mac).some(g => g > 1000)) return showWarn("That's a lot for one meal. The most is 1,000 g of each.");
   const btn = $("m-save"); btn.disabled = true; btn.textContent = "Saving…";
-  const row = { kind: s.kind, name, amount: amt, unit: s.unit }, cols = "id,day,kind,name,amount,unit,created_at";
+  const row = { kind: s.kind, name, amount: amt, unit: amt != null ? s.unit : (macrosOk ? null : s.unit), ...mac }, cols = MEAL_COLS + (macrosOk ? MAC_COLS : "");
   const { data, error } = s.id ? await sb.from("meals").update(row).eq("id", s.id).select(cols).single()
                                : await sb.from("meals").insert({ ...row, day: key(today()) }).select(cols).single();
   if (error){ btn.disabled = false; btn.textContent = s.id ? "Save" : "Add meal"; return showWarn(oops("save the meal", error)); }
-  const r = { ...data, amount: Number(data.amount) };
+  const r = mealRow(data);
   meals = s.id ? meals.map(x => x.id === s.id ? r : x) : [...meals, r];
   mealSheet = null; toast(s.id ? "Saved" : "Meal added"); render();
 }
@@ -4233,8 +4290,9 @@ function openBody(kind){
   const lw = latestWeight();
   if (kind === "height") bodySheet = { kind, unit: hUnit, v: body.height ? (hUnit === "ft" ? String(ftIn(body.height)[0]) : String(body.height)) : "", v2: body.height && hUnit === "ft" ? String(ftIn(body.height)[1]) : "" };
   else if (kind === "weight") bodySheet = { kind, unit: wUnit(), v: lw ? (wUnit() === "lb" ? (lw.kg * HLB).toFixed(1) : String(lw.kg)) : "", v2: "" };
+  else if (kind === "macros") bodySheet = { kind, p: hp.pg ? String(hp.pg) : "", c: hp.cg ? String(hp.cg) : "", f: hp.fg ? String(hp.fg) : "" };
   else bodySheet = { kind: "goal", unit: hp.unit, v: hp.goal ? String(Math.round(inUnit(hp.goal))) : "", v2: "" };
-  render(); setTimeout(() => $("b-v")?.focus({ preventScroll: true }), 150);
+  render(); setTimeout(() => ($("b-v") || $("g-p"))?.focus({ preventScroll: true }), 150);
 }
 function bodyValue(s){            // what's typed, converted to cm / kg / kcal (null if empty or not a number)
   const a = parseFloat(s.v), b = parseFloat(s.v2) || 0;
@@ -4248,8 +4306,29 @@ function bodyOther(s){
   if (s.kind === "weight") return s.unit === "lb" ? `= ${x} kg` : `= ${(x * HLB).toFixed(1)} lb`;
   return s.unit === "kj" ? `= ${nf(x)} kcal` : `= ${nf(x * KJ)} kJ`;
 }
+function macGoalHtml(s){
+  const any = hp.pg || hp.cg || hp.fg;
+  return `<div class="chgwrap" id="bodywrap"><div class="chgdim" data-hclose></div><div class="chgsheet hsheet" role="dialog" aria-label="Daily macro goals">
+    <div class="grab"></div><span class="label">Macros</span><h3 class="sign chgtitle">Daily goals</h3>
+    <div class="hamounts hmacin">${[["g-p", "p", "Protein"], ["g-c", "c", "Carbs"], ["g-f", "f", "Fat"]].map(([id, k, l]) =>
+      `<label class="hamount hmac"><span class="label">${l} g</span><input id="${id}" type="number" inputmode="numeric" min="1" max="1000" step="1" placeholder="–" value="${esc(s[k])}" aria-label="${l} goal in grams" enterkeyhint="done"></label>`).join("")}</div>
+    <p class="note hnote">Optional. Leave any empty to skip it.</p>
+    <button class="cta" id="b-save">Save</button>
+    ${any ? `<button type="button" class="linkbtn hdel" id="b-clear">Remove goals</button>` : `<button type="button" class="linkbtn" data-hclose style="align-self:center">Cancel</button>`}</div></div>`;
+}
+async function saveMacGoals(clear){
+  const s = bodySheet, btn = $("b-save"), v = k => { const n = Math.round(parseFloat(s[k])); return clear || !(n > 0) ? null : n; };
+  const row = { protein_goal: v("p"), carbs_goal: v("c"), fat_goal: v("f") };
+  if (Object.values(row).some(n => n != null && n > 1000)) return showWarn("A goal should be between 1 and 1,000 g.");
+  if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
+  const { error } = await sb.from("profiles").update(row).eq("id", myId);
+  if (error){ if (btn){ btn.disabled = false; btn.textContent = "Save"; } return showWarn(oops("save your goals", error)); }
+  hp.pg = row.protein_goal; hp.cg = row.carbs_goal; hp.fg = row.fat_goal;
+  bodySheet = null; toast(clear ? "Goals removed" : "Saved"); render();
+}
 function bodySheetHtml(){
   const s = bodySheet; if (!s) return "";
+  if (s.kind === "macros") return macGoalHtml(s);
   const c = { height: ["Your height", [["cm", "cm"], ["ft", "ft in"]], "Used for your BMI."],
               weight: ["Your weight", [["kg", "kg"], ["lb", "lb"]], "Saved as today's weigh-in."],
               goal:   ["Daily goal", [["kcal", "kcal"], ["kj", "kJ"]], "Optional. Shows how much is left each day."] }[s.kind];
@@ -4290,27 +4369,37 @@ function wireSeg(id, on){
 }
 function wireHealth2(){
   $("h-back").onclick = () => { if (healthView === "hub") setTab(healthBack); else { healthView = "hub"; render(); window.scrollTo(0, 0); } };
-  main().querySelectorAll("[data-hgo]").forEach(b => b.onclick = () => { healthView = b.dataset.hgo; render(); window.scrollTo(0, 0); });
+  main().querySelectorAll("[data-hgo]").forEach(b => b.onclick = () => { healthView = b.dataset.hgo; hBackDays = 0; render(); window.scrollTo(0, 0); });
   $("h-addmeal")?.addEventListener("click", () => openMeal());
+  const step = n => { hBackDays = Math.max(0, Math.min(6, hBackDays + n)); render(); };
+  $("h-prev")?.addEventListener("click", () => step(1));
+  $("h-next")?.addEventListener("click", () => step(-1));
   main().querySelectorAll("[data-meal]").forEach(b => b.onclick = () => openMeal(meals.find(x => x.id === b.dataset.meal)));
   main().querySelectorAll(".hview [data-bedit]").forEach(b => b.onclick = () => openBody(b.dataset.bedit));
   $("h-goal")?.addEventListener("click", () => openBody("goal"));
+  $("h-macgoal")?.addEventListener("click", () => openBody("macros"));
   wireSeg("h-unit", u => saveHp({ unit: u }));
   const nt = $("h-notify"), at = $("h-at");
   if (nt) nt.onchange = () => { saveHp({ notify: nt.checked }); if (nt.checked && typeof pushState === "function" && pushState() !== "on") showPushSheet(); };
   if (at) at.onchange = () => { if (at.value) saveHp({ at: at.value }); };
   main().querySelectorAll("[data-hclose]").forEach(b => b.onclick = () => { mealSheet = null; bodySheet = null; render(); });
   if (mealSheet){
-    const s = mealSheet, amt = $("m-amt"), sync = () => { s.amount = amt.value; $("m-other").textContent = otherLine(amt.value, s.unit); $("m-save").disabled = !(parseFloat(amt.value) > 0); };
+    const s = mealSheet, amt = $("m-amt"), sync = () => { s.amount = amt.value; for (const k of ["p", "c", "f"]){ const f = $("m-" + k); if (f) s[k] = f.value; }
+      $("m-other").textContent = mealOther(s); $("m-save").disabled = !mealCanSave(s); };
     main().querySelectorAll("[data-mkind]").forEach(b => b.onclick = () => { s.kind = b.dataset.mkind; main().querySelectorAll("[data-mkind]").forEach(x => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", x === b); }); });
     $("m-name").oninput = e => { s.name = e.target.value; };
     $("m-name").onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); amt.focus(); } };
     wireSeg("m-unit", u => { s.unit = u; $("m-u").textContent = uName(u); sync(); });
-    amt.oninput = sync; amt.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); saveMeal(); } };
+    [amt, $("m-p"), $("m-c"), $("m-f")].forEach(f => { if (f){ f.oninput = sync; f.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); saveMeal(); } }; } });
     $("m-save").onclick = saveMeal;
     $("m-del")?.addEventListener("click", deleteMeal);
   }
-  if (bodySheet){
+  if (bodySheet?.kind === "macros"){
+    const s = bodySheet;
+    ["p", "c", "f"].forEach(k => { const f = $("g-" + k); f.oninput = () => { s[k] = f.value; }; f.onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); saveMacGoals(false); } }; });
+    $("b-save").onclick = () => saveMacGoals(false);
+    $("b-clear")?.addEventListener("click", () => saveMacGoals(true));
+  } else if (bodySheet){
     const s = bodySheet, sync = () => { s.v = $("b-v")?.value ?? ""; s.v2 = $("b-v2")?.value ?? ""; $("b-other").textContent = bodyOther(s); };
     wireSeg("b-unit", u => { const x = bodyValue(s); s.unit = u;
       if (x != null){ if (s.kind === "height"){ if (u === "ft"){ [s.v, s.v2] = ftIn(x).map(String); } else { s.v = String(x); s.v2 = ""; } }
