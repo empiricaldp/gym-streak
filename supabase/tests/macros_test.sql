@@ -1,4 +1,4 @@
--- Macros test (032). UNDOES ITSELF (ends with an error on purpose).
+-- Macros test (032). UNDOES ITSELF (ends with an error on purpose).  (032 only: superseded by kcal_typed_test.sql once 033 is applied)
 do $$
 declare a uuid := '00000000-0000-0000-0000-0000000000ad'; b uuid := '00000000-0000-0000-0000-0000000000bd';
   out text := ''; t date; n int; k numeric; r record;
