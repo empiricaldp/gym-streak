@@ -4050,7 +4050,7 @@ let sb = null, session = null, authKnown = false;
 // ================= Auto-update =================
 // Home-screen apps keep running the copy they loaded. Each time the app opens or comes back
 // to the front, compare our version with the live one and reload if there's a newer one.
-const APP_VERSION = window.GYM_BETA ? "b69" : "56";   // bump together with version.json on every release (beta: beta/version.json)
+const APP_VERSION = window.GYM_BETA ? "b70" : "57";   // bump together with version.json on every release (beta: beta/version.json)
 async function checkForUpdate(){
   try {
     const r = await fetch("version.json", { cache: "no-store" });
@@ -4524,7 +4524,9 @@ function viewWorkoutRF(w){
       <button class="whbtn dark" data-trest="skip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5v14l10-7zM16 5h3v14h-3z"/></svg>Skip</button></div>`;
   } else {
     body = `${top}<section class="card whring">${ring}<p class="note">Tap the time to change it</p></section>`;
-    foot = `<button class="whbtn red" id="rf-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start rest</button>`;
+    // b70 (DP): a visible way to stop the workout clock. Finish sits above the big Start rest (thumb stays on Start rest).
+    foot = `<button class="whbtn soft rffin" id="rf-finish"><svg viewBox="0 0 24 24" aria-hidden="true" class="ln"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Finish workout</button>
+      <button class="whbtn red" id="rf-start"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>Start rest</button>`;
   }
   const sheet = woTimeSheet ? `<div class="chgwrap"><div class="chgdim" data-wtclose></div><div class="chgsheet" role="dialog" aria-label="Workout time">
       <div class="grab"></div><span class="label">Workout time</span><b class="sign whnum rfbig" id="ses-t2">${clock(ms)}</b>
@@ -4543,6 +4545,7 @@ function viewWorkoutRF(w){
   if ($("wo-ex")) $("wo-ex").onclick = () => { woTimeSheet = true; render(); };
   main().querySelectorAll("[data-wtclose]").forEach(b => b.onclick = () => { woTimeSheet = false; render(); });
   main().querySelectorAll("[data-radj]").forEach(b => b.onclick = () => restAdj(+b.dataset.radj));
+  if ($("rf-finish")) $("rf-finish").onclick = () => { const f = $("rf-finish"); f.disabled = true; f.textContent = "Saving…"; finishWorkout().finally(() => { const g = $("rf-finish"); if (g){ g.disabled = false; g.innerHTML = g.innerHTML.replace("Saving…", "Finish workout"); } }); };
   if ($("rf-start")) $("rf-start").onclick = () => { unlockAudio(); startRest(restPrefs.s || 90, nextUp(w, 0, -1)); render(); };
   if ($("rf-pause")) $("rf-pause").onclick = restPauseToggle;
   if ($("rf-reset")) $("rf-reset").onclick = restReset;

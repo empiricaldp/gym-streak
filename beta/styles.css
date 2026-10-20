@@ -1238,6 +1238,9 @@ button.hrow{cursor:pointer}
 .hpast{cursor:default}
 .hmval b.hnokcal{font-size:30px;color:var(--muted)}
 .hstar{font-size:.5em;vertical-align:top;position:relative;top:-.05em;margin-left:1px}
+/* b70: Finish workout above Start rest */
+.whfoot .rffin{width:100%;margin-bottom:10px}
+.whfoot #rf-start{width:100%}
 /* Macros (b65) */
 .mc-P{--mc:var(--p-red)} .mc-C{--mc:var(--p-yellow)} .mc-F{--mc:var(--p-blue)}
 .hmacmini{display:flex;gap:16px;font:700 11px var(--mono);letter-spacing:.08em;color:var(--muted)}
